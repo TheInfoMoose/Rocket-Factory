@@ -1,4 +1,5 @@
 pub mod archetype;
+pub mod audit;
 pub mod error;
 pub mod model;
 pub mod storage;
