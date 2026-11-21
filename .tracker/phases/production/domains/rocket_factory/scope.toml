@@ -1,0 +1,11 @@
+[scope]
+id = "rocket_factory"
+target = "."
+tech_stack = []
+description = "Promoted from component 'Rocket-Factory' (.)"
+bound_component = "rocket_factory"
+tracked_files = ["Rocket Factory.md"]
+
+[items]
+bugs = []
+features = []
