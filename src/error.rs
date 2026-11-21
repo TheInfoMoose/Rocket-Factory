@@ -40,6 +40,9 @@ pub enum RfError {
 
     #[error("already exists: {0}")]
     AlreadyExists(String),
+
+    #[error("adapter error: {0}")]
+    Adapter(String),
 }
 
 pub type RfResult<T> = std::result::Result<T, RfError>;
