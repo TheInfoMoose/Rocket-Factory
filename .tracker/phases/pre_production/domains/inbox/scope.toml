@@ -49,3 +49,31 @@ title = "theme"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-21T22:46:51Z"
+
+[[items.tasks]]
+id = "TASK-0007"
+title = "adapter"
+status = "open"
+severity = "medium"
+created_at = "2026-11-21T23:48:13Z"
+
+[[items.tasks]]
+id = "TASK-0008"
+title = "adapter"
+status = "open"
+severity = "medium"
+created_at = "2026-11-21T23:48:13Z"
+
+[[items.tasks]]
+id = "TASK-0009"
+title = "cli"
+status = "open"
+severity = "medium"
+created_at = "2026-11-21T23:48:13Z"
+
+[[items.tasks]]
+id = "TASK-0010"
+title = "cli"
+status = "open"
+severity = "medium"
+created_at = "2026-11-21T23:48:13Z"

@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 1):** Establish the single-crate Rust foundation (`rocket-factory`), core domain model, atomic `.rocket/` TOML+MD storage, planning archetypes, coverage/gap audit engine, tool-agnostic canonical exporters, and RON CRT-amber theme loader — with zero references to any specific external tracker in `src/`.
+**Phase goal (Phase 2):** Implement pluggable external adapter configuration, subprocess push/pull execution with task-status reconciliation, and the headless `rf` CLI (`init`, `audit`, `export`, `push`, `pull`) backed by the `rocket_factory` core library — with zero references to any specific external tracker in `src/`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,27 +26,26 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 1A** | `/goal` | core | `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/error.rs`, `src/model.rs` | — |
-| 2 | **STEP 1B** | `/goal` | storage | `src/storage.rs`, `src/lib.rs` | STEP 1A |
-| 3 | **STEP 1C** | `/goal` | archetypes | `src/archetype.rs`, `src/lib.rs` | STEP 1A |
-| 4 | **STEP 1D** | `/goal` | audit | `src/audit.rs`, `src/lib.rs` | STEP 1A |
-| 5 | **STEP 1E** | `/goal` | export | `src/export.rs`, `src/lib.rs` | STEP 1A |
-| 6 | **STEP 1F** | `/goal` | theme | `src/theme.rs`, `src/lib.rs` | STEP 1A |
+| 1 | **STEP 2A** | `/goal` | adapter | `src/adapter.rs`, `src/error.rs`, `src/lib.rs` | — |
+| 2 | **STEP 2B** | `/goal` | adapter | `src/adapter.rs` | STEP 2A |
+| 3 | **STEP 2C** | `/goal` | cli | `Cargo.toml`, `Cargo.lock`, `src/cli.rs`, `src/lib.rs` | STEP 2B |
+| 4 | **STEP 2D** | `/goal` | cli | `Cargo.toml`, `src/main.rs` | STEP 2C |
 
 ### Completed
 
 | Step ID | Status | Command | Scope | Target Files |
 | :--- | :---: | :---: | :--- | :--- |
+| **STEP 1A** | Done (`60de1ea`) | `/goal` | core | `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/error.rs`, `src/model.rs` |
+| **STEP 1B** | Done (`c9ff16e`) | `/goal` | storage | `src/storage.rs`, `src/lib.rs` |
+| **STEP 1C** | Done (`bcf6670`) | `/goal` | archetypes | `src/archetype.rs`, `src/lib.rs` |
+| **STEP 1D** | Done (`d9d4c45`) | `/goal` | audit | `src/audit.rs`, `src/lib.rs` |
+| **STEP 1E** | Done (`8659ced`) | `/goal` | export | `src/export.rs`, `src/lib.rs` |
+| **STEP 1F** | Done (`3d4b5b0`) | `/goal` | theme | `src/theme.rs`, `src/lib.rs` |
 
 ### Future phases
 
 Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write` and `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase).
 
-- **Phase 2: Pluggable External Adapters & Headless CLI (`rf`)**
-  - Adapter configuration schema and loader (`~/.config/rocket-factory/adapters.toml` + `.rocket/project.toml` bindings)
-  - Subprocess adapter runner (`push_component_cmd`, `push_feature_cmd`, `pull_status_cmd`) using canonical JSON stdin/stdout contract
-  - Task status reconciliation engine (merging pulled statuses into `.rocket/components/<id>.toml`)
-  - Headless CLI (`src/main.rs`, `src/cli.rs` via `clap`): `rf init`, `rf audit`, `rf export`, `rf push`, `rf pull`, and default TUI launch entrypoint
 - **Phase 3: TUI Shell, 3-Column Layout & Component List**
   - Terminal lifecycle manager (raw mode, alternate screen, panic restore hook, suspend/resume for `$EDITOR`)
   - Application state machine (`FocusColumn`, `InputMode`, filter/audit toggles, keyboard dispatcher)
@@ -410,6 +409,219 @@ grep -qE 'ron =' Cargo.toml
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn resolve_theme\b' src/theme.rs && grep -qE 'pub const DEFAULT_CRT_AMBER_RON\b' src/theme.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 2 Step Blocks
+
+### STEP 2A: Adapter Configuration Schema, Loader, and Status Reconciliation
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2A: Add RfError::Adapter and implement adapter configuration loading, active adapter resolution, and pulled task status reconciliation in src/adapter.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs (NEW)
+  - src/error.rs
+  - src/lib.rs
+READ_ONLY_REFS:
+  - src/error.rs:35-45 (RfError, RfResult)
+  - src/model.rs:48-90 (ExternalTaskRef, FeatureItem, Component, TaskStatus, Project)
+  - src/lib.rs:1-10 (module declarations)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No subprocess execution in src/adapter.rs yet (belongs to STEP 2B).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct ExternalTaskRef\b' src/model.rs && grep -qE 'pub enum RfError\b' src/error.rs
+
+[MUTATION_SPEC]
+1. src/error.rs:40 — anchor `AlreadyExists(String),` → add variant directly below it:
+   - `#[error("adapter error: {0}")]`
+   - `Adapter(String),`
+2. src/lib.rs:1 — anchor `pub mod archetype;` → add `pub mod adapter;` directly above `pub mod archetype;`.
+3. src/adapter.rs (NEW) — define adapter config, wire payload types, loader, and reconciler:
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)] #[serde(rename_all = "snake_case")] pub enum ExportFormat { TomlManifest, MarkdownRoadmap, #[default] Json }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)] pub struct CommandSpec { pub program: String, #[serde(default)] pub args: Vec<String> }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)] pub struct AdapterConfig { pub name: String, #[serde(default)] pub export_format: ExportFormat, pub push_component_cmd: Option<CommandSpec>, pub push_feature_cmd: Option<CommandSpec>, pub pull_status_cmd: Option<CommandSpec> }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)] pub struct AdaptersFile { #[serde(default)] pub adapters: Vec<AdapterConfig> }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)] pub struct PulledComponentStatus { pub component_id: String, #[serde(default)] pub tasks: Vec<ExternalTaskRef> }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)] pub struct PullStatusResponse { #[serde(default)] pub components: Vec<PulledComponentStatus> }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)] pub struct PushFeaturePayload { pub component_id: String, pub feature: FeatureItem }`
+   - `#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)] pub struct PushResponse { pub external_id: Option<String>, pub message: Option<String> }`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub struct ReconcileSummary { pub components_updated: usize, pub tasks_synced: usize, pub features_linked: usize }`
+   - `pub fn load_adapters_file(path: &std::path::Path) -> RfResult<AdaptersFile>`: reads `path` (if `ErrorKind::NotFound`, returns `Ok(AdaptersFile::default())`) and parses TOML into `AdaptersFile`.
+   - `pub fn resolve_active_adapters<'a>(file: &'a AdaptersFile, active_names: &[String]) -> RfResult<Vec<&'a AdapterConfig>>`: for each name in `active_names`, finds matching `AdapterConfig` by `name` in `file.adapters` or returns `Err(RfError::NotFound(format!("adapter '{name}'")))`.
+   - `pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) -> ReconcileSummary`: for each `PulledComponentStatus` in `response.components`, looks up `project.component_mut(&entry.component_id)`. If found: replaces `component.external_tasks = entry.tasks.clone()`; increments `components_updated` by 1 and adds `entry.tasks.len()` to `tasks_synced`; for each `feature` in `&mut component.features`, if `feature.external_id` matches any task's `external_id` in `entry.tasks` (or if `feature.external_id.is_none()` and a task's `title == feature.title`), sets `feature.pushed = true`, sets `feature.external_id = Some(task.external_id.clone())`, and increments `features_linked`.
+4. Tests in `src/adapter.rs`:
+   - `load_adapters_file_missing_returns_default`: call `load_adapters_file(dir.path().join("missing.toml").as_path()).unwrap()`; assert `file.adapters.is_empty()`.
+   - `load_and_resolve_active_adapters`: write an `adapters.toml` with 2 adapters (`"tracker_a"`, `"tracker_b"`); assert `resolve_active_adapters(&file, &["tracker_b".to_string()]).unwrap()` returns length 1 with `name == "tracker_b"`, and resolving `"unknown"` returns `Err(RfError::NotFound(_))`.
+   - `reconcile_status_updates_tasks_and_links_features`: build a `Project` with component `"view_box"` having 1 unpushed feature (`id: "f1"`, `title: "Render card"`, `pushed: false`, `external_id: None`); reconcile a `PullStatusResponse` with `component_id: "view_box"` and 1 task (`external_id: "EXT-1"`, `title: "Render card"`, `status: TaskStatus::Complete`); assert `summary == ReconcileSummary { components_updated: 1, tasks_synced: 1, features_linked: 1 }`, `project.component("view_box").unwrap().external_tasks.len() == 1`, and `project.component("view_box").unwrap().features[0].pushed`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn reconcile_status\b' src/adapter.rs && grep -qE 'pub fn load_adapters_file\b' src/adapter.rs && grep -qE 'Adapter\(String\)' src/error.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2B: Subprocess Adapter Runner (Push Component, Push Feature, Pull Status)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2B: Implement subprocess execution for push_component, push_feature, and pull_status in src/adapter.rs with canonical payload piping and mock-command unit tests.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+READ_ONLY_REFS:
+  - src/export.rs:40-115 (export_component_manifest_toml, export_roadmap_markdown, export_project_json)
+  - src/error.rs:1-50 (RfError::Adapter, RfResult)
+  - src/model.rs:48-130 (Project, Component, FeatureItem)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn reconcile_status\b' src/adapter.rs && grep -qE 'pub fn export_component_manifest_toml\b' src/export.rs
+
+[MUTATION_SPEC]
+1. src/adapter.rs — add subprocess helper and three public runner functions:
+   - `fn run_command_with_stdin(spec: &CommandSpec, workdir: &std::path::Path, stdin_payload: &str) -> RfResult<String>`: spawns `std::process::Command::new(&spec.program)` with `.args(&spec.args)`, `.current_dir(workdir)`, `.stdin(Stdio::piped())`, `.stdout(Stdio::piped())`, `.stderr(Stdio::piped())`. Writes `stdin_payload.as_bytes()` to child stdin (dropping stdin handle before waiting), calls `wait_with_output()`. If `!output.status.success()`, returns `Err(RfError::Adapter(format!("command '{}' exited with {}: {}", spec.program, output.status, String::from_utf8_lossy(&output.stderr).trim())))`. Otherwise returns `Ok(String::from_utf8_lossy(&output.stdout).into_owned())`.
+   - `pub fn run_push_component(adapter: &AdapterConfig, workdir: &std::path::Path, project: &Project, component_id: &str) -> RfResult<PushResponse>`: requires `adapter.push_component_cmd` (else `Err(RfError::Adapter(format!("adapter '{}' has no push_component_cmd", adapter.name)))`); formats payload according to `adapter.export_format`: `ExportFormat::TomlManifest` → `export_component_manifest_toml(project, component_id)?`, `ExportFormat::MarkdownRoadmap` → `export_roadmap_markdown(project)`, `ExportFormat::Json` → `serde_json::to_string_pretty(project.component(component_id).ok_or_else(|| RfError::NotFound(component_id.to_string()))?)?`. Invokes `run_command_with_stdin`. If trimmed stdout is empty, returns `Ok(PushResponse { external_id: None, message: None })`; else parses stdout as JSON `PushResponse` (mapping parse failure to `RfError::Adapter`).
+   - `pub fn run_push_feature(adapter: &AdapterConfig, workdir: &std::path::Path, component_id: &str, feature: &FeatureItem) -> RfResult<PushResponse>`: requires `adapter.push_feature_cmd` (else `Err(RfError::Adapter(...))`); serializes `PushFeaturePayload { component_id: component_id.to_string(), feature: feature.clone() }` as JSON; invokes `run_command_with_stdin`; returns `PushResponse` (empty stdout -> `None` fields, non-empty -> parsed JSON).
+   - `pub fn run_pull_status(adapter: &AdapterConfig, workdir: &std::path::Path, project: &Project) -> RfResult<PullStatusResponse>`: requires `adapter.pull_status_cmd` (else `Err(RfError::Adapter(...))`); serializes `export_project_json(project)?` as stdin; invokes `run_command_with_stdin`; parses stdout JSON into `PullStatusResponse` (mapping parse error to `RfError::Adapter`).
+2. Tests in `src/adapter.rs`:
+   - `run_push_component_pipes_toml_manifest_and_parses_response`: configure an `AdapterConfig` with `ExportFormat::TomlManifest` and `push_component_cmd = Some(CommandSpec { program: "sh".into(), args: vec!["-c".into(), "cat >/dev/null && printf '{\"external_id\":\"CMP-1\",\"message\":\"ok\"}'".into()] })`; invoke `run_push_component`; assert `resp.external_id.as_deref() == Some("CMP-1")`.
+   - `run_pull_status_parses_json_tasks`: configure `pull_status_cmd` with `sh -c` outputting `{"components":[{"component_id":"view_box","tasks":[{"external_id":"T-1","title":"Draw box","status":"complete"}]}]}`; invoke `run_pull_status`; assert `resp.components.len() == 1` and `resp.components[0].tasks[0].status == TaskStatus::Complete`.
+   - `run_command_nonzero_exit_returns_adapter_error`: configure `pull_status_cmd` with `sh -c "echo boom >&2; exit 2"`; assert `matches!(run_pull_status(&adapter, dir.path(), &project), Err(RfError::Adapter(msg)) if msg.contains("boom"))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn run_push_component\b' src/adapter.rs && grep -qE 'pub fn run_pull_status\b' src/adapter.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2C: Headless CLI Command Module (`rf init | audit | export | push | pull`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2C: Add clap dependency and implement headless CLI command definitions and execution in src/cli.rs, exposed from src/lib.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - Cargo.lock
+  - src/cli.rs (NEW)
+  - src/lib.rs
+READ_ONLY_REFS:
+  - Cargo.toml:1-20 (dependencies)
+  - src/storage.rs:105-265 (init_workspace, load_project, save_component)
+  - src/audit.rs:70-135 (audit_project, FindingSeverity)
+  - src/export.rs:40-115 (export_component_manifest_toml, export_roadmap_markdown, export_project_json)
+  - src/adapter.rs:1-200 (load_adapters_file, resolve_active_adapters, run_push_component, run_push_feature, run_pull_status, reconcile_status)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No TUI crates (ratatui, crossterm) in Cargo.toml yet.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or Cargo.toml.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn run_push_component\b' src/adapter.rs && grep -qE 'pub fn run_pull_status\b' src/adapter.rs
+
+[MUTATION_SPEC]
+1. Cargo.toml:16 — anchor `thiserror = "2"` → add `clap = { version = "4", features = ["derive"] }` directly beneath it.
+2. src/lib.rs:2 — anchor `pub mod archetype;` → add `pub mod cli;` beneath `pub mod audit;` (preserving alphabetical module order).
+3. src/cli.rs (NEW) — implement clap structs and `run_cli`:
+   - `#[derive(Debug, clap::Parser)] #[command(name = "rf", about = "Rocket Factory — retro-futuristic architecture planning TUI & CLI")] pub struct Cli { #[arg(long, global = true, default_value = ".")] pub path: std::path::PathBuf, #[arg(long, global = true)] pub adapters_file: Option<std::path::PathBuf>, #[command(subcommand)] pub command: Option<Command> }`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)] pub enum ExportKind { Manifest, Roadmap, Json }`
+   - `#[derive(Debug, clap::Subcommand)] pub enum Command`:
+     - `Init { #[arg(long)] name: String, #[arg(long, default_value = "")] description: String }`
+     - `Audit { #[arg(long)] strict: bool }`
+     - `Export { #[arg(long, value_enum)] format: ExportKind, #[arg(long)] component: Option<String> }`
+     - `Push { #[arg(long)] component: Option<String>, #[arg(long)] adapter: Option<String> }`
+     - `Pull { #[arg(long)] adapter: Option<String> }`
+   - `pub fn default_adapters_path() -> std::path::PathBuf`: returns `$HOME/.config/rocket-factory/adapters.toml` if `HOME` env var is set, else `.rocket/adapters.toml`.
+   - `pub struct CliOutput { pub stdout: String, pub exit_code: i32 }` (`Debug, Clone, PartialEq, Eq`).
+   - `pub fn execute_command(root: &std::path::Path, adapters_path: &std::path::Path, command: Command) -> RfResult<CliOutput>`:
+     - `Command::Init { name, description }`: calls `storage::init_workspace(root, &name, &description)?` and returns `Ok(CliOutput { stdout: format!("Initialized Rocket Factory workspace '{name}' in {}\n", root.display()), exit_code: 0 })`.
+     - `Command::Audit { strict }`: loads project, runs `audit::audit_project(&project)`. Formats each finding as `"[ERROR] <msg>\n"` or `"[WARN] <msg>\n"` (or `"No audit findings.\n"` if empty). Sets `exit_code = 1` when `strict` is true and at least one finding has `FindingSeverity::Error`, otherwise `0`; returns `Ok(CliOutput { stdout, exit_code })`.
+     - `Command::Export { format, component }`: loads project; `ExportKind::Manifest` requires `component` (else `Err(RfError::NotFound("export --format manifest requires --component <id>".into()))`) and calls `export::export_component_manifest_toml(&project, &id)?`; `ExportKind::Roadmap` calls `export::export_roadmap_markdown(&project)`; `ExportKind::Json` calls `export::export_project_json(&project)?`; returns `Ok(CliOutput { stdout, exit_code: 0 })`.
+     - `Command::Push { component, adapter }`: loads project and adapters file; selects adapters (either `[adapter_name]` if `--adapter` passed, else `&project.config.active_adapters`); resolves active adapters; iterates target components (single `--component` or all components); runs `run_push_component` when `push_component_cmd.is_some()` and for each unpushed feature runs `run_push_feature` when `push_feature_cmd.is_some()`, marking pushed features and saving modified components via `storage::save_component`; returns summary in `CliOutput { stdout, exit_code: 0 }`.
+     - `Command::Pull { adapter }`: loads project and adapters file; resolves target adapters; for each adapter with `pull_status_cmd.is_some()`, runs `run_pull_status`, calls `reconcile_status(&mut project, &resp)`, saves updated components via `storage::save_component`, and returns summary in `CliOutput { stdout, exit_code: 0 }`.
+4. Tests in `src/cli.rs`:
+   - `cli_init_and_export_roadmap`: use `tempfile::tempdir()`; run `execute_command(dir.path(), &adapters, Command::Init { name: "apollo".into(), description: "Plan".into() })`; save a scaffolded `UiView` component `"hud"`; run `Command::Export { format: ExportKind::Roadmap, component: None }`; assert `out.exit_code == 0` and `out.stdout.contains("# apollo — Blueprint Roadmap")` and `out.stdout.contains("hud_f1")`.
+   - `cli_audit_strict_exits_nonzero_on_gap`: init workspace, save an empty component `"view_box"` (0 features, 0 tasks); run `Command::Audit { strict: true }`; assert `out.exit_code == 1` and `out.stdout.contains("view_box")`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn execute_command\b' src/cli.rs && grep -qE 'pub struct Cli\b' src/cli.rs && ! grep -rqi 'nebulous' src/ Cargo.toml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2D: `rf` Binary Entrypoint
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2D: Register the `rf` binary in Cargo.toml and implement src/main.rs dispatching CLI subcommands and default launch behavior.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - src/main.rs (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml:1-22 (package and lib sections)
+  - src/cli.rs:1-80 (Cli, Command, CliOutput, default_adapters_path, execute_command)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or Cargo.toml.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn execute_command\b' src/cli.rs && grep -qE 'pub struct Cli\b' src/cli.rs
+
+[MUTATION_SPEC]
+1. Cargo.toml:9 — anchor `path = "src/lib.rs"` → add `[[bin]]` section beneath `[lib]`:
+   - `[[bin]]`
+   - `name = "rf"`
+   - `path = "src/main.rs"`
+2. src/main.rs (NEW) — implement entrypoint:
+   - Parse `let cli = rocket_factory::cli::Cli::parse();` (importing `clap::Parser`).
+   - Compute `let adapters_path = cli.adapters_file.unwrap_or_else(rocket_factory::cli::default_adapters_path);`.
+   - Match `cli.command`:
+     - `Some(command)` → call `rocket_factory::cli::execute_command(&cli.path, &adapters_path, command)`:
+       - `Ok(output)` → `print!("{}", output.stdout);` and if `output.exit_code != 0`, return `std::process::ExitCode::from(output.exit_code as u8)`.
+       - `Err(err)` → `eprintln!("error: {err}");` and return `std::process::ExitCode::FAILURE`.
+     - `None` → `println!("Rocket Factory TUI — launching in Phase 3 (use `rf --help` for CLI commands)");` and return `std::process::ExitCode::SUCCESS`.
+   - Return `std::process::ExitCode` from `fn main() -> std::process::ExitCode`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo run --quiet --bin rf -- --help | grep -qE 'Rocket Factory' && ! grep -rqi 'nebulous' src/ Cargo.toml
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
