@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0001"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-21T22:46:51Z"
-updated_at = "2026-11-21T22:46:51Z"
+updated_at = "2026-11-21T22:58:20Z"
 source_ref = "STEP 1A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0001@2026-11-21T22:55:59Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-21"
+commit = "60de1ea"
+summary = "STEP 1A: Cargo Manifest, Error Types, and Core Domain Model (phased check PASS)"
