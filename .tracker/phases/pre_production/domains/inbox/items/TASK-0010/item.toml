@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0010"
 type = "task"
 title = "cli"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-21T23:48:13Z"
-updated_at = "2026-11-21T23:48:13Z"
+updated_at = "2026-11-21T23:56:16Z"
 source_ref = "STEP 2D"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0010@2026-11-21T23:54:58Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-21"
+commit = "eb80b6e"
+summary = "STEP 2D: `rf` Binary Entrypoint (phased check PASS)"
