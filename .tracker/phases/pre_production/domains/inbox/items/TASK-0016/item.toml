@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0016"
 type = "task"
 title = "canvas"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T00:53:04Z"
-updated_at = "2026-11-22T00:53:04Z"
+updated_at = "2026-11-22T00:57:47Z"
 source_ref = "STEP 4B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0016@2026-11-22T00:55:14Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "20884cc"
+summary = "STEP 4B: Orthogonal Unicode Connector Router and Snap Grid Card Renderer (phased check PASS)"
