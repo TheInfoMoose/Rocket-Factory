@@ -17,23 +17,65 @@ created_at = "2026-11-22T00:59:05Z"
 [[items.bugs]]
 id = "BUG-0002"
 title = "Missing ID validation and path containment before $EDITOR launch in terminal.rs"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T03:16:17Z"
 
 [[items.bugs]]
 id = "BUG-0003"
 title = "Canvas viewport panning (App::viewport / ensure_visible) is unwired"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T03:16:18Z"
 
 [[items.bugs]]
 id = "BUG-0004"
 title = "In-memory project state desyncs on disk save failure in TUI mutations"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T03:16:19Z"
+
+[[items.bugs]]
+id = "BUG-0005"
+title = "run_tui ignores caller-provided theme_dirs for the t theme switcher"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T04:16:13Z"
+
+[[items.bugs]]
+id = "BUG-0006"
+title = "Modal save-failure UX inconsistency in UpdateComponent and UpdateConnection"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T04:16:14Z"
+
+[[items.bugs]]
+id = "BUG-0007"
+title = "Keyboard Help modal clips long lines on 80-column terminals"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T04:16:15Z"
+
+[[items.bugs]]
+id = "BUG-0008"
+title = "EditorState::jump_to_match uses stale find_replace.matches across edits and buffer switches"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T04:17:02Z"
+
+[[items.bugs]]
+id = "BUG-0009"
+title = "EditorState::handle_indent does not shift selection offsets and includes trailing col-0 line"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T04:17:03Z"
+
+[[items.bugs]]
+id = "BUG-0010"
+title = "compute_wrapped_layout measures char count rather than Unicode cell width and tab stops"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T04:17:04Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -220,14 +262,14 @@ created_at = "2026-11-22T01:40:28Z"
 [[items.tasks]]
 id = "TASK-0027"
 title = "Extract and unit-test run_event_loop editor workflow in src/tui/terminal.rs"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T03:16:20Z"
 
 [[items.tasks]]
 id = "TASK-0028"
 title = "Phase 5 polish: L-bend label, full-grid fallback, modal clamp, footer [v] hint, $EDITOR args"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-22T03:16:22Z"
 
@@ -272,3 +314,31 @@ title = "tests"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T03:27:00Z"
+
+[[items.tasks]]
+id = "TASK-0035"
+title = "Multi-adapter push short-circuits feature pushing after the first adapter"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T04:16:16Z"
+
+[[items.tasks]]
+id = "TASK-0036"
+title = "tui"
+status = "closed"
+severity = "medium"
+created_at = "2026-11-22T04:18:56Z"
+
+[[items.tasks]]
+id = "TASK-0037"
+title = "ui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T04:18:56Z"
+
+[[items.tasks]]
+id = "TASK-0038"
+title = "sync"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T04:18:56Z"

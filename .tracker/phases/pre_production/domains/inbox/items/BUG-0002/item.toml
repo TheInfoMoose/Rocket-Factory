@@ -2,11 +2,11 @@
 id = "BUG-0002"
 type = "bug"
 title = "Missing ID validation and path containment before $EDITOR launch in terminal.rs"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-22T03:16:17Z"
-updated_at = "2026-11-22T03:16:38Z"
+updated_at = "2026-11-22T04:15:29Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "38f38eb"
+summary = "Added component ID validation, existence check, symlink_metadata check, and canonical path-containment guard before launching $EDITOR in process_pending_editor_with (STEP 6A)."

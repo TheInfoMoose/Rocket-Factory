@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0028"
 type = "task"
 title = "Phase 5 polish: L-bend label, full-grid fallback, modal clamp, footer [v] hint, $EDITOR args"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T03:16:22Z"
-updated_at = "2026-11-22T03:16:43Z"
+updated_at = "2026-11-22T04:15:57Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "f1915a3"
+summary = "Resolved all Phase 5 polish items: $EDITOR arg splitting (38f38eb), L-bend label collision avoidance, Option<GridPos> full-grid guard, u32 modal width calc, 'v' mode reset, and [v] Edit MD footer hint (f1915a3)."
