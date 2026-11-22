@@ -23,8 +23,13 @@ cd Rocket-Factory
 
 # Install `rf` into ~/.cargo/bin
 cargo install --path . --locked
+```
 
-# Or build the release binary without installing (target/release/rf)
+#### Build a local release binary without installing
+
+To build `target/release/rf` without installing into `~/.cargo/bin`:
+
+```bash
 cargo build --release --locked
 ```
 
@@ -105,21 +110,30 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 | :--- | :--- |
 | `Tab` / `Shift+Tab` | Cycle focus (List / Canvas / Detail) |
 | `hjkl` / Arrows | Move selection / Scroll detail |
+| `Space` / `Enter` | Expand or collapse sub-components of the selected parent card (with automatic collision shifting on expand) |
 | `f` | Toggle Gaps Only filter |
 
 ### Editing & Canvas
 
 | Key | Action |
 | :--- | :--- |
-| `n` / `e` / `E` | New component / Edit component / Edit edge |
-| `d` / `D` | Delete component / Delete edge |
-| `m` / `c` | Move card mode / Connect components |
+| `n` | New top-level component (defaults to top-center placement on the canvas) |
+| `a` | Add a sub-component under the selected component |
+| `e` | Edit selected component |
+| `E` | Edit outgoing edge from selected component |
+| `d` | Delete selected component |
+| `D` | Delete connection on selected component |
+| `m` | Toggle Move Card mode |
+| `c` | Connect components (`<A> depends on <target>`, i.e. `from = <A>`, `to = <target>`); confirming on an already-connected target toggles and removes the existing edge |
+| `Enter` (Connect mode) | Confirm connect target |
 | `v` | Open component Markdown in `$EDITOR` |
 
 ### Sync & Display
 
 | Key | Action |
 | :--- | :--- |
+| `+` / `=` | Zoom in (`Compact` → `Normal` → `Expanded`; defaults to `Compact`, fitting `>= 4×4` cards on `>= 114x26` terminals) |
+| `-` | Zoom out (`Expanded` → `Normal` → `Compact`) |
 | `r` / `S` | Pull status from active adapters |
 | `p` | Push selected component & features |
 | `t` | Switch RON theme |
@@ -129,11 +143,16 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 | Key | Action |
 | :--- | :--- |
 | `?` | Toggle this keyboard help |
-| `Esc` / `q` | Cancel mode / Quit |
+| `Esc` | Cancel current mode |
+| `q` | Quit |
+| `Ctrl+C` | Force quit |
 
 ### Modal Controls
 
-- **Component / Connection forms (`n`, `e`, `E`)**: `Tab` switches fields, `←`/`→` cycles enum options, `Enter` saves, `Esc` cancels.
+- **Component / Sub-Component / Connection forms (`n`, `a`, `e`, `E`)**: `Tab` switches fields, `←`/`→` cycles enum options, `Enter` saves, `Esc` cancels.
+  - `a` opens the New Sub-Component modal scoped under the selected parent component.
+  - `e` (Edit Component) supports changing component archetypes (`kind`) and includes an `Add Sub-component` action.
+  - `E` (Edit Edge) supports `EdgeKind::Contains` (`contains`) to ingest existing cards as sub-components or detach them when changed away.
 - **Delete confirmation (`d`, `D`)**: `Enter` or `y` confirms deletion, `Esc` or `n` cancels.
 - **Theme switcher (`t`)**: `↑`/`↓` selects a theme, `Enter` applies and saves to `.rocket/project.toml`, `Esc` cancels.
 - **Keyboard help (`?`)**: `Esc`, `?`, `Enter`, or `q` closes the modal.
@@ -151,8 +170,8 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
         └── <theme_name>.ron
 ```
 
-- **`.rocket/project.toml`**: Stores `ProjectConfig` — `name`, `description`, `theme` (default `"crt_amber"`), `active_adapters` (list of adapter names from `adapters.toml`), `grid` (`cols` and `rows`, default `8` × `6`), and `connections` (`from`, `to`, `kind`: `depends_on` | `data_flow` | `renders` | `invokes` | `custom`, optional `label`).
-- **`.rocket/components/<id>.toml`**: Stores `Component` metadata — `id` (1–64 characters from `[a-z0-9_-]`, cannot start with `-`), `name`, `kind` (`ui_view` | `data_stream` | `service_core` | `cli_tool` | `storage` | `custom`), `description`, optional `relative_path`, `position` (`col`, `row`), `tags`, `tech_stack`, `files`, `flags`, `features` (`id`, `title`, `pushed`, `external_id`), and `external_tasks` (`external_id`, `title`, `status`: `pending` | `in_progress` | `blocked` | `complete`).
+- **`.rocket/project.toml`**: Stores `ProjectConfig` — `name`, `description`, `theme` (default `"crt_amber"`), `active_adapters` (list of adapter names from `adapters.toml`), `grid` (`cols` and `rows`, default `8` × `6`; the canvas uses an effective grid floor of at least the visible canvas capacity minus sidebars, and `project.toml` automatically expands when a card is placed or moved beyond the saved bounds), and `connections` (`from`, `to`, `kind`: `depends_on` | `data_flow` | `renders` | `invokes` | `contains` | `custom`, optional `label`).
+- **`.rocket/components/<id>.toml`**: Stores `Component` metadata — `id` (1–64 characters from `[a-z0-9_-]`, cannot start with `-`), `name`, `kind` (lightweight prototyping archetypes: `concept` default | `interface` | `logic` | `data` | `integration` | `custom`; backwards-compatible with legacy `kind` values `ui_view` | `data_stream` | `service_core` | `cli_tool` | `storage`), optional `parent_id` (parent component ID for sub-components), `description`, optional `relative_path`, `position` (`col`, `row`), `tags`, `tech_stack`, `files`, `flags`, `features` (`id`, `title`, `pushed`, `external_id`), and `external_tasks` (`external_id`, `title`, `status`: `pending` | `in_progress` | `blocked` | `complete`).
 - **`.rocket/components/<id>.md`**: Markdown specification body for component `<id>`, rendered in the Component Details panel and edited with `v`.
 - **`.rocket/themes/*.ron`**: Optional workspace-local RON theme files.
 
