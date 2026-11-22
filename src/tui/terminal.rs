@@ -180,15 +180,21 @@ fn process_pending_sync(app: &mut App, adapters_path: &Path) {
     }
 }
 
+fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RfResult<App> {
+    let project = crate::storage::load_project(root)?;
+    let theme = crate::theme::resolve_theme(&project.config.theme, theme_dirs)?;
+    let mut app = App::new(root.to_path_buf(), project, theme);
+    app.theme_dirs = theme_dirs.to_vec();
+    Ok(app)
+}
+
 pub fn run_tui(
     root: &Path,
     theme_dirs: &[PathBuf],
     adapters_path: &Path,
     poll_interval: Option<Duration>,
 ) -> RfResult<()> {
-    let project = crate::storage::load_project(root)?;
-    let theme = crate::theme::resolve_theme(&project.config.theme, theme_dirs)?;
-    let mut app = App::new(root.to_path_buf(), project, theme);
+    let mut app = build_tui_app(root, theme_dirs)?;
 
     if !app.project.config.active_adapters.is_empty() {
         if let Err(err) = app.sync_pull(adapters_path) {
@@ -289,6 +295,28 @@ mod tests {
     fn default_theme_dirs_includes_project_local_dir() {
         let dirs = default_theme_dirs(Path::new("/tmp/rf_demo"));
         assert_eq!(dirs[0], PathBuf::from("/tmp/rf_demo/.rocket/themes"));
+    }
+
+    #[test]
+    fn build_tui_app_propagates_custom_theme_dirs() {
+        use crate::theme::{list_available_themes, DEFAULT_CRT_AMBER_RON};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Theme Dirs Test", "Propagate theme dirs")
+            .expect("init workspace");
+
+        let custom_dir = dir.path().join("custom_themes");
+        std::fs::create_dir_all(&custom_dir).expect("create custom themes dir");
+        let cobalt_ron = DEFAULT_CRT_AMBER_RON.replace("\"crt_amber\"", "\"cobalt_custom\"");
+        std::fs::write(custom_dir.join("cobalt_custom.ron"), cobalt_ron)
+            .expect("write cobalt_custom.ron");
+
+        let custom_dirs = vec![custom_dir];
+        let app = build_tui_app(dir.path(), &custom_dirs).expect("build_tui_app succeeds");
+
+        assert_eq!(app.theme_dirs, custom_dirs);
+        let available = list_available_themes(&app.theme_dirs);
+        assert!(available.contains(&"cobalt_custom".to_string()));
     }
 
     #[test]

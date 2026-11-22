@@ -664,7 +664,14 @@ impl App {
                         self.status_message = format!("Updated component {name}");
                     }
                     Err(err) => {
-                        self.status_message = format!("Failed to save {name}: {err}");
+                        let msg = format!("Failed to save {name}: {err}");
+                        if let ModalState::EditComponent(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
                     }
                 }
                 self.refresh_audit();
@@ -702,7 +709,14 @@ impl App {
                         self.status_message = format!("Updated connection {from} -> {to}");
                     }
                     Err(err) => {
-                        self.status_message = format!("Failed to save connections: {err}");
+                        let msg = format!("Failed to save connections: {err}");
+                        if let ModalState::EditConnection(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
                     }
                 }
                 self.refresh_audit();
@@ -1404,6 +1418,21 @@ mod tests {
         assert_eq!(alpha.description, "Original alpha");
         assert!(alpha.features.is_empty());
         assert!(app.status_message.contains("Failed to save"));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::EditComponent(ref form)) = app.modal {
+            assert!(form.error.is_some());
+            assert!(form
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("Failed to save"));
+        } else {
+            panic!("expected EditComponent modal to remain open on save failure");
+        }
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
 
         // Break project.toml saves by replacing .rocket/project.toml with a directory
         let project_file = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
@@ -1420,7 +1449,7 @@ mod tests {
         assert_eq!(app.project.config.connections[0].to, "beta");
         assert!(app.status_message.contains("Failed to save connections"));
 
-        // 4. UpdateConnection rolls back kind/label on save failure
+        // 4. UpdateConnection rolls back kind/label on save failure and keeps modal open
         app.handle_key(key(KeyCode::Left)); // back to alpha
         app.handle_key(key(KeyCode::Char('E')));
         app.handle_key(key(KeyCode::Right)); // DependsOn -> DataFlow
@@ -1433,6 +1462,18 @@ mod tests {
             Some("initial")
         );
         assert!(app.status_message.contains("Failed to save connections"));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::EditConnection(ref form)) = app.modal {
+            assert!(form.error.is_some());
+            assert!(form
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("Failed to save connections"));
+        } else {
+            panic!("expected EditConnection modal to remain open on save failure");
+        }
     }
 
     #[test]
