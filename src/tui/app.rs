@@ -221,18 +221,52 @@ impl App {
                 run_push_component(active, &self.root, &candidate, &comp_id)?;
                 components_pushed += 1;
             }
+        }
 
-            if active.push_feature_cmd.is_some() {
+        let feature_adapters: Vec<_> = active_adapters
+            .iter()
+            .copied()
+            .filter(|active| active.push_feature_cmd.is_some())
+            .collect();
+
+        if !feature_adapters.is_empty() {
+            let unpushed_indices: Vec<usize> = candidate
+                .component(&comp_id)
+                .map(|comp| {
+                    comp.features
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, feature)| (!feature.pushed).then_some(idx))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if !unpushed_indices.is_empty() {
+                let mut recorded_external_ids: Vec<Option<String>> =
+                    vec![None; unpushed_indices.len()];
+
+                if let Some(comp) = candidate.component(&comp_id) {
+                    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
+                        if let Some(feature) = comp.features.get(feat_idx) {
+                            for active in &feature_adapters {
+                                let resp = run_push_feature(active, &self.root, &comp_id, feature)?;
+                                features_pushed += 1;
+                                if recorded_external_ids[slot].is_none() {
+                                    recorded_external_ids[slot] = resp.external_id;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if let Some(comp) = candidate.component_mut(&comp_id) {
-                    for feature in &mut comp.features {
-                        if !feature.pushed {
-                            let resp = run_push_feature(active, &self.root, &comp_id, feature)?;
+                    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
+                        if let Some(feature) = comp.features.get_mut(feat_idx) {
                             feature.pushed = true;
-                            if let Some(ext_id) = resp.external_id {
+                            if let Some(ext_id) = ext_id {
                                 feature.external_id = Some(ext_id);
                             }
                             modified = true;
-                            features_pushed += 1;
                         }
                     }
                 }
@@ -1662,6 +1696,98 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
             disk_comp.features[0].external_id.as_deref(),
             Some("FEAT-42")
         );
+    }
+
+    #[test]
+    fn sync_push_selected_pushes_unpushed_features_to_all_active_adapters() {
+        use crate::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_a = dir.path().join("tracker_a.log");
+        let log_b = dir.path().join("tracker_b.log");
+
+        let mut project =
+            crate::storage::init_workspace(dir.path(), "Multi Push", "Multi-adapter TUI push test")
+                .expect("init workspace");
+        project.config.active_adapters = vec!["tracker_a".to_string(), "tracker_b".to_string()];
+        crate::storage::save_project_config(dir.path(), &project.config)
+            .expect("save project config");
+
+        let mut comp = make_component("billing_api");
+        comp.features.push(FeatureItem {
+            id: "billing_api_f1".to_string(),
+            title: "Invoice webhook".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        save_component(dir.path(), &comp).expect("save initial component");
+        project.components.push(comp);
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_file = AdaptersFile {
+            adapters: vec![
+                AdapterConfig {
+                    name: "tracker_a".to_string(),
+                    export_format: ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"A-42\"}}'",
+                                log_a.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: None,
+                },
+                AdapterConfig {
+                    name: "tracker_b".to_string(),
+                    export_format: ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"B-99\"}}'",
+                                log_b.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: None,
+                },
+            ],
+        };
+        std::fs::write(
+            &adapters_path,
+            toml::to_string_pretty(&adapters_file).expect("serialize adapters.toml"),
+        )
+        .expect("write adapters.toml");
+
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        let summary = app
+            .sync_push_selected(&adapters_path)
+            .expect("sync_push_selected succeeds");
+        assert!(summary.contains("2 feature(s) across 2 adapter(s)"));
+        assert_eq!(app.status_message, summary);
+
+        let payload_a = std::fs::read_to_string(&log_a).expect("read tracker_a log");
+        let payload_b = std::fs::read_to_string(&log_b).expect("read tracker_b log");
+        assert!(payload_a.contains("billing_api_f1"));
+        assert!(payload_b.contains("billing_api_f1"));
+
+        let updated = app.project.component("billing_api").expect("updated comp");
+        assert!(updated.features[0].pushed);
+        assert_eq!(updated.features[0].external_id.as_deref(), Some("A-42"));
+
+        let reloaded = crate::storage::load_project(dir.path()).expect("reload project");
+        let disk_comp = reloaded.component("billing_api").expect("disk comp");
+        assert!(disk_comp.features[0].pushed);
+        assert_eq!(disk_comp.features[0].external_id.as_deref(), Some("A-42"));
     }
 
     #[test]

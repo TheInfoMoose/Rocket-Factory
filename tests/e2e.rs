@@ -415,3 +415,154 @@ fn e2e_tui_viewport_panning_theme_switch_and_help_overlay() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(app.modal.is_none());
 }
+
+#[test]
+fn e2e_multi_adapter_feature_push_cli_and_tui() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    let adapters_path = dir.path().join("adapters.toml");
+    let log_a = dir.path().join("tracker_a.log");
+    let log_b = dir.path().join("tracker_b.log");
+
+    storage::init_workspace(
+        dir.path(),
+        "gemini-multi",
+        "Multi-adapter push verification for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let mut cli_comp = scaffold_component(
+        "cli_svc",
+        "CLI Service",
+        ComponentKind::ServiceCore,
+        GridPos { col: 0, row: 0 },
+    );
+    cli_comp.features.truncate(1);
+    storage::save_component(dir.path(), &cli_comp).expect("save cli_svc");
+
+    let mut tui_comp = scaffold_component(
+        "tui_view",
+        "TUI View",
+        ComponentKind::UiView,
+        GridPos { col: 1, row: 0 },
+    );
+    tui_comp.features.truncate(1);
+    storage::save_component(dir.path(), &tui_comp).expect("save tui_view");
+
+    let mut project = storage::load_project(dir.path()).expect("load project");
+    project.config.active_adapters = vec!["tracker_a".to_string(), "tracker_b".to_string()];
+    storage::save_project_config(dir.path(), &project.config).expect("save project config");
+
+    let adapters_file = AdaptersFile {
+        adapters: vec![
+            AdapterConfig {
+                name: "tracker_a".to_string(),
+                export_format: ExportFormat::Json,
+                push_component_cmd: None,
+                push_feature_cmd: Some(CommandSpec {
+                    program: "sh".to_string(),
+                    args: vec![
+                        "-c".to_string(),
+                        format!(
+                            "cat >> '{}' && printf '{{\"external_id\":\"A-100\",\"message\":\"ok\"}}'",
+                            log_a.display()
+                        ),
+                    ],
+                }),
+                pull_status_cmd: None,
+            },
+            AdapterConfig {
+                name: "tracker_b".to_string(),
+                export_format: ExportFormat::Json,
+                push_component_cmd: None,
+                push_feature_cmd: Some(CommandSpec {
+                    program: "sh".to_string(),
+                    args: vec![
+                        "-c".to_string(),
+                        format!(
+                            "cat >> '{}' && printf '{{\"external_id\":\"B-200\",\"message\":\"ok\"}}'",
+                            log_b.display()
+                        ),
+                    ],
+                }),
+                pull_status_cmd: None,
+            },
+        ],
+    };
+    fs::write(
+        &adapters_path,
+        toml::to_string_pretty(&adapters_file).expect("serialize adapters.toml"),
+    )
+    .expect("write adapters.toml");
+
+    // 1. CLI push on `cli_svc`
+    let cli_out = execute_command(
+        dir.path(),
+        &adapters_path,
+        Command::Push {
+            component: Some("cli_svc".to_string()),
+            adapter: None,
+        },
+    )
+    .expect("CLI multi-adapter push succeeds");
+    assert_eq!(cli_out.exit_code, 0);
+    assert!(cli_out.stdout.contains("2 feature(s) across 2 adapter(s)"));
+
+    let log_a_after_cli = fs::read_to_string(&log_a).expect("read tracker_a log after CLI");
+    let log_b_after_cli = fs::read_to_string(&log_b).expect("read tracker_b log after CLI");
+    assert!(log_a_after_cli.contains("cli_svc_f1"));
+    assert!(log_b_after_cli.contains("cli_svc_f1"));
+
+    let after_cli = storage::load_project(dir.path()).expect("reload project after CLI push");
+    let persisted_cli = after_cli.component("cli_svc").expect("cli_svc exists");
+    assert!(persisted_cli.features[0].pushed);
+    assert_eq!(
+        persisted_cli.features[0].external_id.as_deref(),
+        Some("A-100")
+    );
+
+    // 2. TUI push on `tui_view`
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), after_cli, theme);
+    let tui_idx = app
+        .project
+        .components
+        .iter()
+        .position(|c| c.id == "tui_view")
+        .expect("tui_view index");
+    app.selected_index = tui_idx;
+
+    let tui_summary = app
+        .sync_push_selected(&adapters_path)
+        .expect("TUI multi-adapter push succeeds");
+    assert!(tui_summary.contains("2 feature(s) across 2 adapter(s)"));
+
+    let log_a_after_tui = fs::read_to_string(&log_a).expect("read tracker_a log after TUI");
+    let log_b_after_tui = fs::read_to_string(&log_b).expect("read tracker_b log after TUI");
+    assert!(log_a_after_tui.contains("tui_view_f1"));
+    assert!(log_b_after_tui.contains("tui_view_f1"));
+
+    let after_tui = storage::load_project(dir.path()).expect("reload project after TUI push");
+    let persisted_tui = after_tui.component("tui_view").expect("tui_view exists");
+    assert!(persisted_tui.features[0].pushed);
+    assert_eq!(
+        persisted_tui.features[0].external_id.as_deref(),
+        Some("A-100")
+    );
+}
+
+#[test]
+fn e2e_help_overlay_80x24_shows_close_footer_hint() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(dir.path(), "help-80x24", "80x24 help modal test")
+        .expect("init workspace");
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    let snapshot = buffer_to_string(&render_app(&mut app, 80, 24));
+    assert!(
+        snapshot.contains("[Esc/?/Enter/q] Close"),
+        "expected help overlay footer hint to be visible at 80x24, got:\n{snapshot}"
+    );
+}

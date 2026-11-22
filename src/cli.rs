@@ -152,36 +152,70 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
 
             let mut components_pushed = 0usize;
             let mut features_pushed = 0usize;
+            let feature_adapters: Vec<_> = active_adapters
+                .iter()
+                .copied()
+                .filter(|active| active.push_feature_cmd.is_some())
+                .collect();
 
-            for active in &active_adapters {
-                for comp_id in &target_ids {
+            for comp_id in &target_ids {
+                for active in &active_adapters {
                     if active.push_component_cmd.is_some() {
                         adapter::run_push_component(active, root, &project, comp_id)?;
                         components_pushed += 1;
                     }
+                }
 
-                    if active.push_feature_cmd.is_some() {
-                        let mut modified = false;
-                        if let Some(comp) = project.component_mut(comp_id) {
-                            for feature in &mut comp.features {
-                                if !feature.pushed {
-                                    let resp =
-                                        adapter::run_push_feature(active, root, comp_id, feature)?;
-                                    feature.pushed = true;
-                                    if let Some(ext_id) = resp.external_id {
-                                        feature.external_id = Some(ext_id);
-                                    }
-                                    modified = true;
-                                    features_pushed += 1;
+                if feature_adapters.is_empty() {
+                    continue;
+                }
+
+                let unpushed_indices: Vec<usize> = project
+                    .component(comp_id)
+                    .map(|comp| {
+                        comp.features
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(idx, feature)| (!feature.pushed).then_some(idx))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if unpushed_indices.is_empty() {
+                    continue;
+                }
+
+                let mut recorded_external_ids: Vec<Option<String>> =
+                    vec![None; unpushed_indices.len()];
+
+                if let Some(comp) = project.component(comp_id) {
+                    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
+                        if let Some(feature) = comp.features.get(feat_idx) {
+                            for active in &feature_adapters {
+                                let resp =
+                                    adapter::run_push_feature(active, root, comp_id, feature)?;
+                                features_pushed += 1;
+                                if recorded_external_ids[slot].is_none() {
+                                    recorded_external_ids[slot] = resp.external_id;
                                 }
                             }
                         }
-                        if modified {
-                            if let Some(comp) = project.component(comp_id) {
-                                storage::save_component(root, comp)?;
+                    }
+                }
+
+                if let Some(comp) = project.component_mut(comp_id) {
+                    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
+                        if let Some(feature) = comp.features.get_mut(feat_idx) {
+                            feature.pushed = true;
+                            if let Some(ext_id) = ext_id {
+                                feature.external_id = Some(ext_id);
                             }
                         }
                     }
+                }
+
+                if let Some(comp) = project.component(comp_id) {
+                    storage::save_component(root, comp)?;
                 }
             }
 
@@ -309,5 +343,95 @@ mod tests {
             .expect("audit workspace");
         assert_eq!(out.exit_code, 1);
         assert!(out.stdout.contains("view_box"));
+    }
+
+    #[test]
+    fn cli_push_sends_unpushed_features_to_all_active_adapters() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let adapters_path = dir.path().join("adapters.toml");
+        let log_a = dir.path().join("tracker_a.log");
+        let log_b = dir.path().join("tracker_b.log");
+
+        execute_command(
+            dir.path(),
+            &adapters_path,
+            Command::Init {
+                name: "apollo".into(),
+                description: "Multi-adapter CLI push test".into(),
+            },
+        )
+        .expect("init workspace");
+
+        let mut comp = scaffold_component("hud", "HUD", ComponentKind::UiView, GridPos::default());
+        comp.features.truncate(1);
+        storage::save_component(dir.path(), &comp).expect("save hud component");
+
+        let mut project = storage::load_project(dir.path()).expect("load project");
+        project.config.active_adapters = vec!["tracker_a".to_string(), "tracker_b".to_string()];
+        storage::save_project_config(dir.path(), &project.config).expect("save project config");
+
+        let adapters_file = adapter::AdaptersFile {
+            adapters: vec![
+                adapter::AdapterConfig {
+                    name: "tracker_a".to_string(),
+                    export_format: adapter::ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"A-101\"}}'",
+                                log_a.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: None,
+                },
+                adapter::AdapterConfig {
+                    name: "tracker_b".to_string(),
+                    export_format: adapter::ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"B-202\"}}'",
+                                log_b.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: None,
+                },
+            ],
+        };
+        std::fs::write(
+            &adapters_path,
+            toml::to_string_pretty(&adapters_file).expect("serialize adapters.toml"),
+        )
+        .expect("write adapters.toml");
+
+        let out = execute_command(
+            dir.path(),
+            &adapters_path,
+            Command::Push {
+                component: Some("hud".to_string()),
+                adapter: None,
+            },
+        )
+        .expect("push across two adapters");
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("2 feature(s) across 2 adapter(s)"));
+
+        let payload_a = std::fs::read_to_string(&log_a).expect("read tracker_a log");
+        let payload_b = std::fs::read_to_string(&log_b).expect("read tracker_b log");
+        assert!(payload_a.contains("hud_f1"));
+        assert!(payload_b.contains("hud_f1"));
+
+        let reloaded = storage::load_project(dir.path()).expect("reload project");
+        let hud = reloaded.component("hud").expect("hud exists");
+        assert!(hud.features[0].pushed);
+        assert_eq!(hud.features[0].external_id.as_deref(), Some("A-101"));
     }
 }
