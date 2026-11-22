@@ -3,6 +3,22 @@ name = "rocket-factory"
 version = "0.1.0"
 edition = "2021"
 description = "Retro-futuristic TUI development planning platform"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/TheInfoMoose/Rocket-Factory"
+keywords = ["tui", "architecture", "planning", "ratatui", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    ".agents/**",
+    ".github/**",
+    ".orrery/**",
+    ".phased/**",
+    ".rocket/**",
+    ".tracker/**",
+    "scripts/**",
+    "Rocket Factory.md",
+    "STEPPED_IMPLEMENTATION_PLAN.md",
+]
 
 [lib]
 name = "rocket_factory"
