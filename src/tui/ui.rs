@@ -1,4 +1,4 @@
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(chunks[1]);
 
     render_component_list(frame, cols[0], app);
-    render_canvas_placeholder(frame, cols[1], app);
+    crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport);
     render_detail_panel(frame, cols[2], app);
 
     render_footer(frame, chunks[2], app);
@@ -119,42 +119,6 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .style(style::base_style(&app.theme));
     frame.render_widget(list, area);
-}
-
-fn render_canvas_placeholder(frame: &mut Frame, area: Rect, app: &App) {
-    let grid = app.project.config.grid;
-    let title = format!(" Snap Grid ({}x{}) ", grid.cols, grid.rows);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(style::panel_border_style(
-            &app.theme,
-            app.focus == FocusColumn::Canvas,
-        ))
-        .style(style::base_style(&app.theme));
-
-    let count = app.project.components.len();
-    let edges = app.project.config.connections.len();
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("{count} staged component(s), {edges} connection(s)"),
-            style::base_style(&app.theme).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Snap Grid Canvas — interactive cards & connectors in Phase 4",
-            style::muted_style(&app.theme),
-        )),
-    ];
-
-    let placeholder = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: false })
-        .block(block);
-    frame.render_widget(placeholder, area);
 }
 
 fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
@@ -397,5 +361,26 @@ mod tests {
         assert!(text.contains("Components [GAPS]"));
         assert!(text.contains("view_box"));
         assert!(!text.contains("core_bus"));
+    }
+
+    #[test]
+    fn render_canvas_column_displays_connected_cards_progress_and_arrow() {
+        use crate::model::{Connection, EdgeKind};
+
+        let mut app = make_test_app();
+        app.project.config.connections.push(Connection {
+            from: "view_box".to_string(),
+            to: "core_bus".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+
+        let text = render_to_string(&app);
+
+        assert!(text.contains("view_box"));
+        assert!(text.contains("core_bus"));
+        assert!(text.contains("Tasks 0/0"));
+        assert!(text.contains("Tasks 1/1"));
+        assert!(text.contains('▶'));
     }
 }
