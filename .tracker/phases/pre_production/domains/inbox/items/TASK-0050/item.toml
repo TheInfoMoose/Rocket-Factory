@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0050"
 type = "task"
 title = "docs"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T15:03:37Z"
-updated_at = "2026-11-22T15:03:37Z"
+updated_at = "2026-11-22T15:08:20Z"
 source_ref = "STEP 10B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0050@2026-11-22T15:06:44Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "64ab2f4"
+summary = "STEP 10B: Fix Install & Quick Start Instructions in `README.md` (phased check PASS)"
