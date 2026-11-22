@@ -152,11 +152,6 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
 
             let mut components_pushed = 0usize;
             let mut features_pushed = 0usize;
-            let feature_adapters: Vec<_> = active_adapters
-                .iter()
-                .copied()
-                .filter(|active| active.push_feature_cmd.is_some())
-                .collect();
 
             for comp_id in &target_ids {
                 for active in &active_adapters {
@@ -166,56 +161,12 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
                     }
                 }
 
-                if feature_adapters.is_empty() {
-                    continue;
-                }
-
-                let unpushed_indices: Vec<usize> = project
-                    .component(comp_id)
-                    .map(|comp| {
-                        comp.features
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(idx, feature)| (!feature.pushed).then_some(idx))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                if unpushed_indices.is_empty() {
-                    continue;
-                }
-
-                let mut recorded_external_ids: Vec<Option<String>> =
-                    vec![None; unpushed_indices.len()];
-
-                if let Some(comp) = project.component(comp_id) {
-                    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
-                        if let Some(feature) = comp.features.get(feat_idx) {
-                            for active in &feature_adapters {
-                                let resp =
-                                    adapter::run_push_feature(active, root, comp_id, feature)?;
-                                features_pushed += 1;
-                                if recorded_external_ids[slot].is_none() {
-                                    recorded_external_ids[slot] = resp.external_id;
-                                }
-                            }
-                        }
-                    }
-                }
-
                 if let Some(comp) = project.component_mut(comp_id) {
-                    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
-                        if let Some(feature) = comp.features.get_mut(feat_idx) {
-                            feature.pushed = true;
-                            if let Some(ext_id) = ext_id {
-                                feature.external_id = Some(ext_id);
-                            }
-                        }
+                    let summary = adapter::push_unpushed_features(&active_adapters, root, comp)?;
+                    features_pushed += summary.features_pushed;
+                    if summary.modified {
+                        storage::save_component(root, comp)?;
                     }
-                }
-
-                if let Some(comp) = project.component(comp_id) {
-                    storage::save_component(root, comp)?;
                 }
             }
 

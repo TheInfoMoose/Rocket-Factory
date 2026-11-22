@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::adapter::{
-    load_adapters_file, reconcile_status, resolve_active_adapters, run_pull_status,
-    run_push_component, run_push_feature,
+    load_adapters_file, push_unpushed_features, reconcile_status, resolve_active_adapters,
+    run_pull_status, run_push_component,
 };
 use crate::archetype::scaffold_component;
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
@@ -223,54 +223,10 @@ impl App {
             }
         }
 
-        let feature_adapters: Vec<_> = active_adapters
-            .iter()
-            .copied()
-            .filter(|active| active.push_feature_cmd.is_some())
-            .collect();
-
-        if !feature_adapters.is_empty() {
-            let unpushed_indices: Vec<usize> = candidate
-                .component(&comp_id)
-                .map(|comp| {
-                    comp.features
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, feature)| (!feature.pushed).then_some(idx))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            if !unpushed_indices.is_empty() {
-                let mut recorded_external_ids: Vec<Option<String>> =
-                    vec![None; unpushed_indices.len()];
-
-                if let Some(comp) = candidate.component(&comp_id) {
-                    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
-                        if let Some(feature) = comp.features.get(feat_idx) {
-                            for active in &feature_adapters {
-                                let resp = run_push_feature(active, &self.root, &comp_id, feature)?;
-                                features_pushed += 1;
-                                if recorded_external_ids[slot].is_none() {
-                                    recorded_external_ids[slot] = resp.external_id;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let Some(comp) = candidate.component_mut(&comp_id) {
-                    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
-                        if let Some(feature) = comp.features.get_mut(feat_idx) {
-                            feature.pushed = true;
-                            if let Some(ext_id) = ext_id {
-                                feature.external_id = Some(ext_id);
-                            }
-                            modified = true;
-                        }
-                    }
-                }
-            }
+        if let Some(comp) = candidate.component_mut(&comp_id) {
+            let summary = push_unpushed_features(&active_adapters, &self.root, comp)?;
+            features_pushed += summary.features_pushed;
+            modified = summary.modified;
         }
 
         if modified && self.root.join(ROCKET_DIR).exists() {

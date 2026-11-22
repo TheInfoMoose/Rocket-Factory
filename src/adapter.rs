@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{RfError, RfResult};
 use crate::export::{export_component_manifest_toml, export_project_json, export_roadmap_markdown};
-use crate::model::{ExternalTaskRef, FeatureItem, Project};
+use crate::model::{Component, ExternalTaskRef, FeatureItem, Project};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,6 +70,12 @@ pub struct ReconcileSummary {
     pub components_updated: usize,
     pub tasks_synced: usize,
     pub features_linked: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FeaturePushSummary {
+    pub features_pushed: usize,
+    pub modified: bool,
 }
 
 pub fn load_adapters_file(path: &Path) -> RfResult<AdaptersFile> {
@@ -249,6 +255,62 @@ pub fn run_push_feature(
     parse_push_response(&adapter.name, &stdout)
 }
 
+pub fn push_unpushed_features(
+    adapters: &[&AdapterConfig],
+    workdir: &Path,
+    component: &mut Component,
+) -> RfResult<FeaturePushSummary> {
+    let feature_adapters: Vec<&AdapterConfig> = adapters
+        .iter()
+        .copied()
+        .filter(|active| active.push_feature_cmd.is_some())
+        .collect();
+    if feature_adapters.is_empty() {
+        return Ok(FeaturePushSummary::default());
+    }
+
+    let unpushed_indices: Vec<usize> = component
+        .features
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, feature)| (!feature.pushed).then_some(idx))
+        .collect();
+    if unpushed_indices.is_empty() {
+        return Ok(FeaturePushSummary::default());
+    }
+
+    let mut features_pushed = 0usize;
+    let mut recorded_external_ids: Vec<Option<String>> = vec![None; unpushed_indices.len()];
+
+    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
+        if let Some(feature) = component.features.get(feat_idx) {
+            for active in &feature_adapters {
+                let resp = run_push_feature(active, workdir, &component.id, feature)?;
+                features_pushed += 1;
+                if recorded_external_ids[slot].is_none() {
+                    recorded_external_ids[slot] = resp.external_id;
+                }
+            }
+        }
+    }
+
+    let mut modified = false;
+    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
+        if let Some(feature) = component.features.get_mut(feat_idx) {
+            feature.pushed = true;
+            if let Some(ext_id) = ext_id {
+                feature.external_id = Some(ext_id);
+            }
+            modified = true;
+        }
+    }
+
+    Ok(FeaturePushSummary {
+        features_pushed,
+        modified,
+    })
+}
+
 pub fn run_pull_status(
     adapter: &AdapterConfig,
     workdir: &Path,
@@ -272,7 +334,7 @@ pub fn run_pull_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Component, ComponentKind, GridConfig, GridPos, ProjectConfig, TaskStatus};
+    use crate::model::{ComponentKind, GridConfig, GridPos, ProjectConfig, TaskStatus};
     use tempfile::tempdir;
 
     #[test]
@@ -465,5 +527,102 @@ export_format = "json"
             run_pull_status(&adapter, dir.path(), &project),
             Err(RfError::Adapter(msg)) if msg.contains("boom")
         ));
+    }
+
+    #[test]
+    fn push_unpushed_features_sends_to_all_adapters_and_records_first_id() {
+        let dir = tempdir().unwrap();
+        let log_a = dir.path().join("tracker_a.log");
+        let log_b = dir.path().join("tracker_b.log");
+        let mut project = sample_project();
+        let comp = project.component_mut("view_box").unwrap();
+
+        let adapter_a = AdapterConfig {
+            name: "tracker_a".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    format!(
+                        "cat >> '{}' && printf '{{\"external_id\":\"A-1\"}}'",
+                        log_a.display()
+                    ),
+                ],
+            }),
+            pull_status_cmd: None,
+        };
+        let adapter_b = AdapterConfig {
+            name: "tracker_b".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    format!(
+                        "cat >> '{}' && printf '{{\"external_id\":\"B-2\"}}'",
+                        log_b.display()
+                    ),
+                ],
+            }),
+            pull_status_cmd: None,
+        };
+
+        let summary = push_unpushed_features(&[&adapter_a, &adapter_b], dir.path(), comp).unwrap();
+        assert_eq!(
+            summary,
+            FeaturePushSummary {
+                features_pushed: 2,
+                modified: true,
+            }
+        );
+        assert!(comp.features[0].pushed);
+        assert_eq!(comp.features[0].external_id.as_deref(), Some("A-1"));
+
+        let payload_a = std::fs::read_to_string(&log_a).unwrap();
+        let payload_b = std::fs::read_to_string(&log_b).unwrap();
+        assert!(payload_a.contains("Draw box"));
+        assert!(payload_b.contains("Draw box"));
+    }
+
+    #[test]
+    fn push_unpushed_features_leaves_unpushed_on_second_adapter_error() {
+        let dir = tempdir().unwrap();
+        let mut project = sample_project();
+        let comp = project.component_mut("view_box").unwrap();
+
+        let adapter_ok = AdapterConfig {
+            name: "tracker_ok".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "cat >/dev/null && printf '{\"external_id\":\"A-1\"}'".into(),
+                ],
+            }),
+            pull_status_cmd: None,
+        };
+        let adapter_fail = AdapterConfig {
+            name: "tracker_fail".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec!["-c".into(), "echo second failed >&2; exit 2".into()],
+            }),
+            pull_status_cmd: None,
+        };
+
+        let err = push_unpushed_features(&[&adapter_ok, &adapter_fail], dir.path(), comp);
+        assert!(matches!(
+            err,
+            Err(RfError::Adapter(msg)) if msg.contains("second failed")
+        ));
+        assert!(!comp.features[0].pushed);
+        assert!(comp.features[0].external_id.is_none());
     }
 }
