@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::error::{RfError, RfResult};
-use crate::storage::{save_component, COMPONENTS_DIR, ROCKET_DIR};
+use crate::storage::{save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR};
 use crate::tui::app::App;
 use crate::tui::ui;
 
@@ -65,15 +65,24 @@ pub fn restore_terminal(terminal: &mut TuiTerminal) -> RfResult<()> {
     Ok(())
 }
 
+fn parse_editor_command(editor_value: Option<&str>) -> (String, Vec<String>) {
+    if let Some(raw) = editor_value {
+        let mut parts = raw.split_ascii_whitespace();
+        if let Some(program) = parts.next() {
+            let args = parts.map(str::to_string).collect();
+            return (program.to_string(), args);
+        }
+    }
+    ("vi".to_string(), Vec::new())
+}
+
 pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RfResult<()> {
     restore_terminal(terminal)?;
 
-    let editor = std::env::var("EDITOR")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "vi".to_string());
+    let editor_env = std::env::var("EDITOR").ok();
+    let (program, args) = parse_editor_command(editor_env.as_deref());
 
-    let status_res = Command::new(&editor).arg(file_path).status();
+    let status_res = Command::new(&program).args(&args).arg(file_path).status();
 
     enable_raw_mode().map_err(terminal_io_err)?;
     execute!(terminal.backend_mut(), EnterAlternateScreen).map_err(terminal_io_err)?;
@@ -87,11 +96,73 @@ pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RfRes
     if !status.success() {
         return Err(RfError::Io {
             path: file_path.to_path_buf(),
-            source: io::Error::other(format!("editor '{editor}' exited with status {status}")),
+            source: io::Error::other(format!("editor '{program}' exited with status {status}")),
         });
     }
 
     Ok(())
+}
+
+fn process_pending_editor_with<F>(app: &mut App, mut run_editor: F)
+where
+    F: FnMut(&Path) -> RfResult<()>,
+{
+    let Some(comp_id) = app.pending_editor_component.take() else {
+        return;
+    };
+
+    if let Err(err) = validate_component_id(&comp_id) {
+        app.status_message = format!("Invalid component ID '{comp_id}': {err}");
+        return;
+    }
+
+    let Some(comp) = app.project.component(&comp_id) else {
+        app.status_message = format!("Component '{comp_id}' not found");
+        return;
+    };
+
+    let components_dir = app.root.join(ROCKET_DIR).join(COMPONENTS_DIR);
+    let md_path = components_dir.join(format!("{comp_id}.md"));
+
+    if md_path.symlink_metadata().is_err() {
+        if let Err(err) = save_component(&app.root, comp) {
+            app.status_message = format!("Failed to save {comp_id} before editing: {err}");
+            return;
+        }
+    }
+
+    let canon_dir = match std::fs::canonicalize(&components_dir) {
+        Ok(path) => path,
+        Err(err) => {
+            app.status_message =
+                format!("Failed to resolve components directory for {comp_id}: {err}");
+            return;
+        }
+    };
+
+    let canon_md = match std::fs::canonicalize(&md_path) {
+        Ok(path) => path,
+        Err(err) => {
+            app.status_message = format!("Failed to resolve Markdown path for {comp_id}: {err}");
+            return;
+        }
+    };
+
+    if !canon_md.starts_with(&canon_dir) {
+        app.status_message = format!("Refusing to edit {comp_id}: path escapes components dir");
+        return;
+    }
+
+    match run_editor(&canon_md) {
+        Ok(()) => {
+            if let Err(err) = app.reload_component_markdown(&comp_id) {
+                app.status_message = format!("Failed to reload Markdown for {comp_id}: {err}");
+            }
+        }
+        Err(err) => {
+            app.status_message = format!("Editor error for {comp_id}: {err}");
+        }
+    }
 }
 
 pub fn run_tui(root: &Path, theme_dirs: &[PathBuf]) -> RfResult<()> {
@@ -121,36 +192,7 @@ fn run_event_loop(terminal: &mut TuiTerminal, app: &mut App) -> RfResult<()> {
             if let Event::Key(key) = event::read().map_err(terminal_io_err)? {
                 if key.kind == KeyEventKind::Press {
                     app.handle_key(key);
-
-                    if let Some(comp_id) = app.pending_editor_component.take() {
-                        let md_path = app
-                            .root
-                            .join(ROCKET_DIR)
-                            .join(COMPONENTS_DIR)
-                            .join(format!("{comp_id}.md"));
-
-                        if !md_path.exists() {
-                            if let Some(comp) = app.project.component(&comp_id) {
-                                if let Err(err) = save_component(&app.root, comp) {
-                                    app.status_message =
-                                        format!("Failed to save {comp_id} before editing: {err}");
-                                    continue;
-                                }
-                            }
-                        }
-
-                        match suspend_for_editor(terminal, &md_path) {
-                            Ok(()) => {
-                                if let Err(err) = app.reload_component_markdown(&comp_id) {
-                                    app.status_message =
-                                        format!("Failed to reload Markdown for {comp_id}: {err}");
-                                }
-                            }
-                            Err(err) => {
-                                app.status_message = format!("Editor error for {comp_id}: {err}");
-                            }
-                        }
-                    }
+                    process_pending_editor_with(app, |path| suspend_for_editor(terminal, path));
                 }
             }
         }
@@ -165,10 +207,174 @@ fn run_event_loop(terminal: &mut TuiTerminal, app: &mut App) -> RfResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Component, ComponentKind, GridPos};
+    use crate::storage::init_workspace;
+    use crate::theme::default_theme;
+
+    fn make_component(id: &str, body: &str) -> Component {
+        Component {
+            id: id.to_string(),
+            name: id.to_string(),
+            kind: ComponentKind::Custom,
+            description: String::new(),
+            relative_path: None,
+            position: GridPos::default(),
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: body.to_string(),
+        }
+    }
+
+    fn make_workspace_app(components: Vec<Component>) -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut project = init_workspace(dir.path(), "Editor Test", "Workspace for editor tests")
+            .expect("init workspace");
+        project.components = components;
+        let theme = default_theme().expect("default theme");
+        let app = App::new(dir.path().to_path_buf(), project, theme);
+        (dir, app)
+    }
 
     #[test]
     fn default_theme_dirs_includes_project_local_dir() {
         let dirs = default_theme_dirs(Path::new("/tmp/rf_demo"));
         assert_eq!(dirs[0], PathBuf::from("/tmp/rf_demo/.rocket/themes"));
+    }
+
+    #[test]
+    fn parse_editor_command_splits_args_and_falls_back_to_vi() {
+        assert_eq!(
+            parse_editor_command(Some("code --wait")),
+            ("code".to_string(), vec!["--wait".to_string()])
+        );
+        assert_eq!(
+            parse_editor_command(Some("  nvim   -u  NONE  ")),
+            (
+                "nvim".to_string(),
+                vec!["-u".to_string(), "NONE".to_string()]
+            )
+        );
+        assert_eq!(parse_editor_command(None), ("vi".to_string(), Vec::new()));
+        assert_eq!(
+            parse_editor_command(Some("")),
+            ("vi".to_string(), Vec::new())
+        );
+        assert_eq!(
+            parse_editor_command(Some("   \t\n ")),
+            ("vi".to_string(), Vec::new())
+        );
+    }
+
+    #[test]
+    fn process_pending_editor_autosaves_edits_and_reloads_markdown() {
+        let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Initial\n")]);
+        let expected_md = dir
+            .path()
+            .join(ROCKET_DIR)
+            .join(COMPONENTS_DIR)
+            .join("auth_svc.md");
+        assert!(!expected_md.exists());
+
+        app.pending_editor_component = Some("auth_svc".to_string());
+        let mut invoked = false;
+
+        process_pending_editor_with(&mut app, |path| {
+            invoked = true;
+            assert_eq!(
+                path,
+                std::fs::canonicalize(&expected_md).expect("canonical md")
+            );
+            std::fs::write(path, "# Updated Blueprint\n\nNew details.\n").map_err(|source| {
+                RfError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })
+        });
+
+        assert!(invoked);
+        assert!(app.pending_editor_component.is_none());
+        let comp = app.project.component("auth_svc").expect("component exists");
+        assert_eq!(comp.markdown_body, "# Updated Blueprint\n\nNew details.\n");
+    }
+
+    #[test]
+    fn process_pending_editor_rejects_invalid_component_id() {
+        let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.pending_editor_component = Some("../escape".to_string());
+        let mut invoked = false;
+
+        process_pending_editor_with(&mut app, |_| {
+            invoked = true;
+            Ok(())
+        });
+
+        assert!(!invoked);
+        assert!(app.pending_editor_component.is_none());
+        assert!(app.status_message.contains("Invalid component ID"));
+    }
+
+    #[test]
+    fn process_pending_editor_rejects_unknown_component_id() {
+        let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.pending_editor_component = Some("missing_comp".to_string());
+        let mut invoked = false;
+
+        process_pending_editor_with(&mut app, |_| {
+            invoked = true;
+            Ok(())
+        });
+
+        assert!(!invoked);
+        assert!(app.pending_editor_component.is_none());
+        assert!(app.status_message.contains("not found"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_pending_editor_rejects_symlink_escape() {
+        let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        let outside = dir.path().join("outside.md");
+        std::fs::write(&outside, "# Secret\n").expect("write outside file");
+
+        let link_path = dir
+            .path()
+            .join(ROCKET_DIR)
+            .join(COMPONENTS_DIR)
+            .join("auth_svc.md");
+        std::os::unix::fs::symlink(&outside, &link_path).expect("create symlink");
+
+        app.pending_editor_component = Some("auth_svc".to_string());
+        let mut invoked = false;
+
+        process_pending_editor_with(&mut app, |_| {
+            invoked = true;
+            Ok(())
+        });
+
+        assert!(!invoked);
+        assert!(app.pending_editor_component.is_none());
+        assert!(app.status_message.contains("escapes"));
+    }
+
+    #[test]
+    fn process_pending_editor_surfaces_editor_error_without_panicking() {
+        let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.pending_editor_component = Some("auth_svc".to_string());
+
+        process_pending_editor_with(&mut app, |path| {
+            Err(RfError::Io {
+                path: path.to_path_buf(),
+                source: io::Error::other("simulated editor failure"),
+            })
+        });
+
+        assert!(app.pending_editor_component.is_none());
+        assert!(app.status_message.contains("Editor error for auth_svc"));
+        assert!(app.status_message.contains("simulated editor failure"));
     }
 }
