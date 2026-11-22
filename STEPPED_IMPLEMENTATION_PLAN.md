@@ -26,7 +26,7 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 11A** | `/goal` | core | `src/model.rs`, `src/archetype.rs`, `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs` | — |
+| 1 | **STEP 11A** | `/goal` | core | `src/model.rs`, `src/archetype.rs`, `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | — |
 | 2 | **STEP 11B** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/ui.rs` | STEP 11A |
 | 3 | **STEP 11C** | `/goal` | tui | `src/tui/app.rs` | STEP 11B |
 | 4 | **STEP 11D** | `/goal` | ui | `src/tui/ui.rs`, `src/tui/canvas.rs` | STEP 11C |
@@ -2546,6 +2546,7 @@ ALLOWED_FILES:
   - src/tui/app.rs
   - src/tui/terminal.rs
   - src/tui/ui.rs
+  - tests/e2e.rs
 READ_ONLY_REFS:
   - src/model.rs:1-130 (ComponentKind, EdgeKind, Component, Project)
   - src/archetype.rs:1-164 (ARCHETYPES, archetype_for, scaffold_component)
@@ -2588,8 +2589,9 @@ Contract & Behavior:
      - `src/export.rs`: update `map_component_type` for `Concept`, `Interface`, `Logic`, `Data`, `Integration` (preserving existing mappings for legacy variants).
      - `src/tui/modal.rs`: add `EdgeKind::Contains` to `EDGE_KINDS` and `edge_kind_label` (`"contains"`). Update any test that asserts `NewComponentForm` archetype cycling (index 0 is now `Concept`, index 1 is `Interface`).
      - `src/tui/canvas.rs`: add `EdgeKind::Contains => "sub"` to `edge_kind_tag`.
-  4. Mechanical literal updates:
+  4. Mechanical literal & test fixture updates:
      - Add `parent_id: None` to all existing `Component { ... }` struct literals in `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, and `src/tui/ui.rs` (and update `src/tui/app.rs` test asserting new-component default/cycled archetype if it previously expected `DataStream`).
+     - In `src/cli.rs` and `tests/e2e.rs`, update tests that previously relied on `scaffold_component` populating non-empty `starter_features` (e.g., `cli_init_and_export_roadmap`, `cli_push_sends_unpushed_features_to_all_active_adapters`, and `tests/e2e.rs` push/reconcile/roadmap tests) to push explicit `FeatureItem` entries onto the scaffolded components.
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub parent_id: Option<String>' src/model.rs && grep -qE '\bContains\b' src/model.rs && grep -qE '\bConcept\b' src/model.rs && grep -qE 'pub fn scaffold_sub_component\b' src/archetype.rs && ! grep -rqi 'nebulous' src/

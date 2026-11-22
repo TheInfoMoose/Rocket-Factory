@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0053"
 type = "task"
 title = "tui"
-status = "pending"
+status = "open"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T17:40:07Z"
-updated_at = "2026-11-22T18:31:11Z"
+updated_at = "2026-11-22T18:33:45Z"
 source_ref = "STEP 11C"
 
 [effort]
