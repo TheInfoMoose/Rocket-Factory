@@ -902,7 +902,6 @@ impl App {
                 }
             }
             KeyCode::Char('d') => {
-                self.connect_source_id = None;
                 if let Some(comp) = self.selected_component() {
                     let comp_id = comp.id.clone();
                     let comp_name = comp.name.clone();
@@ -918,6 +917,7 @@ impl App {
                         comp_name,
                         affected_connections,
                     ));
+                    self.connect_source_id = None;
                     self.mode = InputMode::Modal;
                     self.status_message = format!("Confirm delete component {comp_id}");
                 } else {
@@ -925,7 +925,6 @@ impl App {
                 }
             }
             KeyCode::Char('D') => {
-                self.connect_source_id = None;
                 if let Some(comp_id) = self.selected_component().map(|c| c.id.clone()) {
                     let target_conn = self
                         .project
@@ -947,6 +946,7 @@ impl App {
                             from.clone(),
                             to.clone(),
                         ));
+                        self.connect_source_id = None;
                         self.mode = InputMode::Modal;
                         self.status_message = format!("Confirm delete connection {from} -> {to}");
                     } else {
@@ -2174,5 +2174,41 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         } else {
             panic!("expected ConfirmDelete modal to remain open on config save failure");
         }
+    }
+
+    #[test]
+    fn app_noop_delete_in_connect_mode_preserves_connect_source() {
+        // 1. In InputMode::Connect with connect_source_id = Some("alpha") and no connections on
+        //    "alpha", pressing 'D' keeps Connect mode and connect_source_id untouched.
+        let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
+        app.mode = InputMode::Connect;
+        app.connect_source_id = Some("alpha".to_string());
+
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
+        assert!(app.modal.is_none());
+        assert_eq!(
+            app.status_message,
+            "No connection on selected component to delete"
+        );
+
+        // 2. With an empty component list in InputMode::Connect and connect_source_id = Some("alpha"),
+        //    pressing 'd' keeps Connect mode and connect_source_id untouched.
+        let mut empty_app = make_app(vec![]);
+        empty_app.mode = InputMode::Connect;
+        empty_app.connect_source_id = Some("alpha".to_string());
+
+        empty_app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(empty_app.mode, InputMode::Connect);
+        assert_eq!(empty_app.connect_source_id.as_deref(), Some("alpha"));
+        assert!(empty_app.modal.is_none());
+        assert_eq!(empty_app.status_message, "No component selected to delete");
+
+        // 3. Pressing 'd' when a component IS selected clears connect_source_id and enters Modal.
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.connect_source_id.is_none());
+        assert!(matches!(app.modal, Some(ModalState::ConfirmDelete(_))));
     }
 }
