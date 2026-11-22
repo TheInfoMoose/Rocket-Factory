@@ -1,0 +1,19 @@
+schema_version = 2
+
+[item]
+id = "TASK-0028"
+type = "task"
+title = "Phase 5 polish: L-bend label, full-grid fallback, modal clamp, footer [v] hint, $EDITOR args"
+status = "pending"
+severity = "low"
+scope_ref = "inbox"
+created_at = "2026-11-22T03:16:22Z"
+updated_at = "2026-11-22T03:16:43Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []
