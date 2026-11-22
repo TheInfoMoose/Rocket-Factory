@@ -26,10 +26,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 8A** | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` | — |
-| 2 | **STEP 8B** | `/goal` | modal | `src/tui/modal.rs` | — |
-| 3 | **STEP 8C** | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | STEP 8A, STEP 8B |
-| 4 | **STEP 8D** | `/goal` | docs | `README.md` | STEP 8C |
+| 1 | **STEP 8E** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | — |
+| 2 | **STEP 8D** | `/goal` | docs | `README.md` | STEP 8E |
 
 ### Completed
 
@@ -67,6 +65,9 @@
 | **STEP 7A** | Done (`c27efb0`) | `/goal` | tui | `src/tui/terminal.rs`, `src/tui/app.rs` |
 | **STEP 7B** | Done (`3ea3c39`) | `/goal` | ui | `src/tui/ui.rs` |
 | **STEP 7C** | Done (`3a3422b`) | `/goal` | sync | `src/cli.rs`, `src/tui/app.rs`, `tests/e2e.rs` |
+| **STEP 8A** | Done (`c4c0058`) | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` |
+| **STEP 8B** | Withdrawn (→ 8E) | `/goal` | modal | `src/tui/modal.rs` |
+| **STEP 8C** | Withdrawn (→ 8E) | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
 
 ### Future phases
 
@@ -2143,6 +2144,99 @@ Contract & Behavior:
 
 [POST_GATE]
 test -s README.md && grep -q 'rf init' README.md && grep -q 'adapters.toml' README.md && grep -q 'Delete component' README.md && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8E: Confirmation-Guarded Delete Component (`d`) & Delete Connection (`D`) with Graceful Connection Cleanup (`TASK-0044`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8E: Add ConfirmDelete modal state/actions, wire d (delete component with graceful incident-connection cleanup) and D (delete connection) keybinds, exhaustive match arms, rendering, and E2E verification across src/tui/modal.rs, src/tui/app.rs, src/tui/ui.rs, and tests/e2e.rs (supersedes STEP 8B + STEP 8C, closes TASK-0044).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/app.rs
+  - src/tui/ui.rs
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs:120-160 (ModalState, ModalAction)
+  - src/tui/modal.rs:224-247 (ModalState::title, ModalState::handle_key)
+  - src/tui/app.rs:545-755 (apply_modal_action)
+  - src/tui/app.rs:764-898 (handle_key)
+  - src/tui/ui.rs:308-511 (render_modal, ModalState::Help)
+  - src/storage.rs:165-197 (delete_component, save_project_config)
+  - src/audit.rs:120-135 (DanglingConnection check)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or tests/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+  - Test fixtures must use reserved placeholder data only (`example.com`, `192.0.2.0/24`, `testuser`).
+
+[PRE_GATE]
+grep -qE 'pub enum ModalState\b' src/tui/modal.rs && grep -qE 'pub fn delete_component\b' src/storage.rs
+
+[MUTATION_SPEC]
+Goal:
+  Resolve TASK-0044 by implementing the ConfirmDelete modal and its exhaustive consumers in a single atomic step, completing TUI CRUD deletion for components (`d`) and connections (`D`) while breaking incident connections gracefully on disk and in memory with transactional rollback and zero dangling-connection audit findings.
+
+Contract & Behavior:
+  - `src/tui/modal.rs`:
+    - Define `#[derive(Debug, Clone, PartialEq, Eq)] pub enum ConfirmDeleteTarget`:
+      - `Component { id: String, name: String, affected_connections: usize }`
+      - `Connection { from: String, to: String }`
+    - Define `#[derive(Debug, Clone, PartialEq, Eq)] pub struct ConfirmDeleteForm { pub target: ConfirmDeleteTarget, pub error: Option<String> }`.
+    - Add variant `ModalState::ConfirmDelete(ConfirmDeleteForm)`.
+    - Add variants to `ModalAction`:
+      - `DeleteComponent { id: String }`
+      - `DeleteConnection { from: String, to: String }`
+    - Add constructors on `ModalState`:
+      - `pub fn confirm_delete_component(id: impl Into<String>, name: impl Into<String>, affected_connections: usize) -> Self`
+      - `pub fn confirm_delete_connection(from: impl Into<String>, to: impl Into<String>) -> Self`
+    - Update `ModalState::title(&self)` to return `"Delete Component"` for `ConfirmDeleteTarget::Component { .. }` and `"Delete Connection"` for `ConfirmDeleteTarget::Connection { .. }`.
+    - Update `ModalState::handle_key(&mut self, key: KeyEvent) -> ModalAction` with a helper `handle_confirm_delete_key(form: &mut ConfirmDeleteForm, key: KeyEvent) -> ModalAction`:
+      - `KeyCode::Enter | KeyCode::Char('y' | 'Y')`: clear `form.error = None` and return `ModalAction::DeleteComponent { id }` or `ModalAction::DeleteConnection { from, to }`.
+      - `KeyCode::Esc | KeyCode::Char('n' | 'N')`: return `ModalAction::Cancel`.
+      - All other keys: return `ModalAction::None`.
+  - `src/tui/app.rs`:
+    - In `handle_key` (non-modal mode):
+      - `KeyCode::Char('d')`: clear `self.connect_source_id = None`; if a component is selected, count `affected_connections` where `conn.from == comp.id || conn.to == comp.id`, open `ModalState::confirm_delete_component(comp.id.clone(), comp.name.clone(), affected_connections)`, set `self.mode = InputMode::Modal`, and set status `"Confirm delete component {}"`. If no component is selected, set status `"No component selected to delete"`.
+      - `KeyCode::Char('D')`: clear `self.connect_source_id = None`; if a component is selected, locate the first connection on it (preferring outgoing `conn.from == comp.id`, falling back to incoming `conn.to == comp.id`), open `ModalState::confirm_delete_connection(conn.from.clone(), conn.to.clone())`, set `self.mode = InputMode::Modal`, and set status `"Confirm delete connection {} -> {}"`. If none exists, set status `"No connection on selected component to delete"`.
+    - In `apply_modal_action` (exhaustive match on `ModalAction`):
+      - `ModalAction::DeleteComponent { id }`:
+        - Build `candidate_config = self.project.config.clone()` with all incident connections removed (`candidate_config.connections.retain(|c| c.from != id && c.to != id)`).
+        - Track `connections_changed = candidate_config.connections.len() != self.project.config.connections.len()`.
+        - When `self.root.join(ROCKET_DIR).exists()`:
+          - Break connections on disk first: if `connections_changed`, persist `save_project_config(&self.root, &candidate_config)`. On `Err(err)`: set `form.error = Some(msg.clone())`, `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project` unchanged, and return.
+          - Delete component files via `crate::storage::delete_component(&self.root, &id)`. On `Err(err)`: if `connections_changed`, best-effort restore `let _ = save_project_config(&self.root, &self.project.config);`; set `form.error = Some(msg.clone())`, `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project` unchanged, and return.
+        - On success: remove the component from `self.project.components`, commit `self.project.config = candidate_config`, clear `self.connect_source_id = None`, clear `self.pending_editor_component` if it equals `Some(&id)`, call `self.clamp_selection()`, reset `self.detail_scroll = 0`, call `self.refresh_audit()`, set `self.mode = InputMode::Navigate`, and set status `"Deleted component {id}"`.
+      - `ModalAction::DeleteConnection { from, to }`:
+        - Build `candidate_config = self.project.config.clone()` removing the first matching `(c.from == from && c.to == to)` connection.
+        - When `self.root.join(ROCKET_DIR).exists()`, persist `save_project_config(&self.root, &candidate_config)`. On `Err(err)`: set `form.error = Some(msg.clone())`, `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project.config` unchanged, and return.
+        - On success: commit `self.project.config = candidate_config`, clear `self.connect_source_id = None`, call `self.refresh_audit()`, set `self.mode = InputMode::Navigate`, and set status `"Deleted connection {from} -> {to}"`.
+  - `src/tui/ui.rs`:
+    - Handle `ModalState::ConfirmDelete(form)` in both `match modal` blocks in `render_modal`:
+      - For `ConfirmDeleteTarget::Component { id, name, affected_connections }`: display `"  Delete component '{name}' ({id})?"` and when `affected_connections > 0`, a warning line noting that `{affected_connections}` connection(s) will also be removed.
+      - For `ConfirmDeleteTarget::Connection { from, to }`: display `"  Delete connection '{from} -> {to}'?"`.
+      - Return `form.error.as_deref()` for standard error rendering and use footer hint `"  [Enter/y] Confirm Delete  [Esc/n] Cancel"`.
+    - Update `ModalState::Help` under `"  Editing & Canvas"` to document `d / D` (`"    d / D             Delete component / Delete edge"`) while keeping every Help line `<= 70` cols and total Help popup height `<= 22` rows so `80x24` terminals render unclipped with `"[Esc/?/Enter/q] Close"` visible.
+  - `tests/e2e.rs`:
+    - Add E2E test `e2e_tui_delete_connection_and_component_persists_to_disk` driving `'D'` + `'y'` to delete a connection, `'d'` + `'n'` to cancel component deletion, and `'d'` + `'y'` to delete a component with incident edges, verifying `.rocket/` on disk via `storage::load_project` and verifying `audit::audit_project(&loaded)` reports no `DanglingConnection` findings after each step.
+
+Tests:
+  - In `src/tui/modal.rs`: unit tests verifying `Enter`/`'y'` emit `ModalAction::DeleteComponent` / `ModalAction::DeleteConnection`, `'n'`/`Esc` emit `ModalAction::Cancel`, and unrelated keys emit `ModalAction::None`.
+  - In `src/tui/app.rs`: unit tests for delete component (including incident connection cleanup and zero `DanglingConnection` audit findings), delete connection (both outgoing and incoming fallback), cancel via `Esc`/`n`, and save-failure rollback keeping modal open with `form.error` and `self.project` unchanged.
+  - In `src/tui/ui.rs`: unit tests verifying `ModalState::ConfirmDelete` rendering (component with affected connections + connection target) and `80x24` `ModalState::Help` rendering with both `"Delete component / Delete edge"` and `"[Esc/?/Enter/q] Close"` intact.
+  - In `tests/e2e.rs`: `e2e_tui_delete_connection_and_component_persists_to_disk` passing under `cargo test --workspace`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub enum ConfirmDeleteTarget\b' src/tui/modal.rs && grep -qE 'Delete component / Delete edge' src/tui/ui.rs && ! grep -rqi 'nebulous' src/ tests/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
