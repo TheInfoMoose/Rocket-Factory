@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0037"
 type = "task"
 title = "ui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:18:56Z"
-updated_at = "2026-11-22T04:18:56Z"
+updated_at = "2026-11-22T04:24:58Z"
 source_ref = "STEP 7B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0037@2026-11-22T04:23:03Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "3ea3c39"
+summary = "STEP 7B: Dynamic Modal Width for Unclipped 80-Column Keyboard Help (`BUG-0007`) (phased check PASS)"
