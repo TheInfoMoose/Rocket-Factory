@@ -77,7 +77,7 @@ created_at = "2026-11-22T04:17:04Z"
 [[items.features]]
 id = "FEAT-0001"
 title = "Modular Components, Sub-Components & Lightweight Mutable Archetypes"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T17:37:52Z"
 
@@ -490,6 +490,34 @@ created_at = "2026-11-22T17:40:07Z"
 [[items.tasks]]
 id = "TASK-0055"
 title = "Add tests/e2e.rs to STEP 11A ALLOWED_FILES to populate test features explicitly"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T18:28:24Z"
+
+[[items.tasks]]
+id = "TASK-0056"
+title = "canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T19:34:07Z"
+
+[[items.tasks]]
+id = "TASK-0057"
+title = "ui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T19:34:07Z"
+
+[[items.tasks]]
+id = "TASK-0058"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T19:34:07Z"
+
+[[items.tasks]]
+id = "TASK-0059"
+title = "tests"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T19:34:07Z"

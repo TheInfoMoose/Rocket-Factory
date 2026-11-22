@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 11):** Introduce modular sub-components (`parent_id` + `EdgeKind::Contains`), lightweight mutable prototyping archetypes (`Concept` default with backwards-compatible legacy TOML), expand/collapse with proximity placement and collision shifting, and clear `<A> depends on <target>` connect prompts.
+**Phase goal (Phase 12):** Widen the Snap Grid canvas with capped sidebars, add `Compact`/`Normal`/`Expanded` zoom levels (`+`/`=`, `-`, defaulting to `Compact` with ≥4×4 capacity and top-center default placement), upgrade the `?` Help modal to per-action rows and footer to underlined-key mnemonics, update `README.md`, and add comprehensive Phase 11–12 E2E tests.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 11A** | `/goal` | core | `src/model.rs`, `src/archetype.rs`, `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | — |
-| 2 | **STEP 11B** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/ui.rs` | STEP 11A |
-| 3 | **STEP 11C** | `/goal` | tui | `src/tui/app.rs` | STEP 11B |
-| 4 | **STEP 11D** | `/goal` | ui | `src/tui/ui.rs`, `src/tui/canvas.rs` | STEP 11C |
+| 1 | **STEP 12A** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/app.rs`, `src/tui/ui.rs` | — |
+| 2 | **STEP 12B** | `/goal` | ui | `src/tui/ui.rs` | STEP 12A |
+| 3 | **STEP 12C** | `/goal` | docs | `README.md` | STEP 12A |
+| 4 | **STEP 12D** | `/goal` | tests | `tests/e2e.rs` | STEP 12B |
 
 ### Completed
 
@@ -77,14 +77,14 @@
 | **STEP 9C** | Done (`8a8b7d4`) | `/goal` | ci | `.github/workflows/ci.yml` |
 | **STEP 10A** | Done (`28a2c33`) | `/goal` | ci | `.github/workflows/ci.yml` |
 | **STEP 10B** | Done (`64ab2f4`) | `/goal` | docs | `README.md` |
+| **STEP 11A** | Done (`9f84e1a`) | `/goal` | core | `src/model.rs`, `src/archetype.rs`, `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
+| **STEP 11B** | Done (`1169d58`) | `/goal` | modal | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/app.rs` |
+| **STEP 11C** | Done (`b13bd79`) | `/goal` | tui | `src/tui/app.rs` |
+| **STEP 11D** | Done (`3d031fa`) | `/goal` | ui | `src/tui/ui.rs`, `src/tui/canvas.rs` |
 
 ### Future phases
 
-- **Phase 12 — Canvas Base Scale, Zoom Levels, Keybind UX & Docs:**
-  - **STEP 12A (`canvas`)**: Widen middle Snap Grid column (~60%+ via compact/capped sidebars), add explicit zoom levels (`Compact` / `Normal` / `Expanded`, defaulting to `Compact` so at least 4 cards wide × 4 cards high fit on start), bind `+`/`=` and `-`, and size scrollable grid area to full-screen canvas capacity (minus sidebars) with top-center default start.
-  - **STEP 12B (`ui`)**: Separate every distinct action onto its own row in the `?` Keyboard Help modal (keeping only truly identical actions grouped) and replace bracketed footer hints with underlined-key mnemonic labels (e.g., `N`ew, `E`dit, `M`ove, `C`onnect).
-  - **STEP 12C (`docs`)**: Update `README.md` — split the local release build (`cargo build --release --locked`) into its own code block, convert TUI Keyboard Reference to per-key rows, document connect direction (`<A> depends on <target>`), sub-components (`parent_id`, `a`, `Space`/`Enter`), lightweight archetypes, and zoom controls.
-  - **STEP 12D (`tests`)**: Add end-to-end integration tests in `tests/e2e.rs` covering sub-component creation/ingestion, expand/collapse collision shifting, mutable archetypes, zoom levels, and connect semantics.
+_None — Phase 12 completes the current roadmap._
 
 ### Open Questions
 
@@ -2799,6 +2799,307 @@ Contract & Behavior:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'Sub-components:' src/tui/ui.rs && grep -q 'archetype_for' src/tui/canvas.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 12 Step Blocks
+
+### STEP 12A: Widened Snap Grid, Zoom Levels (`Compact`/`Normal`/`Expanded`), Capacity Sizing & Top-Center Start
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12A: Widen the middle Snap Grid column via capped sidebars, add explicit ZoomLevel presets (Compact/Normal/Expanded defaulting to Compact with >=4x4 capacity on >=114x26 terminals), bind `+`/`=` and `-`, compute an effective scrollable grid floor without mutating project.config during render, and start new top-level placement at top-center.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/canvas.rs
+  - src/tui/app.rs
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/canvas.rs:15-90 (card sizing constants, CanvasViewport, card_rect, visible_grid_capacity, ensure_visible)
+  - src/tui/canvas.rs:418-589 (render_canvas)
+  - src/tui/canvas.rs:595-900 (existing canvas tests assuming Normal 22x5 geometry)
+  - src/tui/ui.rs:18-52 (render three-column layout)
+  - src/tui/app.rs:58-105 (App struct and App::new)
+  - src/tui/app.rs:495-560 (move_selected_card grid bounds)
+  - src/tui/app.rs:632-648 (first_unoccupied_grid_pos)
+  - src/tui/app.rs:895-960 (ModalAction::CreateComponent grid expansion and persistence)
+  - src/tui/app.rs:1356-1565 (handle_key)
+  - src/tui/app.rs:1860-1885 (create-component test asserting position)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify the `?` Keyboard Help modal rows or the footer mnemonic styling in this step (those belong to STEP 12B).
+  - Do not modify `README.md` or `tests/e2e.rs` in this step.
+  - Do not mutate `app.project.config.grid` inside `render()` (keep config persistence strictly tied to explicit mutations).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct CanvasViewport\b' src/tui/canvas.rs && grep -q 'Sub-components:' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal:
+  Give the Snap Grid canvas primary screen real estate (~60%+ on standard/wide terminals via capped sidebars), introduce three explicit zoom levels (`Compact` / `Normal` / `Expanded`, defaulting to `Compact` so at least 4 cards wide × 4 cards high fit on terminals `>= 114x26`), bind `+`/`=` and `-` to zoom, compute an effective scrollable grid floor without mutating saved config during render, and place new top-level components starting from top-center.
+
+Contract & Behavior:
+  1. `src/tui/canvas.rs`:
+     - Define `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ZoomLevel { #[default] Compact, Normal, Expanded }` with methods:
+       - `pub fn zoom_in(self) -> Self` (`Compact -> Normal -> Expanded -> Expanded`)
+       - `pub fn zoom_out(self) -> Self` (`Expanded -> Normal -> Compact -> Compact`)
+       - `pub fn label(self) -> &'static str` (`"Compact"`, `"Normal"`, `"Expanded"`)
+       - `pub fn metrics(self) -> CardMetrics` returning `pub struct CardMetrics { pub card_width: u16, pub card_height: u16, pub gutter_x: u16, pub gutter_y: u16 }` with `pub fn stride_x(self) -> u16` and `pub fn stride_y(self) -> u16`:
+         - `Compact`: `card_width: 14, card_height: 4, gutter_x: 2, gutter_y: 1` (stride `16x5` — fits >=4×4 cards when canvas inner area is `>= 63x20`, i.e., terminal `>= 114x26`; renders 2 interior lines: line 1 `{glyph} {name}` + optional `[+N]`/`[-N]` badge, line 2 `Tasks {complete}/{total}`)
+         - `Normal`: `card_width: 22, card_height: 5, gutter_x: 4, gutter_y: 2` (stride `26x7` — matches existing `CARD_WIDTH`/`CARD_HEIGHT`/`GUTTER_X`/`GUTTER_Y`; renders 3 interior lines: name + badge, `Tasks {c}/{t} [{archetype}]`, description)
+         - `Expanded`: `card_width: 30, card_height: 7, gutter_x: 4, gutter_y: 2` (stride `34x9` — renders up to 5 interior lines: name + badge, `Tasks {c}/{t} [{archetype}]`, description, tags summary, features/sub-components count)
+     - Add `pub zoom: ZoomLevel` to `CanvasViewport` (`Default` yields `scroll_col: 0, scroll_row: 0, zoom: ZoomLevel::Compact`).
+     - Update `card_rect(inner: Rect, viewport: CanvasViewport, pos: GridPos) -> Option<Rect>` to use `viewport.zoom.metrics()`, WITH a narrow-canvas fallback: if `rel_col == 0 && rel_row == 0` and `inner.width >= 4 && inner.height >= 3` when `inner` is narrower/shorter than `metrics.card_width + 1` or `metrics.card_height + 1` (e.g. `Expanded` on a 60-col terminal), clamp the top-left visible card's width/height to fit inside `inner` so at least the selected/visible cell renders instead of drawing zero cards.
+     - Add `pub fn visible_grid_capacity_for(inner: Rect, zoom: ZoomLevel) -> (u16, u16)` using `zoom.metrics()`. Keep `pub fn visible_grid_capacity(inner: Rect) -> (u16, u16)` delegating to `visible_grid_capacity_for(inner, ZoomLevel::Normal)` for backwards compatibility, and REQUIRE `ensure_visible(inner, &mut viewport, pos)` to call `visible_grid_capacity_for(inner, viewport.zoom)` (never Normal-only).
+     - In `render_canvas`:
+       - Compute `let grid = app.effective_grid();` and render the title as `format!(" Snap Grid ({}x{}) [{}] ", grid.cols, grid.rows, viewport.zoom.label())`.
+       - In `ZoomLevel::Compact`, suppress edge text labels (pass `None` as label to `route_orthogonal_edge` while still drawing orthogonal edge lines and arrowheads `▶`/`◀`/`▼`/`▲`) so the 2-column gutter never clips `"dep"` to `"d…"` between adjacent cards. Render edge labels as before in `Normal` and `Expanded`.
+       - Render card interior lines according to `viewport.zoom` (`Compact`: 2 lines, `Normal`: 3 lines, `Expanded`: 5 lines; gracefully clamp to available interior height when narrow-canvas fallback shrinks a card).
+     - Existing tests in `src/tui/canvas.rs`: update `card_rect_projects_grid_positions_and_culls_offscreen` (`canvas.rs:602`), `render_canvas_buffer` (`canvas.rs:739`), and the `card_rect` helper calls at `canvas.rs:765, 782, 801, 840, 842` to use `CanvasViewport { zoom: ZoomLevel::Normal, ..Default::default() }` so all Normal-zoom geometry, label, and `[Logic]` badge tests continue verifying `Normal` zoom.
+     - Add new unit tests in `src/tui/canvas.rs`:
+       - `zoom_level_transitions_and_compact_4x4_capacity`: verifies `zoom_in`/`zoom_out` clamping, `Compact` fitting >=4×4 in `63x20`, `Compact` suppressing edge labels while preserving arrowheads, `Expanded` rendering extra metadata lines, and narrow-canvas fallback rendering a card even when `inner` is narrower than `Expanded` width.
+  2. `src/tui/ui.rs`:
+     - Add `pub fn column_layout(area: Rect) -> [Rect; 3]` replacing the fixed `24% / 48% / 28%` split:
+       - Left sidebar width: `((u32::from(area.width) * 19 / 100) as u16).clamp(14, 22).min(area.width / 3)`
+       - Right sidebar width: `((u32::from(area.width) * 25 / 100) as u16).clamp(18, 30).min(area.width / 3)`
+       - Middle Snap Grid column: `Constraint::Min(0)` (receives all remaining width — ~57% at 120 cols, >=60% at 130+ cols, ~68% at 160 cols, ~74% at 200 cols).
+     - In `render(frame, app)`:
+       - Use `column_layout(chunks[1])`.
+       - Compute `let (vis_cols, vis_rows) = visible_grid_capacity_for(canvas_inner, app.viewport.zoom);` and store `app.last_canvas_capacity = Some((vis_cols, vis_rows));` WITHOUT mutating `app.project.config.grid`.
+     - Add unit test in `src/tui/ui.rs`:
+       - `column_layout_widens_canvas_and_renders_4x4_compact_grid`: verifies `column_layout` gives middle column >=60% on a `140x40` terminal and `Compact` default renders a 4×4 grid of cards cleanly inside the canvas rect.
+  3. `src/tui/app.rs`:
+     - Add `pub last_canvas_capacity: Option<(u16, u16)>` to `App` (initialized to `None` in `App::new`).
+     - Add `pub fn effective_grid(&self) -> GridConfig`: returns `GridConfig { cols: self.project.config.grid.cols.max(vis_cols), rows: self.project.config.grid.rows.max(vis_rows) }` where `(vis_cols, vis_rows) = self.last_canvas_capacity.unwrap_or((0, 0))`.
+     - Add `pub fn zoom_in(&mut self)` and `pub fn zoom_out(&mut self)` updating `self.viewport.zoom` and setting `self.status_message = format!("Zoom: {}", self.viewport.zoom.label())`.
+     - Bind `KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_in()` and `KeyCode::Char('-') => self.zoom_out()` in `handle_key` (when no modal is open).
+     - Update `first_unoccupied_grid_pos(&self) -> Option<GridPos>` to scan `effective_grid()` from **top-center outward** on each row (`row` in `0..grid.rows`, starting at `center_col = (span.saturating_sub(1)) / 2` where `span = self.last_canvas_capacity.map_or(grid.cols, |(c, _)| c.min(grid.cols)).max(1)`, alternating `center`, `center + 1`, `center - 1`, `center + 2`, `center - 2`, ... across `0..grid.cols`) so the first new top-level component lands at top-center while still returning `None` when the effective grid is completely full.
+     - In `ModalAction::CreateComponent` (top-level branch) and `move_selected_card`: use `effective_grid()` as the movement/placement bounds, and whenever a created or moved card lands at `pos.col >= self.project.config.grid.cols` or `pos.row >= self.project.config.grid.rows`, expand `project.config.grid` to include `pos` and persist via `save_project_config` (when `.rocket/` exists) so saved configs stay consistent across reloads.
+     - Update existing test in `src/tui/app.rs` (`app.rs:1877`): update expected position of the newly created `telemetry_bus` from `GridPos { col: 1, row: 0 }` to `GridPos { col: 3, row: 0 }` (top-center of the default 8-col grid).
+     - Add unit tests in `src/tui/app.rs`:
+       - `zoom_keys_cycle_between_compact_normal_and_expanded` (`+`, `=`, `-` clamping at bounds)
+       - `first_unoccupied_grid_pos_starts_top_center` (verifies empty grid places first card at `row = 0` near center col, not `(0, 0)`, returns `None` on a full `1x1` grid, and persists `project.config.grid` expansion when a card lands in a floored cell outside saved `grid`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub enum ZoomLevel\b' src/tui/canvas.rs && grep -qE 'pub fn visible_grid_capacity_for\b' src/tui/canvas.rs && grep -qE 'pub fn effective_grid\b' src/tui/app.rs && grep -qE 'pub fn zoom_in\b' src/tui/app.rs && grep -q "KeyCode::Char('+')" src/tui/app.rs && grep -q "KeyCode::Char('-')" src/tui/app.rs && grep -qE 'pub fn column_layout\b' src/tui/ui.rs && grep -q 'fn zoom_level_transitions_and_compact_4x4_capacity' src/tui/canvas.rs && grep -q 'fn column_layout_widens_canvas_and_renders_4x4_compact_grid' src/tui/ui.rs && grep -q 'fn zoom_keys_cycle_between_compact_normal_and_expanded' src/tui/app.rs && grep -q 'fn first_unoccupied_grid_pos_starts_top_center' src/tui/app.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12B: Per-Action Keyboard Help Modal & Underlined-Key Mnemonic Footer
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12B: Separate every distinct action onto its own row in the `?` Keyboard Help modal (fitting 80x24 without wrapping or clipping) and replace bracketed footer hints with real-case underlined-key mnemonic labels with 80-column priority in src/tui/ui.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/ui.rs:339-645 (render_footer, render_modal, ModalState::Help)
+  - src/tui/ui.rs:730-895 (existing UI tests for footer and Help modal)
+  - src/tui/app.rs:1356-1565 (active keybindings, case sensitivity, Enter-to-connect, Ctrl+C)
+  - tests/e2e.rs:423-434 (help overlay assertions)
+  - tests/e2e.rs:581-595 (80x24 help overlay close hint assertion)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change keybinding behavior in `src/tui/app.rs` or `src/tui/modal.rs`.
+  - Do not break `tests/e2e.rs` assertions (`Keyboard Help`, `Tab / Shift+Tab`, `Switch RON theme`, `Pull status from active adapters`, `[Esc/?/Enter/q] Close` at `80x24`).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn column_layout\b' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal:
+  Eliminate crammed multi-action keybinding rows in the `?` Help overlay and replace noisy bracketed footer hints (`[n/e/E] Edit`, `[v] Edit MD`) with accurate, real-case underlined-key mnemonic labels that degrade gracefully on 80-column terminals.
+
+Contract & Behavior:
+  1. `src/tui/ui.rs` — `render_footer`:
+     - Replace the bracketed `[key] Label` string with a `Line` composed of styled `Span`s where each hotkey uses `Modifier::UNDERLINED` (in accent/foreground color) and is rendered in its **exact case-sensitive key**:
+       - Core priority group (always fits inside 80 columns, ~65 chars total):
+         `Tab focus` (`Tab` underlined), `new` (`n` underlined), `edit` (`e` underlined), `move` (`m` underlined), `conn` (`c` underlined), `filter` (`f` underlined), `+/- zoom` (`+/-` underlined), `? help` (`?` underlined), `quit` (`q` underlined).
+       - Extended group (appended in order while each item fits within `area.width`, all visible at 120+ cols):
+         `add sub` (`a` underlined), `Edit edge` (`E` underlined), `view MD` (`v` underlined), `r/S sync` (`r` and `S` underlined), `push` (`p` underlined), `theme` (`t` underlined).
+     - No square brackets `[...]` around footer keys. Every underlined key matches its actual `handle_key` binding case (`e` vs `E`, `r`/`S`, lowercase `n`/`m`/`c`/`f`/`v`/`p`/`t`/`q`).
+  2. `src/tui/ui.rs` — `ModalState::Help` in `render_modal`:
+     - Separate every distinct action onto its own row — do NOT combine distinct actions like `n / e / E`, `d / D`, `m / c`, or `Esc / q` on the same row.
+     - Keep ONLY truly identical/alias actions grouped on one row: `Tab / Shift+Tab`, `hjkl / Arrows`, `Space / Enter`, `+ / =`, `r / S`.
+     - Render in a 2-column side-by-side layout sized to fit within `76` inner columns (popup width up to `78.min(max_popup_width)`) and `<= 22` rows so ALL rows plus `  [Esc/?/Enter/q] Close` fit cleanly at `80x24` with zero wrapping or clipping:
+       - Left column (34 chars max, 15 lines; note `(List / Canvas / Detail)` is intentionally shortened to `Cycle focus` to fit 80 cols):
+         - ` Navigation` (heading)
+         - ` Tab / Shift+Tab  Cycle focus`
+         - ` hjkl / Arrows    Move / Scroll`
+         - ` f                Gaps Only filter`
+         - ` Space / Enter    Expand/collapse`
+         - ` Editing & Canvas` (heading)
+         - ` n                New component`
+         - ` a                Add sub-comp`
+         - ` e                Edit component`
+         - ` E                Edit edge`
+         - ` d                Delete component`
+         - ` D                Delete edge`
+         - ` m                Move card mode`
+         - ` c                Connect cards`
+         - ` v                Edit Markdown`
+       - Gap: 2 spaces (`34 + 2 + 40 = 76` inner cols).
+       - Right column (40 chars max, 13 lines; note `& features` is intentionally shortened to `Push selected component` to fit 80 cols, and `Enter` connect confirm + `Ctrl+C` are included):
+         - ` Zoom` (heading)
+         - ` + / =  Zoom in`
+         - ` -      Zoom out`
+         - ` Sync & Display` (heading)
+         - ` r / S  Pull status from active adapters`
+         - ` p      Push selected component`
+         - ` t      Switch RON theme`
+         - ` General` (heading)
+         - ` ?      Toggle this keyboard help`
+         - ` Esc    Cancel current mode`
+         - ` Enter  Confirm connect target`
+         - ` q      Quit`
+         - ` Ctrl+C Force quit`
+  3. Unit tests in `src/tui/ui.rs`:
+     - Update `render_three_column_layout_displays_header_list_and_details` and `render_help_and_theme_switcher_modals_display_entries_and_footer_hints` for the new real-case mnemonic footer (verifying `view MD`, `r/S sync`, `push`, `theme`, `? help`, and absence of `[v] Edit MD` / `[r/S] Sync`).
+     - Add `render_footer_uses_real_case_underlined_mnemonics_and_fits_80_cols`: verifies hotkey cells on the footer row carry `Modifier::UNDERLINED` in their real case (`n`, `e`, `E`, `q`, etc.), and at `80x24` the core hints (`? help`, `quit`, `new`, `edit`) are rendered without clipping.
+     - Update `render_help_modal_fits_80x24_without_wrapping_or_footer_clipping`: verifies separate per-action rows (`New component`, `Add sub-comp`, `Edit component`, `Edit edge`, `Delete component`, `Delete edge`, `Zoom in`, `Zoom out`, `Expand/collapse`, `Confirm connect target`, `Force quit`, and `[Esc/?/Enter/q] Close`) are all visible at `80x24` and the old combined row `New component / Edit component / Edit edge` does NOT appear in the rendered buffer.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'UNDERLINED' src/tui/ui.rs && grep -q 'fn render_footer_uses_real_case_underlined_mnemonics_and_fits_80_cols' src/tui/ui.rs && grep -q 'fn render_help_modal_fits_80x24_without_wrapping_or_footer_clipping' src/tui/ui.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12C: Documentation Update (`README.md`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12C: Update README.md to split the local release build into its own code block, convert TUI Keyboard Reference to per-key rows, and document connect direction/toggle, sub-components, lightweight archetypes, zoom controls, effective grid floor, and top-center placement.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - README.md
+READ_ONLY_REFS:
+  - README.md:1-160 (Installation, TUI Keyboard Reference, Workspace Layout)
+  - src/tui/app.rs:590-650 (connect toggle/remove, first_unoccupied_grid_pos top-center, effective_grid)
+  - src/tui/app.rs:1356-1565 (active keybindings and connect prompt)
+  - src/model.rs:10-98 (ComponentKind, EdgeKind, Component::parent_id)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not remove existing CLI Reference, RON Themes, or External Adapters sections.
+  - No references to the string "nebulous" (case-insensitive) anywhere in README.md.
+
+[PRE_GATE]
+grep -qE 'pub fn zoom_in\b' src/tui/app.rs && test -s README.md
+
+[MUTATION_SPEC]
+Goal:
+  Bring `README.md` into full parity with Phase 11 and Phase 12 behavior.
+
+Contract & Behavior:
+  1. `README.md` — `## Installation`:
+     - Split `cargo build --release --locked` out of the `cargo install --path . --locked` fenced code block into its own separate fenced `bash` code block (with a brief heading/note explaining it builds `target/release/rf` without installing).
+  2. `README.md` — `## TUI Keyboard Reference`:
+     - Convert ALL FOUR grouped multi-action rows (`n` / `e` / `E`, `d` / `D`, `m` / `c`, `Esc` / `q`) into individual per-key rows, keeping only truly identical/alias bindings grouped (`Tab` / `Shift+Tab`, `hjkl` / Arrows, `Space` / `Enter`, `+` / `=`, `r` / `S`).
+     - Document:
+       - `a`: Add a sub-component under the selected component.
+       - `Space` / `Enter`: Expand or collapse sub-components of the selected parent card (with automatic collision shifting on expand).
+       - `+` / `=`: Zoom in (`Compact` → `Normal` → `Expanded`; defaults to `Compact`, fitting >=4×4 cards on `>= 114x26` terminals).
+       - `-`: Zoom out (`Expanded` → `Normal` → `Compact`).
+       - `c`: Connect components — explicitly state both direction (`<A> depends on <target>`, i.e. `from = <A>`, `to = <target>`) and toggle behavior (confirming `c` on an already-connected target removes the existing edge).
+       - `Enter` (in Connect mode): Confirm connect target.
+       - `Ctrl+C`: Force quit.
+       - New top-level components (`n`) default to top-center placement on the canvas.
+     - Add a brief note under Modal Controls covering `a` (New Sub-Component), mutable archetypes and `Add Sub-component` in `e` (Edit Component), and `EdgeKind::Contains` in `E` (Edit Edge) to ingest/detach existing cards as sub-components.
+  3. `README.md` — `## Workspace Layout`:
+     - Add `contains` to the documented `connections` `kind` list (`depends_on` | `data_flow` | `renders` | `invokes` | `contains` | `custom`).
+     - Document the `grid` effective floor: `.rocket/project.toml` defaults to `8` × `6`, the canvas uses an effective grid floor of at least the visible canvas capacity (minus sidebars), and `project.toml` expands when a card is placed or moved beyond the saved bounds.
+     - Document optional `parent_id` on `.rocket/components/<id>.toml`.
+     - Document the lightweight prototyping `kind` values (`concept` default, `interface`, `logic`, `data`, `integration`, `custom`) and note backwards compatibility with legacy `kind` values (`ui_view`, `data_stream`, `service_core`, `cli_tool`, `storage`).
+
+[POST_GATE]
+test -s README.md && awk '/cargo install --path \. --locked/{in_install=1} /^```$/ && in_install{in_install=0; saw_close=1} /cargo build --release --locked/{if (saw_close) ok=1} END{exit !ok}' README.md && grep -q 'depends on <target>' README.md && grep -q 'parent_id' README.md && grep -q 'Compact' README.md && grep -q 'contains' README.md && grep -q 'concept' README.md && grep -q 'interface' README.md && grep -q 'integration' README.md && grep -qi 'top-center' README.md && ! grep -q '`n` / `e` / `E`' README.md && ! grep -q '`d` / `D`' README.md && ! grep -q '`m` / `c`' README.md && ! grep -q '`Esc` / `q`' README.md && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' README.md
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12D: End-to-End Integration Tests for Phase 11 & Phase 12 Workflows
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12D: Add end-to-end integration tests in tests/e2e.rs covering sub-component creation/ingestion, expand/collapse collision shifting, mutable archetypes, zoom levels with canvas-rect assertions, underlined footer mnemonics, top-center placement, and connect semantics.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - tests/e2e.rs:1-60 (helper functions buffer_to_string, render_app)
+  - src/tui/app.rs:326-375 (toggle_expand_selected)
+  - src/tui/app.rs:515-535 (move_selected_card checks all components including hidden children)
+  - src/tui/app.rs:880-1215 (CreateComponent, UpdateComponent, UpdateConnection)
+  - src/tui/app.rs:1409-1435 (`E` edits first outgoing connection from selected component)
+  - src/tui/canvas.rs:15-100 (ZoomLevel, CanvasViewport, visible_grid_capacity_for)
+  - src/tui/ui.rs:18-52 (column_layout)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify or weaken any existing E2E test in `tests/e2e.rs`.
+  - No references to the string "nebulous" (case-insensitive) anywhere in tests/.
+  - Use reserved placeholder names/domains/IPs only (`testuser`, `example.com`, `192.0.2.x`).
+
+[PRE_GATE]
+grep -qE 'pub enum ZoomLevel\b' src/tui/canvas.rs && grep -q 'UNDERLINED' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal:
+  Provide full disk-backed + rendered-TUI end-to-end regression coverage for every feature introduced in Phase 11 and Phase 12.
+
+Contract & Behavior:
+  Add four E2E integration tests to `tests/e2e.rs`:
+  1. `e2e_sub_component_creation_expand_collapse_and_collision_shifting`:
+     - Initialize a tempdir workspace with parent `api_gateway` at `(0, 0)` and neighbor `auth_svc` at `(1, 0)`.
+     - Drive the TUI with `a` on `api_gateway` to create sub-component `rate_limiter` (`Rate Limiter`); assert `rate_limiter` is persisted on disk with `parent_id == Some("api_gateway")`, placed near `api_gateway` without colliding with `auth_svc`, and visible on the canvas with `[-1]` badge on `api_gateway`.
+     - Press `Space` on `api_gateway` to collapse; assert `rate_limiter` is hidden from `visible_component_indices()` and rendered canvas shows `[+1]`.
+     - Seed the collision by saving `auth_svc` at `rate_limiter`'s `GridPos` via `storage::save_component` and reloading via `storage::load_project` (since `m` prevents moving onto hidden cards), then press `Space` on `api_gateway` to expand; assert `rate_limiter` is revealed, `auth_svc` was shifted to a distinct unoccupied cell and persisted to disk, no two visible components share a `GridPos`, and `storage::load_project` reloads the hierarchy and shifted positions intact.
+  2. `e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics`:
+     - Initialize a tempdir workspace with `frontend` (`Concept`, custom description and markdown body), `backend` (`Concept`), and `widget_lib` (`Concept`).
+     - Drive `c` on `frontend`, navigate to `backend`, and press `Enter`: assert the connect prompt contains `"depends on <target>"`, confirmation contains `"frontend depends on backend"`, and persisted `.rocket/project.toml` has `Connection { from: "frontend", to: "backend", kind: EdgeKind::DependsOn, .. }`.
+     - Reselect `frontend` (since connect leaves selection on `backend`) and delete `frontend -> backend` via `D` + `y` so `E` targets the next outgoing edge cleanly (or use a separate source).
+     - Drive `e` on `frontend`: change archetype to `Interface` and enter a new sub-component name in `Add Sub-component`; save and assert `frontend.kind == ComponentKind::Interface`, `frontend.description` and `frontend.markdown_body` are preserved, and the new sub-component is persisted with `parent_id == Some("frontend")`.
+     - Reselect `frontend`, connect `frontend` -> `widget_lib` (`c` + navigate + `Enter`), reselect `frontend`, and drive `E` to set `EdgeKind::Contains`; assert `widget_lib.parent_id == Some("frontend")` on disk; then drive `E` again on `frontend` to change the edge to `EdgeKind::DependsOn` and assert `widget_lib.parent_id == None` on disk.
+  3. `e2e_canvas_zoom_levels_and_compact_4x4_capacity`:
+     - Initialize a tempdir workspace with 16 components with short names (<=10 chars, e.g. `C00`..`C33`) arranged across `(col: 0..4, row: 0..4)`.
+     - Assert `App::new` defaults to `ZoomLevel::Compact`.
+     - Render at `140x40`, slice the buffer strictly to the middle canvas rect (`column_layout(Rect::new(0, 3, 140, 36))[1]`), and assert `[Compact]` appears in the canvas title and all 16 short card names (`C00`..`C33`) appear inside the canvas rect (proving 4×4 canvas capacity rather than reading from the Component List).
+     - Drive `+` (zoom to `Normal`, assert `[Normal]`), `=` (zoom to `Expanded`, assert `[Expanded]`), and `-` twice (return to `Compact`, assert `[Compact]`).
+     - Inspect the bottom footer row (`y = 39`) of the rendered buffer and assert hotkey cells carry `Modifier::UNDERLINED` (and legacy `[v] Edit MD` brackets are absent).
+  4. `e2e_top_center_default_placement_and_grid_expansion_persists`:
+     - Initialize an empty tempdir workspace, launch `App`, render once at `140x40`, then drive `n` to create a top-level component `core_hub`; assert `core_hub.position.row == 0` and `core_hub.position.col > 0` (top-center, not `(0, 0)`), and verify `storage::load_project` reloads the same position from disk.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_sub_component_creation_expand_collapse_and_collision_shifting' tests/e2e.rs && grep -q 'fn e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics' tests/e2e.rs && grep -q 'fn e2e_canvas_zoom_levels_and_compact_4x4_capacity' tests/e2e.rs && grep -q 'fn e2e_top_center_default_placement_and_grid_expansion_persists' tests/e2e.rs && ! grep -rqi 'nebulous' tests/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
