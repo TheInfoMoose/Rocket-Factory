@@ -5,8 +5,14 @@ tech_stack = []
 description = "Default unscoped triage inbox"
 
 [items]
-bugs = []
 features = []
+
+[[items.bugs]]
+id = "BUG-0001"
+title = "Fix edge label overwriting arrowhead in render_canvas"
+status = "pending"
+severity = "high"
+created_at = "2026-11-22T00:59:05Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -123,7 +129,7 @@ created_at = "2026-11-22T00:53:04Z"
 [[items.tasks]]
 id = "TASK-0017"
 title = "canvas"
-status = "open"
+status = "pending"
 severity = "medium"
 created_at = "2026-11-22T00:53:04Z"
 
@@ -133,3 +139,10 @@ title = "canvas"
 status = "open"
 severity = "medium"
 created_at = "2026-11-22T00:53:04Z"
+
+[[items.tasks]]
+id = "TASK-0019"
+title = "Include src/tui/canvas.rs fix for STEP 4C connector arrow rendering"
+status = "pending"
+severity = "high"
+created_at = "2026-11-22T00:59:05Z"
