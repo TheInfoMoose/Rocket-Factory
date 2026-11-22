@@ -352,10 +352,62 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let footer = Paragraph::new(
-        " [Tab] Focus [n/e/E] Edit [v] Edit MD [f] Gaps [m] Move [c] Conn [r/S] Sync [p] Push [t] Theme [?] Help [q] Quit",
-    )
-    .style(style::muted_style(&app.theme));
+    let label_style = style::muted_style(&app.theme);
+    let key_style = Style::default()
+        .fg(style::to_color(app.theme.palette.accent))
+        .add_modifier(Modifier::UNDERLINED);
+
+    let core_items: &[&[(&str, bool)]] = &[
+        &[("Tab", true), (" focus", false)],
+        &[("n", true), ("ew", false)],
+        &[("e", true), ("dit", false)],
+        &[("m", true), ("ove", false)],
+        &[("c", true), ("onn", false)],
+        &[("f", true), ("ilter", false)],
+        &[("+/-", true), (" zoom", false)],
+        &[("?", true), (" help", false)],
+        &[("q", true), ("uit", false)],
+    ];
+    let extended_items: &[&[(&str, bool)]] = &[
+        &[("a", true), ("dd sub", false)],
+        &[("E", true), ("dit edge", false)],
+        &[("v", true), ("iew MD", false)],
+        &[("r", true), ("/", false), ("S", true), (" sync", false)],
+        &[("p", true), ("ush", false)],
+        &[("t", true), ("heme", false)],
+    ];
+
+    let max_width = usize::from(area.width);
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(" ", label_style)];
+    let mut used_width: usize = 1;
+
+    for (idx, item) in core_items.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled("  ", label_style));
+            used_width += 2;
+        }
+        for &(text, is_key) in *item {
+            let st = if is_key { key_style } else { label_style };
+            spans.push(Span::styled(text, st));
+            used_width += text.chars().count();
+        }
+    }
+
+    for item in extended_items {
+        let item_width: usize = item.iter().map(|(text, _)| text.chars().count()).sum();
+        if used_width + 2 + item_width > max_width {
+            break;
+        }
+        spans.push(Span::styled("  ", label_style));
+        used_width += 2;
+        for &(text, is_key) in *item {
+            let st = if is_key { key_style } else { label_style };
+            spans.push(Span::styled(text, st));
+        }
+        used_width += item_width;
+    }
+
+    let footer = Paragraph::new(Line::from(spans)).style(label_style);
     frame.render_widget(footer, area);
 }
 
@@ -494,61 +546,68 @@ fn render_modal(
             form.error.as_deref()
         }
         ModalState::Help => {
-            lines.push(Line::from(Span::styled("  Navigation", heading_style)));
-            lines.push(Line::from(Span::styled(
-                "    Tab / Shift+Tab   Cycle focus (List / Canvas / Detail)",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    hjkl / Arrows     Move selection / Scroll detail",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    f                 Toggle Gaps Only filter",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "  Editing & Canvas",
-                heading_style,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    n / e / E         New component / Edit component / Edit edge",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    d / D             Delete component / Delete edge",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    m / c             Move card mode / Connect components",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    v                 Open component Markdown in $EDITOR",
-                base,
-            )));
-            lines.push(Line::from(Span::styled("  Sync & Display", heading_style)));
-            lines.push(Line::from(Span::styled(
-                "    r / S             Pull status from active adapters",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    p                 Push selected component & features",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    t                 Switch RON theme",
-                base,
-            )));
-            lines.push(Line::from(Span::styled("  General", heading_style)));
-            lines.push(Line::from(Span::styled(
-                "    ?                 Toggle this keyboard help",
-                base,
-            )));
-            lines.push(Line::from(Span::styled(
-                "    Esc / q           Cancel mode / Quit",
-                base,
-            )));
+            const LEFT_COL_WIDTH: usize = 34;
+            let left_rows: &[(&str, bool)] = &[
+                (" Navigation", true),
+                (" Tab / Shift+Tab  Cycle focus", false),
+                (" hjkl / Arrows    Move / Scroll", false),
+                (" f                Gaps Only filter", false),
+                (" Space / Enter    Expand/collapse", false),
+                (" Editing & Canvas", true),
+                (" n                New component", false),
+                (" a                Add sub-comp", false),
+                (" e                Edit component", false),
+                (" E                Edit edge", false),
+                (" d                Delete component", false),
+                (" D                Delete edge", false),
+                (" m                Move card mode", false),
+                (" c                Connect cards", false),
+                (" v                Edit Markdown", false),
+            ];
+            let right_rows: &[(&str, bool)] = &[
+                (" Zoom", true),
+                (" + / =  Zoom in", false),
+                (" -      Zoom out", false),
+                (" Sync & Display", true),
+                (" r / S  Pull status from active adapters", false),
+                (" p      Push selected component", false),
+                (" t      Switch RON theme", false),
+                (" General", true),
+                (" ?      Toggle this keyboard help", false),
+                (" Esc    Cancel current mode", false),
+                (" Enter  Confirm connect target", false),
+                (" q      Quit", false),
+                (" Ctrl+C Force quit", false),
+            ];
+
+            let total_rows = left_rows.len().max(right_rows.len());
+            for row_idx in 0..total_rows {
+                let left = left_rows.get(row_idx).copied();
+                let right = right_rows.get(row_idx).copied();
+                match (left, right) {
+                    (Some((l_text, l_heading)), Some((r_text, r_heading))) => {
+                        let l_style = if l_heading { heading_style } else { base };
+                        let r_style = if r_heading { heading_style } else { base };
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("{l_text:<LEFT_COL_WIDTH$}"), l_style),
+                            Span::styled("  ", base),
+                            Span::styled(r_text, r_style),
+                        ]));
+                    }
+                    (Some((l_text, l_heading)), None) => {
+                        let l_style = if l_heading { heading_style } else { base };
+                        lines.push(Line::from(Span::styled(l_text, l_style)));
+                    }
+                    (None, Some((r_text, r_heading))) => {
+                        let r_style = if r_heading { heading_style } else { base };
+                        lines.push(Line::from(vec![
+                            Span::styled(" ".repeat(LEFT_COL_WIDTH + 2), base),
+                            Span::styled(r_text, r_style),
+                        ]));
+                    }
+                    (None, None) => {}
+                }
+            }
             None
         }
         ModalState::ThemeSwitcher(form) => {
@@ -638,7 +697,7 @@ fn render_modal(
     };
     let popup_width = ((u32::from(area.width) * 60 / 100) as u16)
         .max(content_width)
-        .clamp(54, 76)
+        .clamp(54, 78)
         .min(max_popup_width);
     let popup_height = (lines.len() as u16).saturating_add(2);
     let popup_area = centered_rect(popup_width, popup_height, area);
@@ -753,7 +812,8 @@ mod tests {
         assert!(text.contains("Snap Grid"));
         assert!(text.contains("Component Details"));
         assert!(text.contains("view_box"));
-        assert!(text.contains("[v] Edit MD"));
+        assert!(text.contains("view MD"));
+        assert!(!text.contains("[v] Edit MD"));
     }
 
     #[test]
@@ -855,10 +915,13 @@ mod tests {
     fn render_help_and_theme_switcher_modals_display_entries_and_footer_hints() {
         let mut app = make_test_app();
         let base_text = render_to_string(&mut app);
-        assert!(base_text.contains("[r/S] Sync"));
-        assert!(base_text.contains("[p] Push"));
-        assert!(base_text.contains("[t] Theme"));
-        assert!(base_text.contains("[?] Help"));
+        assert!(base_text.contains("view MD"));
+        assert!(base_text.contains("r/S sync"));
+        assert!(base_text.contains("push"));
+        assert!(base_text.contains("theme"));
+        assert!(base_text.contains("? help"));
+        assert!(!base_text.contains("[v] Edit MD"));
+        assert!(!base_text.contains("[r/S] Sync"));
 
         // Help modal
         app.modal = Some(ModalState::help());
@@ -883,6 +946,57 @@ mod tests {
     }
 
     #[test]
+    fn render_footer_uses_real_case_underlined_mnemonics_and_fits_80_cols() {
+        let mut app = make_test_app();
+
+        // 120x35: verify all core + extended hotkeys are underlined in their real case
+        let backend_wide = TestBackend::new(120, 35);
+        let mut terminal_wide = Terminal::new(backend_wide).unwrap();
+        terminal_wide.draw(|frame| render(frame, &mut app)).unwrap();
+        let buf_wide = terminal_wide.backend().buffer();
+        let footer_y = buf_wide.area.height - 1;
+        let footer_row: String = (0..buf_wide.area.width)
+            .map(|x| buf_wide[(x, footer_y)].symbol())
+            .collect();
+        let underlined_chars: String = (0..buf_wide.area.width)
+            .filter(|&x| {
+                buf_wide[(x, footer_y)]
+                    .modifier
+                    .contains(Modifier::UNDERLINED)
+            })
+            .map(|x| buf_wide[(x, footer_y)].symbol())
+            .collect();
+
+        assert!(!footer_row.contains('['));
+        assert!(!footer_row.contains(']'));
+        assert!(footer_row.contains("Tab focus"));
+        assert!(footer_row.contains("Edit edge"));
+        assert!(footer_row.contains("r/S sync"));
+        assert!(underlined_chars.contains("Tab"));
+        assert!(underlined_chars.contains('n'));
+        assert!(underlined_chars.contains('e'));
+        assert!(underlined_chars.contains('E'));
+        assert!(underlined_chars.contains('r'));
+        assert!(underlined_chars.contains('S'));
+        assert!(underlined_chars.contains('q'));
+
+        // 80x24: verify core hints fit without clipping
+        let backend_80 = TestBackend::new(80, 24);
+        let mut terminal_80 = Terminal::new(backend_80).unwrap();
+        terminal_80.draw(|frame| render(frame, &mut app)).unwrap();
+        let buf_80 = terminal_80.backend().buffer();
+        let footer_y_80 = buf_80.area.height - 1;
+        let footer_row_80: String = (0..buf_80.area.width)
+            .map(|x| buf_80[(x, footer_y_80)].symbol())
+            .collect();
+        assert!(footer_row_80.contains("Tab focus"));
+        assert!(footer_row_80.contains("new"));
+        assert!(footer_row_80.contains("edit"));
+        assert!(footer_row_80.contains("? help"));
+        assert!(footer_row_80.contains("quit"));
+    }
+
+    #[test]
     fn render_help_modal_fits_80x24_without_wrapping_or_footer_clipping() {
         let mut app = make_test_app();
         app.modal = Some(ModalState::help());
@@ -900,9 +1014,19 @@ mod tests {
         }
 
         assert!(text.contains("Keyboard Help"));
-        assert!(text.contains("New component / Edit component / Edit edge"));
-        assert!(text.contains("Delete component / Delete edge"));
+        assert!(text.contains("New component"));
+        assert!(text.contains("Add sub-comp"));
+        assert!(text.contains("Edit component"));
+        assert!(text.contains("Edit edge"));
+        assert!(text.contains("Delete component"));
+        assert!(text.contains("Delete edge"));
+        assert!(text.contains("Zoom in"));
+        assert!(text.contains("Zoom out"));
+        assert!(text.contains("Expand/collapse"));
+        assert!(text.contains("Confirm connect target"));
+        assert!(text.contains("Force quit"));
         assert!(text.contains("[Esc/?/Enter/q] Close"));
+        assert!(!text.contains("New component / Edit component / Edit edge"));
     }
 
     #[test]
