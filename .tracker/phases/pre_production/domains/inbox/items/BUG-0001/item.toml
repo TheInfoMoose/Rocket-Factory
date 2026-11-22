@@ -2,11 +2,11 @@
 id = "BUG-0001"
 type = "bug"
 title = "Fix edge label overwriting arrowhead in render_canvas"
-status = "pending"
+status = "open"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-22T00:59:05Z"
-updated_at = "2026-11-22T00:59:13Z"
+updated_at = "2026-11-22T01:37:28Z"
 
 [effort]
 logged_time_minutes = 0

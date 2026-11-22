@@ -10,7 +10,7 @@ features = []
 [[items.bugs]]
 id = "BUG-0001"
 title = "Fix edge label overwriting arrowhead in render_canvas"
-status = "pending"
+status = "open"
 severity = "high"
 created_at = "2026-11-22T00:59:05Z"
 
@@ -129,20 +129,62 @@ created_at = "2026-11-22T00:53:04Z"
 [[items.tasks]]
 id = "TASK-0017"
 title = "canvas"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T00:53:04Z"
 
 [[items.tasks]]
 id = "TASK-0018"
 title = "canvas"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T00:53:04Z"
 
 [[items.tasks]]
 id = "TASK-0019"
 title = "Include src/tui/canvas.rs fix for STEP 4C connector arrow rendering"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T00:59:05Z"
+
+[[items.tasks]]
+id = "TASK-0020"
+title = "canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"
+
+[[items.tasks]]
+id = "TASK-0021"
+title = "canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"
+
+[[items.tasks]]
+id = "TASK-0022"
+title = "canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"
+
+[[items.tasks]]
+id = "TASK-0023"
+title = "modal"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"
+
+[[items.tasks]]
+id = "TASK-0024"
+title = "modal"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"
+
+[[items.tasks]]
+id = "TASK-0025"
+title = "editor"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T01:37:28Z"

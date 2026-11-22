@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0017"
 type = "task"
 title = "canvas"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T00:53:04Z"
-updated_at = "2026-11-22T01:20:42Z"
+updated_at = "2026-11-22T01:37:28Z"
 source_ref = "STEP 4C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 39
 iteration_count = 1
+last_timer_session = "TASK-0017@2026-11-22T00:57:47Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "b22518c"
+summary = "Withdrawn: re-split into STEP 4E and STEP 4F"
