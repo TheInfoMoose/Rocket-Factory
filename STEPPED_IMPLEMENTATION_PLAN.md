@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 2):** Implement pluggable external adapter configuration, subprocess push/pull execution with task-status reconciliation, and the headless `rf` CLI (`init`, `audit`, `export`, `push`, `pull`) backed by the `rocket_factory` core library — with zero references to any specific external tracker in `src/`.
+**Phase goal (Phase 3):** Build the Ratatui TUI shell, terminal lifecycle manager, keyboard-driven `App` state machine, CRT-amber style adapter, and top-down 3-column layout (header bar, filterable Left Column component list with gap indicators, Middle Column canvas frame, Right Column component detail breakdown) wired into `rf` — with zero references to any specific external tracker in `src/`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 2A** | `/goal` | adapter | `src/adapter.rs`, `src/error.rs`, `src/lib.rs` | — |
-| 2 | **STEP 2B** | `/goal` | adapter | `src/adapter.rs` | STEP 2A |
-| 3 | **STEP 2C** | `/goal` | cli | `Cargo.toml`, `Cargo.lock`, `src/cli.rs`, `src/lib.rs` | STEP 2B |
-| 4 | **STEP 2D** | `/goal` | cli | `Cargo.toml`, `src/main.rs` | STEP 2C |
+| 1 | **STEP 3A** | `/goal` | tui | `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/tui/mod.rs`, `src/tui/app.rs` | — |
+| 2 | **STEP 3B** | `/goal` | tui | `src/tui/style.rs`, `src/tui/mod.rs` | STEP 3A |
+| 3 | **STEP 3C** | `/goal` | tui | `src/tui/ui.rs`, `src/tui/mod.rs` | STEP 3B |
+| 4 | **STEP 3D** | `/goal` | tui | `src/tui/terminal.rs`, `src/tui/mod.rs`, `src/main.rs` | STEP 3C |
 
 ### Completed
 
@@ -41,16 +41,15 @@
 | **STEP 1D** | Done (`d9d4c45`) | `/goal` | audit | `src/audit.rs`, `src/lib.rs` |
 | **STEP 1E** | Done (`8659ced`) | `/goal` | export | `src/export.rs`, `src/lib.rs` |
 | **STEP 1F** | Done (`3d4b5b0`) | `/goal` | theme | `src/theme.rs`, `src/lib.rs` |
+| **STEP 2A** | Done (`c5c78e7`) | `/goal` | adapter | `src/adapter.rs`, `src/error.rs`, `src/lib.rs` |
+| **STEP 2B** | Done (`56aca5a`) | `/goal` | adapter | `src/adapter.rs` |
+| **STEP 2C** | Done (`94cdbb8`) | `/goal` | cli | `Cargo.toml`, `Cargo.lock`, `src/cli.rs`, `src/lib.rs` |
+| **STEP 2D** | Done (`eb80b6e`) | `/goal` | cli | `Cargo.toml`, `src/main.rs` |
 
 ### Future phases
 
 Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write` and `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase).
 
-- **Phase 3: TUI Shell, 3-Column Layout & Component List**
-  - Terminal lifecycle manager (raw mode, alternate screen, panic restore hook, suspend/resume for `$EDITOR`)
-  - Application state machine (`FocusColumn`, `InputMode`, filter/audit toggles, keyboard dispatcher)
-  - Header bar widget and Left Column filterable component list with coverage gap indicators
-  - Right Column component detail breakdown view (metadata, connections, feature checklist, themed Markdown preview)
 - **Phase 4: Snap Grid Canvas & Orthogonal Vector Connectors**
   - Cell-based snap grid viewport (panning, cell coordinates, routing gutters)
   - Component card widget (name, status badge, progress `done/total`, brief description, themed status border)
@@ -622,6 +621,268 @@ grep -qE 'pub fn execute_command\b' src/cli.rs && grep -qE 'pub struct Cli\b' sr
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo run --quiet --bin rf -- --help | grep -qE 'Rocket Factory' && ! grep -rqi 'nebulous' src/ Cargo.toml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 3 Step Blocks
+
+### STEP 3A: Ratatui Dependencies and TUI Application State Machine
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 3A: Add ratatui and crossterm to Cargo.toml and implement the TUI App state machine and keyboard dispatcher in src/tui/app.rs and src/tui/mod.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - Cargo.lock
+  - src/lib.rs
+  - src/tui/mod.rs (NEW)
+  - src/tui/app.rs (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml:1-25 (dependencies)
+  - src/lib.rs:1-12 (module declarations)
+  - src/model.rs:1-140 (Project, Component, CardStatus)
+  - src/audit.rs:1-85 (AuditFinding, compute_card_status, audit_project)
+  - src/theme.rs:1-45 (Theme)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No rendering widgets or terminal raw-mode I/O in src/tui/app.rs (belongs to STEP 3C and STEP 3D).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or Cargo.toml.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn audit_project\b' src/audit.rs && grep -qE 'pub struct Theme\b' src/theme.rs
+
+[MUTATION_SPEC]
+1. Cargo.toml:21 — anchor `clap = { version = "4", features = ["derive"] }` → add directly beneath it:
+   - `ratatui = "0.29"`
+   - `crossterm = "0.28"`
+2. src/lib.rs:8 — anchor `pub mod theme;` → add `pub mod tui;` directly beneath it.
+3. src/tui/mod.rs (NEW) — declare `pub mod app;` and re-export `pub use app::{App, FocusColumn, InputMode, ListFilter};`.
+4. src/tui/app.rs (NEW) — define TUI state types and pure keyboard handler:
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum FocusColumn { List, Canvas, Detail }`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum InputMode { Navigate, MoveCard, Connect, Modal }`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum ListFilter { All, GapsOnly }`
+   - `#[derive(Debug, Clone)] pub struct App`:
+     - `pub root: std::path::PathBuf`
+     - `pub project: crate::model::Project`
+     - `pub theme: crate::theme::Theme`
+     - `pub focus: FocusColumn`
+     - `pub mode: InputMode`
+     - `pub filter: ListFilter`
+     - `pub selected_index: usize`
+     - `pub detail_scroll: u16`
+     - `pub status_message: String`
+     - `pub should_quit: bool`
+     - `pub audit_findings: Vec<crate::audit::AuditFinding>`
+   - `impl App`:
+     - `pub fn new(root: std::path::PathBuf, project: Project, theme: Theme) -> Self`: initializes `focus: FocusColumn::List`, `mode: InputMode::Navigate`, `filter: ListFilter::All`, `selected_index: 0`, `detail_scroll: 0`, `status_message: "Ready".to_string()`, `should_quit: false`, and computes `audit_findings = crate::audit::audit_project(&project)`.
+     - `pub fn refresh_audit(&mut self)`: recomputes `self.audit_findings = crate::audit::audit_project(&self.project)`.
+     - `pub fn gap_count(&self) -> usize`: returns count of `self.project.components` whose `crate::audit::compute_card_status(c) == crate::model::CardStatus::Gap`.
+     - `pub fn visible_component_indices(&self) -> Vec<usize>`: if `self.filter == ListFilter::All`, returns `(0..self.project.components.len()).collect()`; if `ListFilter::GapsOnly`, returns indices where `compute_card_status(&self.project.components[i]) == CardStatus::Gap`.
+     - `pub fn selected_component(&self) -> Option<&crate::model::Component>`: uses `visible_component_indices()` and returns the component at `indices.get(self.selected_index)`.
+     - `pub fn clamp_selection(&mut self)`: clamps `self.selected_index` to `0` if `visible_component_indices()` is empty, else `self.selected_index.min(len - 1)`.
+     - `pub fn select_next(&mut self)`: advances `selected_index` wrapping modulo `visible.len()` (no-op if empty) and resets `detail_scroll = 0`.
+     - `pub fn select_prev(&mut self)`: decrements `selected_index` wrapping modulo `visible.len()` (no-op if empty) and resets `detail_scroll = 0`.
+     - `pub fn cycle_focus_next(&mut self)`: `List -> Canvas -> Detail -> List`.
+     - `pub fn cycle_focus_prev(&mut self)`: `List -> Detail -> Canvas -> List`.
+     - `pub fn toggle_gaps_filter(&mut self)`: toggles `All <-> GapsOnly`, calls `clamp_selection()`, resets `detail_scroll = 0`, and updates `status_message` to `"Filter: Gaps Only"` or `"Filter: All Components"`.
+     - `pub fn handle_key(&mut self, key: crossterm::event::KeyEvent)`:
+       - `Ctrl+c` or `KeyCode::Char('q')` (when `mode != InputMode::Modal`) → sets `self.should_quit = true`.
+       - `KeyCode::Esc` → sets `self.mode = InputMode::Navigate` and `self.status_message = "Mode: Navigate".to_string()`.
+       - `KeyCode::Tab` → `self.cycle_focus_next()`.
+       - `KeyCode::BackTab` → `self.cycle_focus_prev()`.
+       - `KeyCode::Char('f')` → `self.toggle_gaps_filter()`.
+       - `KeyCode::Char('m')` → sets `self.mode = InputMode::MoveCard` and `self.status_message = "Mode: Move Card".to_string()`.
+       - `KeyCode::Char('c')` → sets `self.mode = InputMode::Connect` and `self.status_message = "Mode: Connect".to_string()`.
+       - `KeyCode::Down | KeyCode::Char('j')` → if `self.focus == FocusColumn::Detail`, increments `self.detail_scroll = self.detail_scroll.saturating_add(1)`; else calls `self.select_next()`.
+       - `KeyCode::Up | KeyCode::Char('k')` → if `self.focus == FocusColumn::Detail`, decrements `self.detail_scroll = self.detail_scroll.saturating_sub(1)`; else calls `self.select_prev()`.
+5. Tests in `src/tui/app.rs`:
+   - `app_cycles_focus_and_quits_on_q`: create `App` with 2 components; send `Tab` (assert `Canvas`), `Tab` (assert `Detail`), `BackTab` (assert `Canvas`), `Char('q')` (assert `app.should_quit`).
+   - `app_gaps_filter_narrows_visible_components`: create `App` with `"tracked"` (1 `Complete` external task) and `"view_box"` (0 features, 0 tasks); assert `app.gap_count() == 1` and `app.visible_component_indices() == vec![0, 1]`; send `Char('f')`; assert `app.visible_component_indices() == vec![1]` and `app.selected_component().unwrap().id == "view_box"`.
+   - `app_detail_focus_scrolls_instead_of_changing_selection`: set `app.focus = FocusColumn::Detail`, send `Char('j')` twice then `Char('k')` once; assert `app.detail_scroll == 1` and `app.selected_index == 0`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct App\b' src/tui/app.rs && grep -qE 'pub fn handle_key\b' src/tui/app.rs && ! grep -rqi 'nebulous' src/ Cargo.toml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 3B: Ratatui Theme Style Adapter
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 3B: Implement CRT amber Ratatui color and Markdown styling helpers in src/tui/style.rs and expose them from src/tui/mod.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/style.rs (NEW)
+  - src/tui/mod.rs
+READ_ONLY_REFS:
+  - src/theme.rs:1-70 (RgbColor, ThemePalette, Theme, default_theme)
+  - src/model.rs:40-50 (CardStatus)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct App\b' src/tui/app.rs && grep -qE 'ratatui =' Cargo.toml
+
+[MUTATION_SPEC]
+1. src/tui/mod.rs:1 — anchor `pub mod app;` → add `pub mod style;` directly beneath `pub mod app;`.
+2. src/tui/style.rs (NEW) — implement pure Ratatui style mapping functions:
+   - `pub fn to_color(c: crate::theme::RgbColor) -> ratatui::style::Color`: returns `Color::Rgb(c.r, c.g, c.b)`.
+   - `pub fn base_style(theme: &Theme) -> Style`: `Style::default().fg(to_color(theme.palette.foreground)).bg(to_color(theme.palette.background))`.
+   - `pub fn muted_style(theme: &Theme) -> Style`: `Style::default().fg(to_color(theme.palette.muted)).bg(to_color(theme.palette.background))`.
+   - `pub fn header_style(theme: &Theme) -> Style`: `Style::default().fg(to_color(theme.palette.background)).bg(to_color(theme.palette.foreground)).add_modifier(Modifier::BOLD)`.
+   - `pub fn panel_border_style(theme: &Theme, focused: bool) -> Style`: returns `Style::default().fg(to_color(if focused { theme.palette.border_focused } else { theme.palette.border_default }))`.
+   - `pub fn selected_row_style(theme: &Theme) -> Style`: `Style::default().fg(to_color(theme.palette.background)).bg(to_color(theme.palette.accent)).add_modifier(Modifier::BOLD)`.
+   - `pub fn card_border_color(theme: &Theme, status: CardStatus) -> Color`: maps `CardStatus::Gap => status_gap`, `CardStatus::Planned => status_planned`, `CardStatus::InProgress => status_in_progress`, `CardStatus::Blocked => status_blocked`, `CardStatus::Complete => status_complete` through `to_color`.
+   - `pub fn status_glyph(status: CardStatus) -> &'static str`: maps `Gap => "[!]"`, `Planned => "[ ]"`, `InProgress => "[~]"`, `Blocked => "[X]"`, `Complete => "[✓]"`.
+   - `pub fn markdown_line_style(theme: &Theme, line: &str) -> Style`:
+     - Trimmed line starting with `"#"` → `Style::default().fg(to_color(theme.palette.md_heading)).add_modifier(Modifier::BOLD)`.
+     - Trimmed line starting with `` "```" `` or `"    "` (4 spaces) → `Style::default().fg(to_color(theme.palette.md_code))`.
+     - Trimmed line containing `"ERROR"` or `"BLOCKED"` → `Style::default().fg(to_color(theme.palette.alert_error)).add_modifier(Modifier::BOLD)`.
+     - Trimmed line containing `"WARN"` or `"TODO"` → `Style::default().fg(to_color(theme.palette.alert_warn))`.
+     - Otherwise → `Style::default().fg(to_color(theme.palette.foreground))`.
+3. Tests in `src/tui/style.rs`:
+   - `card_border_color_maps_complete_to_green_and_gap_to_gap_color`: load `default_theme().unwrap()`; assert `card_border_color(&theme, CardStatus::Complete) == to_color(theme.palette.status_complete)` and `card_border_color(&theme, CardStatus::Gap) == to_color(theme.palette.status_gap)`.
+   - `markdown_line_style_differentiates_headings_code_and_alerts`: load `default_theme().unwrap()`; assert `markdown_line_style(&theme, "# Overview").fg == Some(to_color(theme.palette.md_heading))`, `markdown_line_style(&theme, "```rust").fg == Some(to_color(theme.palette.md_code))`, and `markdown_line_style(&theme, "BLOCKED: missing view").fg == Some(to_color(theme.palette.alert_error))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn card_border_color\b' src/tui/style.rs && grep -qE 'pub fn markdown_line_style\b' src/tui/style.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 3C: Top-Down 3-Column TUI Layout, Header, List, and Detail Breakdown
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 3C: Implement the top-down 3-column Ratatui layout (header bar, Left Column component list, Middle Column canvas frame, Right Column detail breakdown, footer) in src/tui/ui.rs with TestBackend render tests.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs (NEW)
+  - src/tui/mod.rs
+READ_ONLY_REFS:
+  - src/tui/app.rs:1-140 (App, FocusColumn, InputMode, ListFilter)
+  - src/tui/style.rs:1-85 (base_style, header_style, panel_border_style, selected_row_style, card_border_color, status_glyph, markdown_line_style)
+  - src/audit.rs:30-75 (compute_card_status, task_progress)
+  - src/model.rs:50-135 (Component, Connection, FeatureItem, ExternalTaskRef)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No snap-grid card or vector-line rendering yet (Middle Column renders a clean bordered placeholder frame stating grid dimensions and component count; full canvas arrives in Phase 4).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn card_border_color\b' src/tui/style.rs && grep -qE 'pub fn markdown_line_style\b' src/tui/style.rs
+
+[MUTATION_SPEC]
+1. src/tui/mod.rs:2 — anchor `pub mod style;` → add `pub mod ui;` directly beneath `pub mod style;`.
+2. src/tui/ui.rs (NEW) — implement top-down container tree and panel renderers:
+   - `pub fn render(frame: &mut ratatui::Frame, app: &App)`:
+     - Fills full `frame.area()` with `Block::default().style(style::base_style(&app.theme))`.
+     - Root vertical split (`Layout::vertical([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])`):
+       - `[0]` → `render_header(frame, chunks[0], app)`
+       - `[1]` → Body horizontal 3-column split (`Layout::horizontal([Constraint::Percentage(24), Constraint::Percentage(48), Constraint::Percentage(28)])`):
+         - `[0]` → `render_component_list(frame, cols[0], app)`
+         - `[1]` → `render_canvas_placeholder(frame, cols[1], app)`
+         - `[2]` → `render_detail_panel(frame, cols[2], app)`
+       - `[2]` → `render_footer(frame, chunks[2], app)`
+   - `fn render_header(frame: &mut Frame, area: Rect, app: &App)`: bordered block showing `" ROCKET FACTORY :: {project.config.name} | MODE: {mode:?} | GAPS: {app.gap_count()} | {app.status_message}"` with alert styling on the gap badge when `app.gap_count() > 0`.
+   - `fn render_component_list(frame: &mut Frame, area: Rect, app: &App)`: bordered block titled `" Components "` (or `" Components [GAPS] "` when `app.filter == ListFilter::GapsOnly`), border styled with `panel_border_style(&app.theme, app.focus == FocusColumn::List)`. Renders each visible component as a `ListItem` showing `"{glyph} {comp.name} ({progress.complete}/{progress.total})"` colored by `card_border_color` (and highlighted with `selected_row_style` for `app.selected_index`). When empty, renders `" (no components) "`.
+   - `fn render_canvas_placeholder(frame: &mut Frame, area: Rect, app: &App)`: bordered block titled `" Snap Grid ({cols}x{rows}) "`, border styled with `panel_border_style(&app.theme, app.focus == FocusColumn::Canvas)`. Displays centered summary lines: `"{count} staged component(s), {edges} connection(s)"` and `"Snap Grid Canvas — interactive cards & connectors in Phase 4"`.
+   - `fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App)`: bordered block titled `" Component Details "`, border styled with `panel_border_style(&app.theme, app.focus == FocusColumn::Detail)`. If `app.selected_component()` is `Some(comp)`, builds styled `Vec<Line>` containing:
+     - `Name: {comp.name} ({comp.id})`
+     - `Kind: {:?} | Status: {:?} | Grid: ({}, {})`
+     - `Path: {relative_path or "-"}`
+     - `Tags: {joined tags or "-"}`
+     - `Description: {comp.description}`
+     - Section `Connections:` listing outgoing (`-> to [kind]`) and incoming (`<- from [kind]`) edges from `app.project.config.connections`.
+     - Section `Features:` listing `[pushed]` / `[local]` + `feature.title`.
+     - Section `External Tasks:` listing `[status]` + `task.external_id` + `task.title`.
+     - Section `Specification:` rendering each line of `comp.markdown_body` with `style::markdown_line_style(&app.theme, line)`.
+     - Renders as `Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((app.detail_scroll, 0))`.
+     - If `None`, renders `"Select a component to inspect details."`.
+   - `fn render_footer(frame: &mut Frame, area: Rect, app: &App)`: renders `" [Tab] Focus  [j/k ↑/↓] Navigate/Scroll  [f] Gaps Filter  [m] Move  [c] Connect  [q] Quit"` using `muted_style`.
+3. Tests in `src/tui/ui.rs`:
+   - `render_three_column_layout_displays_header_list_and_details`: build `App` with `"view_box"` (gap) and `"core_bus"` (1 `Complete` external task) using `default_theme().unwrap()`; draw onto `Terminal::new(TestBackend::new(120, 35))`; collect rendered buffer text; assert text contains `"ROCKET FACTORY"`, `"GAPS: 1"`, `"Components"`, `"Snap Grid"`, `"Component Details"`, and `"view_box"`.
+   - `render_gaps_filter_hides_tracked_component`: call `app.toggle_gaps_filter()`; draw onto `TestBackend::new(120, 35)`; assert rendered text contains `"Components [GAPS]"` and `"view_box"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn render\b' src/tui/ui.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 3D: Terminal Lifecycle Manager and `rf` TUI Launch Wiring
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 3D: Implement terminal lifecycle management (raw mode, alternate screen, panic hook, $EDITOR suspend/resume, event loop) in src/tui/terminal.rs and wire default `rf` launch in src/main.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs (NEW)
+  - src/tui/mod.rs
+  - src/main.rs
+READ_ONLY_REFS:
+  - src/tui/app.rs:1-140 (App, handle_key)
+  - src/tui/ui.rs:1-30 (render)
+  - src/storage.rs:199-265 (load_project)
+  - src/theme.rs:65-95 (resolve_theme)
+  - src/main.rs:1-35 (main)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter any CLI subcommand handling (`Some(command)` arm) in src/main.rs.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn render\b' src/tui/ui.rs && grep -qE 'fn main\b' src/main.rs
+
+[MUTATION_SPEC]
+1. src/tui/mod.rs:3 — anchor `pub mod ui;` → add `pub mod terminal;` and `pub use terminal::{default_theme_dirs, run_tui, suspend_for_editor};`.
+2. src/tui/terminal.rs (NEW) — implement terminal lifecycle and main TUI event loop:
+   - `pub type TuiTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>;`
+   - `pub fn default_theme_dirs(root: &std::path::Path) -> Vec<std::path::PathBuf>`: returns `[root.join(".rocket/themes")]`, plus `$HOME/.config/rocket-factory/themes` if `HOME` env var is non-empty.
+   - `pub fn install_panic_hook()`: wraps `std::panic::take_hook()` so that on panic it calls `let _ = crossterm::terminal::disable_raw_mode();` and `let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);` before delegating to the original hook.
+   - `pub fn enter_terminal() -> RfResult<TuiTerminal>`: enables raw mode, executes `EnterAlternateScreen` on stdout, constructs `Terminal::new(CrosstermBackend::new(std::io::stdout()))`, and maps any I/O error to `RfError::Io { path: PathBuf::from("<terminal>"), source }`.
+   - `pub fn restore_terminal(terminal: &mut TuiTerminal) -> RfResult<()>`: disables raw mode, executes `LeaveAlternateScreen`, calls `terminal.show_cursor()`, mapping I/O errors to `RfError::Io`.
+   - `pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &std::path::Path) -> RfResult<()>`: calls `restore_terminal(terminal)?`, reads `std::env::var("EDITOR")` (defaulting to `"vi"` if unset/empty), spawns and waits on `Command::new(&editor).arg(file_path)`, re-enters raw mode + `EnterAlternateScreen` + `terminal.clear()`, and returns an error if the editor exited non-zero (`RfError::Io` with `ErrorKind::Other`).
+   - `pub fn run_tui(root: &std::path::Path, theme_dirs: &[std::path::PathBuf]) -> RfResult<()>`: loads project via `crate::storage::load_project(root)?`, resolves theme via `crate::theme::resolve_theme(&project.config.theme, theme_dirs)?`, constructs `App::new(root.to_path_buf(), project, theme)`, calls `install_panic_hook()`, enters terminal, runs loop (`terminal.draw(|f| ui::render(f, &app))`, polls `crossterm::event::poll(Duration::from_millis(100))`, reads `Event::Key(key)` with `key.kind == KeyEventKind::Press` and calls `app.handle_key(key)` until `app.should_quit`), always restores terminal before returning.
+3. src/main.rs:28 — anchor `None => {` → replace the `None => { ... }` arm so it calls `let theme_dirs = rocket_factory::tui::default_theme_dirs(&cli.path);` and `rocket_factory::tui::run_tui(&cli.path, &theme_dirs)`, returning `ExitCode::SUCCESS` on `Ok(())` and printing `eprintln!("error: {err}");` + `ExitCode::FAILURE` on `Err(err)`.
+4. Tests in `src/tui/terminal.rs`:
+   - `default_theme_dirs_includes_project_local_dir`: call `default_theme_dirs(Path::new("/tmp/rf_demo"))`; assert `dirs[0] == PathBuf::from("/tmp/rf_demo/.rocket/themes")`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo run --quiet --bin rf -- --help | grep -qE 'Rocket Factory' && grep -qE 'pub fn run_tui\b' src/tui/terminal.rs && grep -qE 'pub fn suspend_for_editor\b' src/tui/terminal.rs && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

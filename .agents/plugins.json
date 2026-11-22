@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {
+      "path": "~/.gemini/config/workflows",
+      "include_only": ["orrery-gemini-phased"]
+    }
+  ]
+}

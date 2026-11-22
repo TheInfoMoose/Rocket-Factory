@@ -77,3 +77,31 @@ title = "cli"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-21T23:48:13Z"
+
+[[items.tasks]]
+id = "TASK-0011"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:13:46Z"
+
+[[items.tasks]]
+id = "TASK-0012"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:13:46Z"
+
+[[items.tasks]]
+id = "TASK-0013"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:13:46Z"
+
+[[items.tasks]]
+id = "TASK-0014"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:13:46Z"
