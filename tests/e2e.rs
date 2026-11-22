@@ -1,10 +1,12 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::style::Color;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 use rocket_factory::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};
 use rocket_factory::archetype::scaffold_component;
@@ -15,7 +17,8 @@ use rocket_factory::model::{
 use rocket_factory::storage;
 use rocket_factory::theme::{default_theme, DEFAULT_CRT_AMBER_RON};
 use rocket_factory::tui::app::App;
-use rocket_factory::tui::ui::render;
+use rocket_factory::tui::canvas::ZoomLevel;
+use rocket_factory::tui::ui::{column_layout, render};
 
 fn buffer_to_string(buffer: &Buffer) -> String {
     let mut text = String::new();
@@ -708,4 +711,451 @@ fn e2e_tui_delete_connection_and_component_persists_to_disk() {
     assert!(!audit_project(&after_comp_delete)
         .iter()
         .any(|f| f.kind == FindingKind::DanglingConnection));
+}
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn type_text(app: &mut App, text: &str) {
+    for ch in text.chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+}
+
+fn select_component_by_id(app: &mut App, id: &str) {
+    let vis_idx = app
+        .visible_component_indices()
+        .iter()
+        .position(|&idx| app.project.components.get(idx).is_some_and(|c| c.id == id))
+        .unwrap_or_else(|| panic!("expected visible component '{id}'"));
+    app.selected_index = vis_idx;
+}
+
+fn rect_to_string(buffer: &Buffer, rect: Rect) -> String {
+    let mut text = String::new();
+    let max_x = rect.x.saturating_add(rect.width).min(buffer.area.width);
+    let max_y = rect.y.saturating_add(rect.height).min(buffer.area.height);
+    for y in rect.y..max_y {
+        for x in rect.x..max_x {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+#[test]
+fn e2e_sub_component_creation_expand_collapse_and_collision_shifting() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "apollo-subcomp",
+        "Sub-component hierarchy E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let api_gateway = scaffold_component(
+        "api_gateway",
+        "API Gateway",
+        ComponentKind::Interface,
+        GridPos { col: 0, row: 0 },
+    );
+    let auth_svc = scaffold_component(
+        "auth_svc",
+        "Auth Svc",
+        ComponentKind::Logic,
+        GridPos { col: 1, row: 0 },
+    );
+    storage::save_component(dir.path(), &api_gateway).expect("save api_gateway");
+    storage::save_component(dir.path(), &auth_svc).expect("save auth_svc");
+
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    // 1. Create sub-component `rate_limiter` under `api_gateway` using `a`
+    select_component_by_id(&mut app, "api_gateway");
+    app.handle_key(key(KeyCode::Char('a')));
+    type_text(&mut app, "rate_limiter");
+    app.handle_key(key(KeyCode::Tab));
+    type_text(&mut app, "Rate Limiter");
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+
+    let after_create = storage::load_project(dir.path()).expect("reload after sub-comp create");
+    let rate_limiter = after_create
+        .component("rate_limiter")
+        .expect("rate_limiter persisted on disk");
+    let persisted_gateway = after_create
+        .component("api_gateway")
+        .expect("api_gateway persisted");
+    let persisted_auth = after_create
+        .component("auth_svc")
+        .expect("auth_svc persisted");
+
+    assert_eq!(rate_limiter.parent_id.as_deref(), Some("api_gateway"));
+    assert_ne!(rate_limiter.position, persisted_gateway.position);
+    assert_ne!(rate_limiter.position, persisted_auth.position);
+    let rate_pos = rate_limiter.position;
+
+    let canvas_rect = column_layout(Rect::new(0, 3, 140, 36))[1];
+    let expanded_buf = render_app(&mut app, 140, 40);
+    let expanded_canvas = rect_to_string(&expanded_buf, canvas_rect);
+    assert!(
+        expanded_canvas.contains("Rate Li"),
+        "expected rate_limiter visible on canvas:\n{expanded_canvas}"
+    );
+    assert!(
+        expanded_canvas.contains("[-1]"),
+        "expected [-1] badge on api_gateway:\n{expanded_canvas}"
+    );
+
+    // 2. Collapse `api_gateway` via Space
+    select_component_by_id(&mut app, "api_gateway");
+    app.handle_key(key(KeyCode::Char(' ')));
+
+    let visible_ids_collapsed: Vec<&str> = app
+        .visible_component_indices()
+        .into_iter()
+        .filter_map(|idx| app.project.components.get(idx).map(|c| c.id.as_str()))
+        .collect();
+    assert!(!visible_ids_collapsed.contains(&"rate_limiter"));
+
+    let collapsed_buf = render_app(&mut app, 140, 40);
+    let collapsed_canvas = rect_to_string(&collapsed_buf, canvas_rect);
+    assert!(
+        collapsed_canvas.contains("[+1]"),
+        "expected [+1] badge on collapsed api_gateway:\n{collapsed_canvas}"
+    );
+    assert!(!collapsed_canvas.contains("Rate Li"));
+
+    // 3. Seed collision by moving `auth_svc` onto `rate_limiter`'s hidden GridPos on disk and reloading
+    let mut colliding_auth = persisted_auth.clone();
+    colliding_auth.position = rate_pos;
+    storage::save_component(dir.path(), &colliding_auth).expect("save colliding auth_svc");
+
+    let reloaded_project = storage::load_project(dir.path()).expect("reload colliding project");
+    let theme2 = default_theme().expect("load default theme");
+    let mut app2 = App::new(dir.path().to_path_buf(), reloaded_project, theme2);
+
+    // Expand `api_gateway` via Space and verify collision shifting
+    select_component_by_id(&mut app2, "api_gateway");
+    app2.handle_key(key(KeyCode::Char(' ')));
+
+    let visible_indices_after = app2.visible_component_indices();
+    let visible_ids_after: Vec<&str> = visible_indices_after
+        .iter()
+        .filter_map(|&idx| app2.project.components.get(idx).map(|c| c.id.as_str()))
+        .collect();
+    assert!(visible_ids_after.contains(&"rate_limiter"));
+    assert!(visible_ids_after.contains(&"auth_svc"));
+
+    let visible_positions: HashSet<GridPos> = visible_indices_after
+        .iter()
+        .filter_map(|&idx| app2.project.components.get(idx).map(|c| c.position))
+        .collect();
+    assert_eq!(
+        visible_positions.len(),
+        visible_indices_after.len(),
+        "no two visible components should share a GridPos after expand"
+    );
+
+    let after_expand = storage::load_project(dir.path()).expect("reload after expand shift");
+    let final_rate = after_expand
+        .component("rate_limiter")
+        .expect("rate_limiter exists");
+    let final_auth = after_expand.component("auth_svc").expect("auth_svc exists");
+    let final_gw = after_expand
+        .component("api_gateway")
+        .expect("api_gateway exists");
+
+    assert_eq!(final_rate.parent_id.as_deref(), Some("api_gateway"));
+    assert_eq!(final_rate.position, rate_pos);
+    assert_ne!(final_auth.position, final_rate.position);
+    assert_ne!(final_auth.position, final_gw.position);
+}
+
+#[test]
+fn e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "gemini-semantics",
+        "Edge contains & archetype mutation E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let custom_desc = "Primary web client for example.com".to_string();
+    let custom_body = "## Custom Notes\n\nKeep this blueprint body intact.\n".to_string();
+
+    let mut frontend = scaffold_component(
+        "frontend",
+        "Frontend",
+        ComponentKind::Concept,
+        GridPos { col: 0, row: 0 },
+    );
+    frontend.description = custom_desc.clone();
+    frontend.markdown_body = custom_body.clone();
+    let backend = scaffold_component(
+        "backend",
+        "Backend",
+        ComponentKind::Concept,
+        GridPos { col: 1, row: 0 },
+    );
+    let widget_lib = scaffold_component(
+        "widget_lib",
+        "Widget Lib",
+        ComponentKind::Concept,
+        GridPos { col: 2, row: 0 },
+    );
+    storage::save_component(dir.path(), &frontend).expect("save frontend");
+    storage::save_component(dir.path(), &backend).expect("save backend");
+    storage::save_component(dir.path(), &widget_lib).expect("save widget_lib");
+
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    // 1. Drive `c` on `frontend`, navigate to `backend`, confirm with Enter
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('c')));
+    assert!(
+        app.status_message.contains("depends on <target>"),
+        "unexpected connect prompt: {}",
+        app.status_message
+    );
+
+    let mut steps = 0;
+    while app.selected_component().map(|c| c.id.as_str()) != Some("backend") {
+        app.handle_key(key(KeyCode::Down));
+        steps += 1;
+        assert!(steps <= 10, "failed to navigate to backend");
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(
+        app.status_message.contains("frontend depends on backend"),
+        "unexpected connect confirmation: {}",
+        app.status_message
+    );
+
+    let after_connect = storage::load_project(dir.path()).expect("reload after connect");
+    assert!(after_connect
+        .config
+        .connections
+        .iter()
+        .any(|c| { c.from == "frontend" && c.to == "backend" && c.kind == EdgeKind::DependsOn }));
+
+    // 2. Reselect `frontend` and delete `frontend -> backend` via `D` + `y`
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('D')));
+    app.handle_key(key(KeyCode::Char('y')));
+    let after_del_conn = storage::load_project(dir.path()).expect("reload after delete conn");
+    assert!(after_del_conn.config.connections.is_empty());
+
+    // 3. Drive `e` on `frontend`: change archetype to Interface and add sub-component
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('e')));
+    // Field 0 (Name) -> Tab -> Field 1 (Archetype: Concept -> Right -> Interface)
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Right));
+    // Field 1 -> Tab x5 -> Field 6 (Add Sub-component)
+    for _ in 0..5 {
+        app.handle_key(key(KeyCode::Tab));
+    }
+    type_text(&mut app, "Nav Header");
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+
+    let after_edit = storage::load_project(dir.path()).expect("reload after edit component");
+    let edited_frontend = after_edit
+        .component("frontend")
+        .expect("frontend still exists");
+    assert_eq!(edited_frontend.kind, ComponentKind::Interface);
+    assert_eq!(edited_frontend.description, custom_desc);
+    assert_eq!(edited_frontend.markdown_body, custom_body);
+    let nav_header = after_edit
+        .component("nav_header")
+        .expect("new sub-component nav_header persisted");
+    assert_eq!(nav_header.parent_id.as_deref(), Some("frontend"));
+
+    // 4. Reselect `frontend`, connect `frontend -> widget_lib`, then edit edge via `E` to Contains
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('c')));
+    steps = 0;
+    while app.selected_component().map(|c| c.id.as_str()) != Some("widget_lib") {
+        app.handle_key(key(KeyCode::Down));
+        steps += 1;
+        assert!(steps <= 10, "failed to navigate to widget_lib");
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('E')));
+    // EDGE_KINDS: DependsOn(0) -> DataFlow(1) -> Renders(2) -> Invokes(3) -> Contains(4)
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Right));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+
+    let after_contains = storage::load_project(dir.path()).expect("reload after Contains edge");
+    assert_eq!(
+        after_contains
+            .component("widget_lib")
+            .expect("widget_lib exists")
+            .parent_id
+            .as_deref(),
+        Some("frontend")
+    );
+
+    // 5. Drive `E` again on `frontend` to change Contains back to DependsOn and verify detachment
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('E')));
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Left));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+
+    let after_detach = storage::load_project(dir.path()).expect("reload after DependsOn edge");
+    assert_eq!(
+        after_detach
+            .component("widget_lib")
+            .expect("widget_lib exists")
+            .parent_id,
+        None
+    );
+}
+
+#[test]
+fn e2e_canvas_zoom_levels_and_compact_4x4_capacity() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "zoom-4x4",
+        "Zoom levels and 4x4 compact capacity E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let mut short_names = Vec::new();
+    for row in 0..4u16 {
+        for col in 0..4u16 {
+            let id = format!("c{row}{col}");
+            let name = format!("C{row}{col}");
+            let comp = scaffold_component(&id, &name, ComponentKind::Concept, GridPos { col, row });
+            storage::save_component(dir.path(), &comp).expect("save grid component");
+            short_names.push(name);
+        }
+    }
+
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+
+    let canvas_rect = column_layout(Rect::new(0, 3, 140, 36))[1];
+    let compact_buf = render_app(&mut app, 140, 40);
+    let compact_canvas = rect_to_string(&compact_buf, canvas_rect);
+    assert!(
+        compact_canvas.contains("[Compact]"),
+        "expected [Compact] in canvas title:\n{compact_canvas}"
+    );
+    for name in &short_names {
+        assert!(
+            compact_canvas.contains(name.as_str()),
+            "expected card '{name}' inside 4x4 Compact canvas rect:\n{compact_canvas}"
+        );
+    }
+
+    // Zoom in via `+` -> Normal
+    app.handle_key(key(KeyCode::Char('+')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Normal);
+    let normal_canvas = rect_to_string(&render_app(&mut app, 140, 40), canvas_rect);
+    assert!(
+        normal_canvas.contains("[Normal]"),
+        "expected [Normal] in canvas title:\n{normal_canvas}"
+    );
+
+    // Zoom in via `=` -> Expanded
+    app.handle_key(key(KeyCode::Char('=')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Expanded);
+    let expanded_canvas = rect_to_string(&render_app(&mut app, 140, 40), canvas_rect);
+    assert!(
+        expanded_canvas.contains("[Expanded]"),
+        "expected [Expanded] in canvas title:\n{expanded_canvas}"
+    );
+
+    // Zoom out twice via `-` -> Compact
+    app.handle_key(key(KeyCode::Char('-')));
+    app.handle_key(key(KeyCode::Char('-')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+    let back_compact_buf = render_app(&mut app, 140, 40);
+    let back_compact_canvas = rect_to_string(&back_compact_buf, canvas_rect);
+    assert!(
+        back_compact_canvas.contains("[Compact]"),
+        "expected [Compact] after zooming back out:\n{back_compact_canvas}"
+    );
+
+    // Inspect bottom footer row (y = 39) for underlined hotkey cells and absence of legacy brackets
+    let footer_row = rect_to_string(&back_compact_buf, Rect::new(0, 39, 140, 1));
+    assert!(
+        !footer_row.contains("[v] Edit MD"),
+        "legacy '[v] Edit MD' bracketed hint should not appear in footer: {footer_row}"
+    );
+    let underlined_cells = (0..140u16)
+        .filter(|&x| {
+            back_compact_buf[(x, 39)]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        })
+        .count();
+    assert!(
+        underlined_cells > 0,
+        "expected underlined mnemonic hotkey cells in bottom footer row (y = 39)"
+    );
+}
+
+#[test]
+fn e2e_top_center_default_placement_and_grid_expansion_persists() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "top-center-e2e",
+        "Top-center default placement E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let project = storage::load_project(dir.path()).expect("load empty project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    // Render once at 140x40 so last_canvas_capacity is populated
+    let _ = render_app(&mut app, 140, 40);
+
+    // Drive `n` to create top-level component `core_hub`
+    app.handle_key(key(KeyCode::Char('n')));
+    type_text(&mut app, "core_hub");
+    app.handle_key(key(KeyCode::Tab));
+    type_text(&mut app, "Core Hub");
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+
+    let core_hub = app
+        .project
+        .component("core_hub")
+        .expect("core_hub created in app state");
+    assert_eq!(core_hub.position.row, 0);
+    assert!(
+        core_hub.position.col > 0,
+        "expected top-center placement with col > 0, got {:?}",
+        core_hub.position
+    );
+
+    let reloaded = storage::load_project(dir.path()).expect("reload project from disk");
+    let persisted = reloaded
+        .component("core_hub")
+        .expect("core_hub persisted on disk");
+    assert_eq!(persisted.position, core_hub.position);
 }
