@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0044"
 type = "task"
 title = "Include src/tui/app.rs and src/tui/ui.rs exhaustive match arms for STEP 8B ConfirmDelete modal variants"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-22T05:12:59Z"
-updated_at = "2026-11-22T05:13:07Z"
+updated_at = "2026-11-22T05:38:46Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "001c983"
+summary = "Implemented ConfirmDelete modal and exhaustive match arms across src/tui/modal.rs, src/tui/app.rs, src/tui/ui.rs, and tests/e2e.rs in atomic STEP 8E."

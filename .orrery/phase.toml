@@ -1,11 +1,15 @@
 # Written by phased-step.sh new-phase from the plan's Up Next table.
 # Regenerated every phase; edits here are lost.
-phase = "8"
+phase = "9"
 
 [[queue]]
-step = "8E"
-item = "TASK-0045"
+step = "9A"
+item = "TASK-0046"
 
 [[queue]]
-step = "8D"
-item = "TASK-0043"
+step = "9B"
+item = "TASK-0047"
+
+[[queue]]
+step = "9C"
+item = "TASK-0048"

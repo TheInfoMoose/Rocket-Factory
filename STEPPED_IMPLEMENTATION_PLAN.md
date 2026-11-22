@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 8):** Complete TUI CRUD workflows with confirmation-guarded deletion of components (`d`) and connections (`D`), deduplicate the multi-adapter feature push loop into a shared `src/adapter.rs` helper (`TASK-0039`), and add `README.md` documenting CLI usage, TUI keybindings, `.ron` themes, and external adapter contracts.
+**Phase goal (Phase 9):** Fix no-op `d`/`D` mode cleanup in `src/tui/app.rs`, configure and verify crate packaging (`Cargo.toml`, `LICENSE`, `cargo package`), and add GitHub Actions CI (`.github/workflows/ci.yml`) enforcing formatting, clippy, tests, and packaging.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,8 +26,9 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 8E** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | — |
-| 2 | **STEP 8D** | `/goal` | docs | `README.md` | STEP 8E |
+| 1 | **STEP 9A** | `/goal` | tui | `src/tui/app.rs` | — |
+| 2 | **STEP 9B** | `/goal` | packaging | `Cargo.toml`, `LICENSE` | — |
+| 3 | **STEP 9C** | `/goal` | ci | `.github/workflows/ci.yml` | STEP 9B |
 
 ### Completed
 
@@ -68,10 +69,12 @@
 | **STEP 8A** | Done (`c4c0058`) | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` |
 | **STEP 8B** | Withdrawn (→ 8E) | `/goal` | modal | `src/tui/modal.rs` |
 | **STEP 8C** | Withdrawn (→ 8E) | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
+| **STEP 8E** | Done (`001c983`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
+| **STEP 8D** | Done (`9c40fd6`) | `/goal` | docs | `README.md` |
 
 ### Future phases
 
-_None planned — Phase 8 completes TUI CRUD deletion flows, resolves `TASK-0039`, and documents Rocket Factory for end-user adoption._
+_None planned — Phase 9 completes TUI delete edge-case cleanup, crate packaging verification, and automated CI._
 
 ### Open Questions
 
@@ -2237,6 +2240,150 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub enum ConfirmDeleteTarget\b' src/tui/modal.rs && grep -qE 'Delete component / Delete edge' src/tui/ui.rs && ! grep -rqi 'nebulous' src/ tests/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 9 Step Blocks
+
+### STEP 9A: Preserve Mode & Connect State on No-Op `d` / `D` Key Presses
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 9A: Fix no-op d and D key handling in src/tui/app.rs so connect_source_id is only cleared when opening a ConfirmDelete modal (matching e/E), and add unit tests.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/tui/app.rs:864-961 (handle_key arms for 'e', 'E', 'd', 'D')
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE "KeyCode::Char\('d'\)" src/tui/app.rs && grep -qE "KeyCode::Char\('D'\)" src/tui/app.rs
+
+[MUTATION_SPEC]
+Goal:
+  Prevent a no-op `d` or `D` press (when no deletable component or connection exists) from clearing `self.connect_source_id` while `self.mode` remains `InputMode::Connect`.
+
+Contract & Behavior:
+  - `src/tui/app.rs` (`App::handle_key`):
+    - In `KeyCode::Char('d')`: move `self.connect_source_id = None;` inside the `if let Some(comp) = self.selected_component()` branch right before setting `self.mode = InputMode::Modal`. When no component is selected, leave `self.mode` and `self.connect_source_id` untouched and set status `"No component selected to delete"`.
+    - In `KeyCode::Char('D')`: move `self.connect_source_id = None;` inside the `if let Some(conn) = target_conn` branch right before setting `self.mode = InputMode::Modal`. When no component or no incident connection exists, leave `self.mode` and `self.connect_source_id` untouched and set status `"No connection on selected component to delete"`.
+
+Tests:
+  - In `src/tui/app.rs`:
+    - Add unit test `app_noop_delete_in_connect_mode_preserves_connect_source` verifying:
+      1. In `InputMode::Connect` with `connect_source_id = Some("alpha")` and no connections on `"alpha"`, pressing `'D'` keeps `app.mode == InputMode::Connect` and `app.connect_source_id.as_deref() == Some("alpha")`.
+      2. With an empty filtered/component list in `InputMode::Connect` and `connect_source_id = Some("alpha")`, pressing `'d'` keeps `app.mode == InputMode::Connect` and `app.connect_source_id.as_deref() == Some("alpha")`.
+      3. Pressing `'d'` when a component IS selected clears `connect_source_id` and enters `InputMode::Modal`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 9B: Crate Packaging Metadata, `LICENSE`, and Offline Package Verification
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 9B: Complete Cargo.toml crate packaging metadata and exclusions, add MIT LICENSE file, and verify offline cargo package output.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - LICENSE (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml:1-26 (current package manifest)
+  - README.md:1-35 (package overview)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify dependency versions or Cargo.lock.
+  - No references to the string "nebulous" (case-insensitive) anywhere in Cargo.toml or LICENSE.
+
+[PRE_GATE]
+test -f Cargo.toml && test -f README.md
+
+[MUTATION_SPEC]
+Goal:
+  Make `rocket-factory` cleanly packageable with `cargo package` by populating required crates.io metadata, adding a root `LICENSE` file, and excluding internal planning/workflow/tracker directories from the packaged tarball.
+
+Contract & Behavior:
+  - `LICENSE` (NEW):
+    - Add standard MIT License text.
+  - `Cargo.toml` (`[package]`):
+    - Keep `name = "rocket-factory"`, `version = "0.1.0"`, `edition = "2021"`, and `description`.
+    - Add `license = "MIT"`, `readme = "README.md"`, `repository = "https://github.com/TheInfoMoose/Rocket-Factory"`.
+    - Add `keywords = ["tui", "architecture", "planning", "ratatui", "cli"]` and `categories = ["command-line-utilities", "development-tools"]`.
+    - Add `exclude = [".agents/**", ".github/**", ".orrery/**", ".phased/**", ".rocket/**", ".tracker/**", "scripts/**", "Rocket Factory.md", "STEPPED_IMPLEMENTATION_PLAN.md"]` so internal tracker, orchestration, and plan files are omitted from packaged tarballs.
+  - Verification:
+    - Confirm `cargo package --list --allow-dirty` includes `Cargo.toml`, `Cargo.lock`, `LICENSE`, `README.md`, `src/`, and `tests/`, and excludes `.tracker/`, `.orrery/`, `.phased/`, `scripts/`, and `STEPPED_IMPLEMENTATION_PLAN.md`.
+    - Confirm `cargo package --offline --allow-dirty` succeeds (builds and verifies the packaged crate from the local dependency cache without network access) and remove any generated `target/package/` artifact if desired (it is gitignored under `target/`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && test -s LICENSE && cargo package --list --allow-dirty | grep -q '^LICENSE$' && cargo package --list --allow-dirty | grep -q '^README.md$' && ! cargo package --list --allow-dirty | grep -qE '^(\.tracker/|\.orrery/|\.phased/|scripts/|STEPPED_IMPLEMENTATION_PLAN\.md)' && cargo package --offline --allow-dirty && ! grep -rqi 'nebulous' Cargo.toml LICENSE
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 9C: GitHub Actions CI Workflow (Format, Clippy, Test, Package)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 9C: Add GitHub Actions CI workflow in .github/workflows/ci.yml enforcing cargo fmt, cargo clippy, cargo test, and cargo package.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/ci.yml (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml (package metadata and edition)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in .github/.
+  - No secrets, tokens, or host-specific paths.
+
+[PRE_GATE]
+grep -qE '^license\s*=' Cargo.toml && test -s LICENSE
+
+[MUTATION_SPEC]
+Goal:
+  Automate quality and packaging gates in GitHub Actions so every push and pull request verifies formatting, lints, unit/E2E tests, and crate packaging.
+
+Contract & Behavior:
+  - `.github/workflows/ci.yml` (NEW):
+    - Name: `CI`.
+    - Triggers: `push` (branches `master`, `main`) and `pull_request`.
+    - Permissions: `contents: read`.
+    - Single `check` job on `ubuntu-latest` with `CARGO_TERM_COLOR: always`:
+      1. Checkout (`actions/checkout@v4`).
+      2. Install stable Rust toolchain (`dtolnay/rust-toolchain@stable` with `components: rustfmt, clippy`).
+      3. Cache Cargo registry/build (`Swatinem/rust-cache@v2`).
+      4. `cargo fmt --all -- --check`
+      5. `cargo clippy --workspace --all-targets -- -D warnings`
+      6. `cargo test --workspace`
+      7. `cargo package --locked`
+
+[POST_GATE]
+test -s .github/workflows/ci.yml && grep -q 'cargo fmt --all -- --check' .github/workflows/ci.yml && grep -q 'cargo clippy --workspace --all-targets -- -D warnings' .github/workflows/ci.yml && grep -q 'cargo test --workspace' .github/workflows/ci.yml && grep -q 'cargo package --locked' .github/workflows/ci.yml && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' .github/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
