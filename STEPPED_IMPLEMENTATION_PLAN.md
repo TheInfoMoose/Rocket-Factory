@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 10):** Add a Linux git build/install smoke-test job to GitHub Actions CI (`.github/workflows/ci.yml`) and fix the install and quickstart instructions in `README.md`.
+**Phase goal (Phase 11):** Introduce modular sub-components (`parent_id` + `EdgeKind::Contains`), lightweight mutable prototyping archetypes (`Concept` default with backwards-compatible legacy TOML), expand/collapse with proximity placement and collision shifting, and clear `<A> depends on <target>` connect prompts.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,8 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 10A** | `/goal` | ci | `.github/workflows/ci.yml` | — |
-| 2 | **STEP 10B** | `/goal` | docs | `README.md` | — |
+| 1 | **STEP 11A** | `/goal` | core | `src/model.rs`, `src/archetype.rs`, `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs` | — |
+| 2 | **STEP 11B** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/ui.rs` | STEP 11A |
+| 3 | **STEP 11C** | `/goal` | tui | `src/tui/app.rs` | STEP 11B |
+| 4 | **STEP 11D** | `/goal` | ui | `src/tui/ui.rs`, `src/tui/canvas.rs` | STEP 11C |
 
 ### Completed
 
@@ -73,10 +75,16 @@
 | **STEP 9A** | Done (`890fc2b`) | `/goal` | tui | `src/tui/app.rs` |
 | **STEP 9B** | Done (`4a3affe`) | `/goal` | packaging | `Cargo.toml`, `LICENSE` |
 | **STEP 9C** | Done (`8a8b7d4`) | `/goal` | ci | `.github/workflows/ci.yml` |
+| **STEP 10A** | Done (`28a2c33`) | `/goal` | ci | `.github/workflows/ci.yml` |
+| **STEP 10B** | Done (`64ab2f4`) | `/goal` | docs | `README.md` |
 
 ### Future phases
 
-_None planned — Phase 10 adds Linux git build/install CI verification and fixes end-user installation and quickstart documentation._
+- **Phase 12 — Canvas Base Scale, Zoom Levels, Keybind UX & Docs:**
+  - **STEP 12A (`canvas`)**: Widen middle Snap Grid column (~60%+ via compact/capped sidebars), add explicit zoom levels (`Compact` / `Normal` / `Expanded`, defaulting to `Compact` so at least 4 cards wide × 4 cards high fit on start), bind `+`/`=` and `-`, and size scrollable grid area to full-screen canvas capacity (minus sidebars) with top-center default start.
+  - **STEP 12B (`ui`)**: Separate every distinct action onto its own row in the `?` Keyboard Help modal (keeping only truly identical actions grouped) and replace bracketed footer hints with underlined-key mnemonic labels (e.g., `N`ew, `E`dit, `M`ove, `C`onnect).
+  - **STEP 12C (`docs`)**: Update `README.md` — split the local release build (`cargo build --release --locked`) into its own code block, convert TUI Keyboard Reference to per-key rows, document connect direction (`<A> depends on <target>`), sub-components (`parent_id`, `a`, `Space`/`Enter`), lightweight archetypes, and zoom controls.
+  - **STEP 12D (`tests`)**: Add end-to-end integration tests in `tests/e2e.rs` covering sub-component creation/ingestion, expand/collapse collision shifting, mutable archetypes, zoom levels, and connect semantics.
 
 ### Open Questions
 
@@ -2506,6 +2514,289 @@ Contract & Behavior:
 
 [POST_GATE]
 test -s README.md && grep -q 'cargo install --git https://github.com/TheInfoMoose/Rocket-Factory.git --locked' README.md && grep -q 'git clone https://github.com/TheInfoMoose/Rocket-Factory.git' README.md && grep -q 'cargo install --path . --locked' README.md && grep -q 'cargo build --release --locked' README.md && grep -q 'rf --help' README.md && grep -q '## CLI Reference' README.md && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' README.md
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 11 Step Blocks
+
+### STEP 11A: Modular Component Hierarchy (`parent_id`), `EdgeKind::Contains` & Lightweight Archetypes
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 11A: Extend the domain model with optional parent_id and EdgeKind::Contains, replace rigid upfront archetypes with lightweight mutable prototyping archetypes (retaining legacy TOML compatibility), and update existing struct literals and helpers to compile cleanly.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/model.rs
+  - src/archetype.rs
+  - src/export.rs
+  - src/tui/modal.rs
+  - src/tui/canvas.rs
+  - src/storage.rs
+  - src/audit.rs
+  - src/adapter.rs
+  - src/cli.rs
+  - src/tui/app.rs
+  - src/tui/terminal.rs
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-130 (ComponentKind, EdgeKind, Component, Project)
+  - src/archetype.rs:1-164 (ARCHETYPES, archetype_for, scaffold_component)
+  - src/export.rs:25-45 (map_component_type)
+  - src/tui/modal.rs:1-25 (EDGE_KINDS, edge_kind_label)
+  - src/tui/canvas.rs:400-420 (edge_kind_tag)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change TUI keybindings, layout proportions, zoom, or modal flows in this step (only add `parent_id: None` to existing `Component { ... }` test literals in storage/audit/adapter/cli/app/terminal/ui).
+  - Do not break deserialization of existing `.rocket/components/*.toml` files using legacy `ComponentKind` values (`ui_view`, `data_stream`, `service_core`, `cli_tool`, `storage`, `custom`) or omitting `parent_id`.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct Component\b' src/model.rs && grep -qE 'pub const ARCHETYPES:' src/archetype.rs
+
+[MUTATION_SPEC]
+Goal:
+  Support modular parent/child component hierarchies stored uniformly as `.rocket/components/<id>.toml` and shift archetypes from rigid upfront templates to lightweight prototyping defaults that remain backwards-compatible with legacy TOML files.
+
+Contract & Behavior:
+  1. `src/model.rs`:
+     - Extend `ComponentKind` with broad prototyping variants `#[default] Concept`, `Interface`, `Logic`, `Data`, `Integration`, while preserving `UiView`, `DataStream`, `ServiceCore`, `CliTool`, `Storage`, and `Custom` for backwards-compatible TOML deserialization and existing tests.
+     - Extend `EdgeKind` with `Contains` (`#[serde(rename_all = "snake_case")]` -> `"contains"`).
+     - Add `#[serde(default)] pub parent_id: Option<String>` to `Component`.
+     - Add helper `impl Project { pub fn sub_components(&self, parent_id: &str) -> Vec<&Component> }` returning all components whose `parent_id.as_deref() == Some(parent_id)`.
+     - Add unit tests verifying TOML roundtrip with `parent_id = Some("parent_a")` and backwards-compatible deserialization of TOML omitting `parent_id` (defaults to `None`) and using legacy `ComponentKind` strings.
+  2. `src/archetype.rs`:
+     - Replace `ARCHETYPES` with 6 lightweight, broad prototyping archetypes in order:
+       1. `ComponentKind::Concept` (`label: "Concept"`, `summary: ""`, `default_tags: &[]`, `starter_features: &[]`, `markdown_template: "## Notes\n\n"`) — index 0 so new components default to a blank/minimal concept.
+       2. `ComponentKind::Interface` (`label: "Interface"`, concise summary, `default_tags: &["interface"]`, `starter_features: &[]`, lightweight markdown template).
+       3. `ComponentKind::Logic` (`label: "Logic"`, concise summary, `default_tags: &["logic"]`, `starter_features: &[]`, lightweight markdown template).
+       4. `ComponentKind::Data` (`label: "Data"`, concise summary, `default_tags: &["data"]`, `starter_features: &[]`, lightweight markdown template).
+       5. `ComponentKind::Integration` (`label: "Integration"`, concise summary, `default_tags: &["integration"]`, `starter_features: &[]`, lightweight markdown template).
+       6. `ComponentKind::Custom` (`label: "Custom"`, concise summary, `default_tags: &[]`, `starter_features: &[]`, lightweight markdown template).
+     - Update `archetype_for(kind)` to map all 6 broad variants directly and map legacy variants to their broad counterparts (`UiView | CliTool => Interface`, `ServiceCore => Logic`, `DataStream | Storage => Data`).
+     - Update `scaffold_component` to set `parent_id: None`, and add `pub fn scaffold_sub_component(id: &str, name: &str, kind: ComponentKind, position: GridPos, parent_id: &str) -> Component`.
+     - Update `src/archetype.rs` unit tests to cover all `ComponentKind` variants (broad + legacy), verify `Concept` scaffolds with empty features/tags/description, and verify `scaffold_sub_component` sets `parent_id`.
+  3. `src/export.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`:
+     - `src/export.rs`: update `map_component_type` for `Concept`, `Interface`, `Logic`, `Data`, `Integration` (preserving existing mappings for legacy variants).
+     - `src/tui/modal.rs`: add `EdgeKind::Contains` to `EDGE_KINDS` and `edge_kind_label` (`"contains"`). Update any test that asserts `NewComponentForm` archetype cycling (index 0 is now `Concept`, index 1 is `Interface`).
+     - `src/tui/canvas.rs`: add `EdgeKind::Contains => "sub"` to `edge_kind_tag`.
+  4. Mechanical literal updates:
+     - Add `parent_id: None` to all existing `Component { ... }` struct literals in `src/storage.rs`, `src/audit.rs`, `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`, `src/tui/modal.rs`, `src/tui/canvas.rs`, and `src/tui/ui.rs` (and update `src/tui/app.rs` test asserting new-component default/cycled archetype if it previously expected `DataStream`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub parent_id: Option<String>' src/model.rs && grep -qE '\bContains\b' src/model.rs && grep -qE '\bConcept\b' src/model.rs && grep -qE 'pub fn scaffold_sub_component\b' src/archetype.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 11B: Editable Archetype, Sub-Component Modal & Human-Readable Edge Preview
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 11B: Extend NewComponentForm for optional parent_id (sub-component creation), add mutable Archetype and Add Sub-component fields to EditComponentForm, and render human-readable edge direction previews in EditConnection modal.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/ui.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/archetype.rs:1-120 (ARCHETYPES, archetype_for)
+  - src/model.rs:1-95 (ComponentKind, EdgeKind, Component)
+  - src/tui/modal.rs:1-545 (forms, ModalState, ModalAction, handlers)
+  - src/tui/ui.rs:290-400 (render_modal for NewComponent, EditComponent, EditConnection)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - In `src/tui/app.rs`, ONLY update the `ModalAction::CreateComponent` / `ModalAction::UpdateComponent` destructuring arms so the crate compiles cleanly; full expand/collapse, collision shifting, and sub-component ingestion logic belongs in STEP 11C.
+  - Do not alter footer rendering, Help modal rows, or canvas zoom in this step.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub parent_id: Option<String>' src/model.rs && grep -qE 'pub fn scaffold_sub_component\b' src/archetype.rs
+
+[MUTATION_SPEC]
+Goal:
+  Allow users to create sub-components via modal, change a component's archetype later in Edit Component, add a sub-component directly from Edit Component, and see an unambiguous human-readable relationship preview in Edit Connection.
+
+Contract & Behavior:
+  1. `src/tui/modal.rs`:
+     - Add `pub fn edge_relationship_preview(from: &str, to: &str, kind: EdgeKind) -> String`:
+       - `DependsOn` -> `"{from} depends on {to}"`
+       - `DataFlow` -> `"{from} sends data to {to}"`
+       - `Renders` -> `"{from} renders {to}"`
+       - `Invokes` -> `"{from} invokes {to}"`
+       - `Contains` -> `"{from} contains {to} (sub-component)"`
+       - `Custom` -> `"{from} -> {to}"`
+     - `NewComponentForm`: add `pub parent_id: Option<String>`.
+       - Add constructor `ModalState::new_sub_component(parent_id: impl Into<String>) -> Self`.
+       - `ModalState::title(&self)` returns `"New Sub-Component"` when `NewComponentForm.parent_id.is_some()`, otherwise `"New Component"`.
+       - `ModalAction::CreateComponent` includes `parent_id: Option<String>`.
+     - `EditComponentForm`:
+       - Add `pub archetype_index: usize` (initialized from `ARCHETYPES` matching `archetype_for(comp.kind).kind`, defaulting to 0) and `pub new_sub_component: String`.
+       - Field order (`FIELD_COUNT = 7`): `0: Name`, `1: Archetype` (`←`/`→` cycles `ARCHETYPES`), `2: Description`, `3: Path`, `4: Tags`, `5: Add Feature`, `6: Add Sub-component`.
+       - `ModalAction::UpdateComponent` includes `kind: ComponentKind` and `add_sub_component: Option<String>`.
+     - Unit tests in `src/tui/modal.rs`:
+       - Verify `new_sub_component` sets title `"New Sub-Component"` and emits `parent_id: Some(...)`.
+       - Verify `EditComponentForm` cycles archetype with `←`/`→`, preserves existing fields, and parses optional `add_sub_component`.
+       - Verify `edge_relationship_preview` for all `EdgeKind` variants including `DependsOn` and `Contains`.
+  2. `src/tui/ui.rs`:
+     - In `render_modal`:
+       - `NewComponent`: if `form.parent_id` is `Some(pid)`, render a muted `  Parent: {pid}` header line above `ID`.
+       - `EditComponent`: render `Archetype: < label >` (field 1) and `Add Sub-component` (field 6) with active-row highlighting.
+       - `EditConnection`: render `  Edge: {}` using `edge_relationship_preview(&form.from, &form.to, form.selected_kind())`.
+     - Add/update UI modal rendering tests in `src/tui/ui.rs` to verify `EditComponent` renders `Archetype:` and `Add Sub-component:` and `EditConnection` renders `depends on`.
+  3. `src/tui/app.rs`:
+     - Update `ModalAction::CreateComponent { id, name, kind, parent_id }` and `ModalAction::UpdateComponent { component_id, name, kind, description, relative_path, tags, add_feature, add_sub_component }` pattern matches so `cargo test --workspace` compiles and passes (applying `candidate.kind = kind` without touching `description`, `features`, or `markdown_body`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn new_sub_component\b' src/tui/modal.rs && grep -qE 'pub fn edge_relationship_preview\b' src/tui/modal.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 11C: Expand/Collapse, Proximity Placement, Collision Shifting, Sub-Component Ingestion & Connect Prompt Clarity
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 11C: Implement sub-component expand/collapse, proximity auto-placement with collision shifting, sub-component creation/ingestion (via `a`, Edit Component, and `EdgeKind::Contains`), parent deletion detachment, and explicit `<A> depends on <target>` connect prompts in src/tui/app.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-140 (Component, EdgeKind::Contains, GridPos, Project::sub_components)
+  - src/archetype.rs:90-140 (scaffold_component, scaffold_sub_component)
+  - src/tui/modal.rs:150-240 (ModalState::new_sub_component, ModalAction)
+  - src/tui/app.rs:250-1040 (App state, visibility, move, connect, modal apply, handle_key)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter footer/canvas rendering or zoom levels (handled in STEP 11D and Phase 12).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn new_sub_component\b' src/tui/modal.rs && grep -qE 'pub fn scaffold_sub_component\b' src/archetype.rs
+
+[MUTATION_SPEC]
+Goal:
+  Enable modular sub-component workflows on the single snap grid: expanding/collapsing parents without ever overwriting/obscuring another card, creating sub-components via `a` or Edit Component, ingesting/detaching existing cards via `EdgeKind::Contains`, and clarifying Connect mode direction.
+
+Contract & Behavior:
+  1. Expand/collapse state & hierarchical visibility:
+     - Add `pub expanded_components: std::collections::HashSet<String>` to `App` (initially empty).
+     - Add helper `pub fn has_sub_components(&self, component_id: &str) -> bool` and `pub fn is_expanded(&self, component_id: &str) -> bool`.
+     - Update `visible_component_indices(&self) -> Vec<usize>`:
+       - Include top-level components (`parent_id.is_none()`), and immediately after each expanded parent, recursively include its visible children (preserving `ListFilter::GapsOnly` filtering; if a component's parent is missing/dangling, treat it as top-level so no card is silently lost).
+     - Add `pub fn toggle_expand_selected(&mut self)`:
+       - If the selected component has sub-components, toggle its ID in `expanded_components`.
+       - When expanding: for each newly revealed child, if its `position` collides with any OTHER currently visible card, shift the colliding card (preferring right, then down, expanding `project.config.grid` bounds if necessary so shifting never fails) and persist moved cards when `.rocket/` exists. Update `status_message` to indicate expanded/collapsed state.
+     - Bind `KeyCode::Char(' ')` and `KeyCode::Enter` (when `self.mode == InputMode::Navigate`) to `self.toggle_expand_selected()` (preserving `KeyCode::Enter if self.mode == InputMode::Connect => self.confirm_connect()`).
+  2. Proximity auto-placement & collision-free helper:
+     - Add `fn find_proximity_grid_pos(&self, anchor: GridPos) -> GridPos`: searches cells in increasing Manhattan distance around `anchor` (preferring right/below `anchor` first, e.g., `(col+1, row)`, `(col, row+1)`, `(col+1, row+1)`, etc.), returning the first cell not occupied by any currently visible component (expanding `grid.cols`/`grid.rows` if needed).
+     - Add `fn resolve_visible_collisions_for(&mut self, protected_id: &str)`: if any other visible component shares the same `position` as `protected_id`, shift that colliding component to the nearest unoccupied cell via `find_proximity_grid_pos` and persist it if `.rocket/` exists.
+  3. Sub-component creation (`a` key & Edit Component `add_sub_component`):
+     - Bind `KeyCode::Char('a')` in `Navigate` mode: if a component is selected, open `ModalState::new_sub_component(selected.id)` with `self.mode = InputMode::Modal`.
+     - In `ModalAction::CreateComponent { id, name, kind, parent_id }`:
+       - When `parent_id` is `Some(pid)`: place the new sub-component near its parent using `find_proximity_grid_pos(parent.position)`, build it via `scaffold_sub_component`, auto-insert `pid` into `expanded_components`, and resolve any collision.
+       - When `parent_id` is `None`: place at `first_unoccupied_grid_pos` (or expand grid if full) and build via `scaffold_component`.
+     - In `ModalAction::UpdateComponent`:
+       - Apply `candidate.kind = kind` WITHOUT overwriting `description`, `features`, or `markdown_body`.
+       - If `add_sub_component` is `Some(sub_name)`: derive a valid unique snake_case ID from `sub_name` (falling back to `{component_id}_sub_{n}` if slug is empty/invalid), create a `Concept` sub-component with `parent_id = Some(component_id)` placed near the parent, persist it, and report creation in `status_message` (leaving it ready to appear when the parent is expanded, or visible immediately if already expanded).
+  4. Connection-driven sub-component ingestion (`EdgeKind::Contains`):
+     - In `ModalAction::UpdateConnection { from, to, kind, label }`:
+       - When `kind == EdgeKind::Contains`: reject cycles (do not allow `from` to be a descendant of `to`), set `to.parent_id = Some(from.clone())`, persist `to`, and if `from` is expanded ensure no grid collision.
+       - When changing an existing `EdgeKind::Contains` edge to another `EdgeKind`: if `to.parent_id.as_deref() == Some(from.as_str())`, detach by setting `to.parent_id = None` and persist `to`.
+  5. Safe parent deletion:
+     - In `ModalAction::DeleteComponent { id }`: detach any children whose `parent_id.as_deref() == Some(id.as_str())` by setting `parent_id = None` (and persisting updated children when `.rocket/` exists) and remove `id` from `expanded_components`.
+  6. Connect Component (`c`) prompt clarity:
+     - Update the `KeyCode::Char('c')` status message to:
+       `format!("Connect: select dependency for {name} ({name} depends on <target>), Enter to confirm")`
+     - Update `confirm_connect` creation message to:
+       `format!("Connected: {source_id} depends on {target_id}")`
+  7. Unit tests in `src/tui/app.rs`:
+     - `sub_component_expand_collapse_hides_and_shows_children`
+     - `expand_shifts_colliding_card_without_overwriting`
+     - `edit_component_changes_archetype_without_clobbering_and_adds_sub_component`
+     - `edit_connection_contains_ingests_and_detaches_sub_component`
+     - `delete_parent_detaches_sub_components`
+     - `connect_prompt_states_dependency_direction`
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub expanded_components:' src/tui/app.rs && grep -qE 'pub fn toggle_expand_selected\b' src/tui/app.rs && grep -q 'depends on <target>' src/tui/app.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 11D: Render Sub-Component Indicators in List, Canvas & Component Details
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 11D: Render expand/collapse indicators and hierarchy indentation in Component List, sub-component badges on parent canvas cards, and Parent/Archetype/Sub-components sections in Component Details.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+  - src/tui/canvas.rs
+READ_ONLY_REFS:
+  - src/archetype.rs:70-100 (archetype_for)
+  - src/model.rs:75-135 (Component::parent_id, Project::sub_components)
+  - src/tui/app.rs:250-340 (visible_component_indices, has_sub_components, is_expanded)
+  - src/tui/ui.rs:84-262 (render_component_list, render_detail_panel)
+  - src/tui/canvas.rs:525-570 (card rendering)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change canvas zoom levels, column widths, footer mnemonic styling, or Help modal rows (those belong to Phase 12).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub expanded_components:' src/tui/app.rs && grep -qE 'pub fn toggle_expand_selected\b' src/tui/app.rs
+
+[MUTATION_SPEC]
+Goal:
+  Make parent/sub-component structure immediately legible across all three TUI columns: Component List, Snap Grid Canvas, and Component Details.
+
+Contract & Behavior:
+  1. `src/tui/ui.rs` — `render_component_list`:
+     - For components with `parent_id.is_some()`, indent the list row with `"  └─ "` (depth-aware if nested).
+     - For components that have sub-components (`app.has_sub_components(&comp.id)`), prefix with `"▾ "` when expanded or `"▸ "` when collapsed.
+  2. `src/tui/ui.rs` — `render_detail_panel`:
+     - Display `Archetype: {}` using `archetype_for(comp.kind).label` (instead of raw `{:?}` only).
+     - If `comp.parent_id` is `Some(pid)`, render a `Parent: {pid}` metadata line.
+     - Add a `Sub-components:` section listing each child from `app.project.sub_components(&comp.id)` (showing child name, id, and whether the parent is currently `[expanded]` or `[collapsed]`, or `(none)` when empty).
+  3. `src/tui/canvas.rs` — `render_canvas`:
+     - On parent cards that have `N > 0` sub-components, append a compact indicator on line 1 or line 2: `[+{N}]` when collapsed or `[-{N}]` when expanded, and display the human-readable archetype label (`archetype_for(comp.kind).label`) on line 2 instead of raw debug enum formatting.
+  4. Tests in `src/tui/ui.rs` and `src/tui/canvas.rs`:
+     - Verify `render_component_list` shows `▸` when collapsed, and `▾` + indented child when expanded.
+     - Verify `render_detail_panel` displays `Parent:`, `Archetype:`, and `Sub-components:`.
+     - Verify `render_canvas` displays `[+1]` when collapsed and `[-1]` when expanded.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'Sub-components:' src/tui/ui.rs && grep -q 'archetype_for' src/tui/canvas.rs && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

@@ -4,9 +4,6 @@ target = ".tracker"
 tech_stack = []
 description = "Default unscoped triage inbox"
 
-[items]
-features = []
-
 [[items.bugs]]
 id = "BUG-0001"
 title = "Fix edge label overwriting arrowhead in render_canvas"
@@ -76,6 +73,41 @@ title = "compute_wrapped_layout measures char count rather than Unicode cell wid
 status = "closed"
 severity = "low"
 created_at = "2026-11-22T04:17:04Z"
+
+[[items.features]]
+id = "FEAT-0001"
+title = "Modular Components, Sub-Components & Lightweight Mutable Archetypes"
+status = "open"
+severity = "high"
+created_at = "2026-11-22T17:37:52Z"
+
+[[items.features]]
+id = "FEAT-0002"
+title = "Canvas Base Scale (4x4 on Start), Explicit Zoom Levels & Top-Center Scrollable Grid"
+status = "open"
+severity = "high"
+created_at = "2026-11-22T17:37:53Z"
+
+[[items.features]]
+id = "FEAT-0003"
+title = "Per-Key Keyboard Reference & Underlined-Mnemonic TUI Footer"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:37:54Z"
+
+[[items.features]]
+id = "FEAT-0004"
+title = "Clear Connect Component Direction (<A> depends on <target>)"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:37:55Z"
+
+[[items.features]]
+id = "FEAT-0005"
+title = "Separate Local Release Build Code Block & Updated Docs in README.md"
+status = "open"
+severity = "low"
+created_at = "2026-11-22T17:37:56Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -426,3 +458,31 @@ title = "docs"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T15:03:37Z"
+
+[[items.tasks]]
+id = "TASK-0051"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:40:07Z"
+
+[[items.tasks]]
+id = "TASK-0052"
+title = "modal"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:40:07Z"
+
+[[items.tasks]]
+id = "TASK-0053"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:40:07Z"
+
+[[items.tasks]]
+id = "TASK-0054"
+title = "ui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T17:40:07Z"
