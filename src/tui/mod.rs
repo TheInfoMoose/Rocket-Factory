@@ -1,4 +1,5 @@
 pub mod app;
+pub mod canvas;
 pub mod style;
 pub mod terminal;
 pub mod ui;
