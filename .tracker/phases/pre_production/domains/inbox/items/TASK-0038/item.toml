@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0038"
 type = "task"
 title = "sync"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:18:56Z"
-updated_at = "2026-11-22T04:18:56Z"
+updated_at = "2026-11-22T04:27:50Z"
 source_ref = "STEP 7C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0038@2026-11-22T04:24:58Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "3a3422b"
+summary = "STEP 7C: Fix Multi-Adapter Feature Push Across CLI and TUI + E2E Verification (`TASK-0035`) (phased check PASS)"
