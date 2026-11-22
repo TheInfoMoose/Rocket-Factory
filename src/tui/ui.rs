@@ -1,9 +1,12 @@
+use std::collections::HashSet;
+
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::archetype::archetype_for;
 use crate::audit::{compute_card_status, task_progress};
 use crate::theme::Theme;
 use crate::tui::app::{App, FocusColumn, ListFilter};
@@ -83,6 +86,28 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(header, area);
 }
 
+fn component_depth(app: &App, comp_id: &str) -> usize {
+    let mut depth = 0usize;
+    let mut current_id = comp_id;
+    let mut visited = HashSet::new();
+    visited.insert(current_id);
+    while let Some(parent_id) = app
+        .project
+        .component(current_id)
+        .and_then(|c| c.parent_id.as_deref())
+    {
+        if !visited.insert(parent_id) {
+            break;
+        }
+        depth += 1;
+        if app.project.component(parent_id).is_none() {
+            break;
+        }
+        current_id = parent_id;
+    }
+    depth
+}
+
 fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
     let title = match app.filter {
         ListFilter::All => " Components ",
@@ -115,8 +140,23 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
             let status = compute_card_status(comp);
             let glyph = style::status_glyph(status);
             let progress = task_progress(comp);
+            let depth = component_depth(app, &comp.id);
+            let indent = if depth > 0 {
+                format!("{}└─ ", "  ".repeat(depth))
+            } else {
+                String::new()
+            };
+            let expand_prefix = if app.has_sub_components(&comp.id) {
+                if app.is_expanded(&comp.id) {
+                    "▾ "
+                } else {
+                    "▸ "
+                }
+            } else {
+                ""
+            };
             let label = format!(
-                "{glyph} {} ({}/{})",
+                "{indent}{expand_prefix}{glyph} {} ({}/{})",
                 comp.name, progress.complete, progress.total
             );
             let item_style = if row_idx == app.selected_index {
@@ -154,6 +194,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let status = compute_card_status(comp);
+    let archetype = archetype_for(comp.kind);
     let path_display = comp.relative_path.as_deref().unwrap_or("-");
     let tags_display = if comp.tags.is_empty() {
         "-".to_string()
@@ -174,20 +215,53 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         )),
         Line::from(Span::styled(
             format!(
-                "Kind: {:?} | Status: {:?} | Grid: ({}, {})",
-                comp.kind, status, comp.position.col, comp.position.row
+                "Archetype: {} | Status: {:?} | Grid: ({}, {})",
+                archetype.label, status, comp.position.col, comp.position.row
             ),
             Style::default().fg(style::card_border_color(&app.theme, status)),
         )),
-        Line::from(Span::styled(format!("Path: {path_display}"), base)),
-        Line::from(Span::styled(format!("Tags: {tags_display}"), base)),
-        Line::from(Span::styled(
-            format!("Description: {}", comp.description),
-            base,
-        )),
-        Line::from(""),
-        Line::from(Span::styled("Connections:", heading_style)),
     ];
+    if let Some(pid) = comp.parent_id.as_deref() {
+        lines.push(Line::from(Span::styled(format!("Parent: {pid}"), base)));
+    }
+    lines.push(Line::from(Span::styled(
+        format!("Path: {path_display}"),
+        base,
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("Tags: {tags_display}"),
+        base,
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("Description: {}", comp.description),
+        base,
+    )));
+
+    let sub_components = app.project.sub_components(&comp.id);
+    lines.push(Line::from(""));
+    if sub_components.is_empty() {
+        lines.push(Line::from(Span::styled("Sub-components:", heading_style)));
+        lines.push(Line::from(Span::styled("  (none)", muted)));
+    } else {
+        let sub_state = if app.is_expanded(&comp.id) {
+            "[expanded]"
+        } else {
+            "[collapsed]"
+        };
+        lines.push(Line::from(Span::styled(
+            format!("Sub-components: {sub_state}"),
+            heading_style,
+        )));
+        for child in sub_components {
+            lines.push(Line::from(Span::styled(
+                format!("  {} ({})", child.name, child.id),
+                base,
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Connections:", heading_style)));
 
     let mut has_connections = false;
     for conn in &app.project.config.connections {
@@ -870,5 +944,102 @@ mod tests {
         let edge_text = render_to_string(&mut app);
         assert!(edge_text.contains("Edit Connection"));
         assert!(edge_text.contains("Edge: view_box depends on core_bus"));
+    }
+
+    #[test]
+    fn render_component_list_shows_expand_collapse_indicators_and_nested_indentation() {
+        let mut app = make_test_app();
+        app.project.components.push(Component {
+            id: "bus_worker".to_string(),
+            name: "bus_worker".to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: Some("core_bus".to_string()),
+            description: "Worker sub-component".to_string(),
+            relative_path: Some("src/bus_worker.rs".to_string()),
+            position: GridPos { col: 1, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+        app.project.components.push(Component {
+            id: "worker_pool".to_string(),
+            name: "worker_pool".to_string(),
+            kind: ComponentKind::Data,
+            parent_id: Some("bus_worker".to_string()),
+            description: "Nested pool".to_string(),
+            relative_path: Some("src/worker_pool.rs".to_string()),
+            position: GridPos { col: 1, row: 2 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+
+        let collapsed = render_to_string(&mut app);
+        assert!(collapsed.contains("▸ "));
+        assert!(!collapsed.contains("  └─ "));
+
+        app.expanded_components.insert("core_bus".to_string());
+        let expanded_one = render_to_string(&mut app);
+        assert!(expanded_one.contains("▾ "));
+        assert!(expanded_one.contains("  └─ ▸ "));
+        assert!(expanded_one.contains("bus_worker"));
+        assert!(!expanded_one.contains("    └─ "));
+
+        app.expanded_components.insert("bus_worker".to_string());
+        let expanded_two = render_to_string(&mut app);
+        assert!(expanded_two.contains("  └─ ▾ "));
+        assert!(expanded_two.contains("    └─ "));
+        assert!(expanded_two.contains("worker_pool"));
+    }
+
+    #[test]
+    fn render_detail_panel_displays_parent_archetype_and_sub_components() {
+        let mut app = make_test_app();
+        app.project.components.push(Component {
+            id: "bus_worker".to_string(),
+            name: "Bus Worker".to_string(),
+            kind: ComponentKind::Data,
+            parent_id: Some("core_bus".to_string()),
+            description: "Worker sub-component".to_string(),
+            relative_path: Some("src/bus_worker.rs".to_string()),
+            position: GridPos { col: 1, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+
+        // Select parent (core_bus) while collapsed
+        app.selected_index = 1;
+        let parent_collapsed = render_to_string(&mut app);
+        assert!(parent_collapsed.contains("Archetype: Logic"));
+        assert!(!parent_collapsed.contains("Parent:"));
+        assert!(parent_collapsed.contains("Sub-components: [collapsed]"));
+        assert!(parent_collapsed.contains("Bus Worker (bus_worker)"));
+
+        // Expand parent and verify status updates
+        app.expanded_components.insert("core_bus".to_string());
+        let parent_expanded = render_to_string(&mut app);
+        assert!(parent_expanded.contains("Sub-components: [expanded]"));
+        assert!(parent_expanded.contains("Bus Worker (bus_worker)"));
+
+        // Select child (bus_worker) and verify Parent, Archetype, and empty Sub-components
+        app.selected_index = 2;
+        let child_detail = render_to_string(&mut app);
+        assert!(child_detail.contains("Archetype: Data"));
+        assert!(child_detail.contains("Parent: core_bus"));
+        assert!(child_detail.contains("Sub-components:"));
+        assert!(child_detail.contains("(none)"));
     }
 }

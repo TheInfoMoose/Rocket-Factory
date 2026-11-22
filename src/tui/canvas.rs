@@ -6,6 +6,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
+use crate::archetype::archetype_for;
 use crate::audit::{compute_card_status, task_progress};
 use crate::model::{EdgeKind, GridPos};
 use crate::tui::app::{App, FocusColumn};
@@ -544,11 +545,29 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         }
 
         let inner_w = rect.width.saturating_sub(2) as usize;
-        let line1 = truncate_text(&format!("{glyph} {}", comp.name), inner_w);
+        let sub_count = app.project.sub_components(&comp.id).len();
+        let line1 = if sub_count > 0 {
+            let badge = if app.is_expanded(&comp.id) {
+                format!("[-{sub_count}]")
+            } else {
+                format!("[+{sub_count}]")
+            };
+            let badge_len = badge.chars().count();
+            if inner_w > badge_len + 1 {
+                let prefix =
+                    truncate_text(&format!("{glyph} {}", comp.name), inner_w - badge_len - 1);
+                format!("{prefix} {badge}")
+            } else {
+                truncate_text(&format!("{glyph} {} {badge}", comp.name), inner_w)
+            }
+        } else {
+            truncate_text(&format!("{glyph} {}", comp.name), inner_w)
+        };
+        let archetype = archetype_for(comp.kind);
         let line2 = truncate_text(
             &format!(
-                "Tasks {}/{} [{:?}]",
-                progress.complete, progress.total, comp.kind
+                "Tasks {}/{} [{}]",
+                progress.complete, progress.total, archetype.label
             ),
             inner_w,
         );
@@ -833,5 +852,49 @@ mod tests {
             );
         }
         assert_eq!(expected.segments.last().map(|&(_, _, ch)| ch), Some('▶'));
+    }
+
+    #[test]
+    fn render_canvas_displays_sub_component_badges_and_archetype_label() {
+        use crate::model::{Component, ComponentKind};
+
+        let mut app =
+            make_canvas_test_app(GridPos { col: 0, row: 0 }, GridPos { col: 1, row: 0 }, None);
+        app.project.components[0].kind = ComponentKind::Logic;
+        app.project.components.push(Component {
+            id: "alpha_child".to_string(),
+            name: "Alpha Child".to_string(),
+            kind: ComponentKind::Data,
+            parent_id: Some("alpha".to_string()),
+            description: "Child node".to_string(),
+            relative_path: Some("src/alpha_child.rs".to_string()),
+            position: GridPos { col: 0, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+
+        let collapsed_buf = render_canvas_buffer(&app, 60, 20);
+        let collapsed_text: String = (0..collapsed_buf.area.height)
+            .map(|y| row_text(&collapsed_buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(collapsed_text.contains("[+1]"));
+        assert!(!collapsed_text.contains("[-1]"));
+        assert!(collapsed_text.contains("[Logic]"));
+
+        app.expanded_components.insert("alpha".to_string());
+        let expanded_buf = render_canvas_buffer(&app, 60, 20);
+        let expanded_text: String = (0..expanded_buf.area.height)
+            .map(|y| row_text(&expanded_buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(expanded_text.contains("[-1]"));
+        assert!(!expanded_text.contains("[+1]"));
+        assert!(expanded_text.contains("Alpha Child"));
     }
 }
