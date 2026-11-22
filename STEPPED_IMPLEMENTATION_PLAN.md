@@ -18,13 +18,18 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 7):** Resolve all Phase 6 review findings (`BUG-0005`–`BUG-0007`, `TASK-0035`) — propagate caller-supplied `theme_dirs` in `run_tui`, align modal save-failure UX for component/connection edits, eliminate 80-column Help modal wrapping/clipping, and fix multi-adapter feature push short-circuiting across CLI and TUI.
+**Phase goal (Phase 8):** Complete TUI CRUD workflows with confirmation-guarded deletion of components (`d`) and connections (`D`), deduplicate the multi-adapter feature push loop into a shared `src/adapter.rs` helper (`TASK-0039`), and add `README.md` documenting CLI usage, TUI keybindings, `.ron` themes, and external adapter contracts.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
 ### Up Next
 
-_None — Phase 7 complete._
+| # | Step | Command | Scope | Target Files | Waits on |
+| :---: | :--- | :---: | :--- | :--- | :--- |
+| 1 | **STEP 8A** | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` | — |
+| 2 | **STEP 8B** | `/goal` | modal | `src/tui/modal.rs` | — |
+| 3 | **STEP 8C** | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` | STEP 8A, STEP 8B |
+| 4 | **STEP 8D** | `/goal` | docs | `README.md` | STEP 8C |
 
 ### Completed
 
@@ -65,7 +70,7 @@ _None — Phase 7 complete._
 
 ### Future phases
 
-_None planned — Phase 7 closes out all Phase 6 review findings and hardens Rocket Factory for release._
+_None planned — Phase 8 completes TUI CRUD deletion flows, resolves `TASK-0039`, and documents Rocket Factory for end-user adoption._
 
 ### Open Questions
 
@@ -1900,6 +1905,244 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/ tests/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 8 Step Blocks
+
+### STEP 8A: Shared Multi-Adapter Feature Push Helper (`TASK-0039`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8A: Extract a shared push_unpushed_features helper in src/adapter.rs and refactor src/cli.rs and src/tui/app.rs to use it (TASK-0039).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+  - src/cli.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:230-260 (run_push_feature)
+  - src/cli.rs:150-225 (Command::Push loop)
+  - src/tui/app.rs:215-285 (sync_push_selected)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn run_push_feature\b' src/adapter.rs && grep -qE 'pub fn sync_push_selected\b' src/tui/app.rs
+
+[MUTATION_SPEC]
+Goal:
+  Close TASK-0039 by eliminating the duplicated ~45-line multi-adapter feature-push loop between CLI (`Command::Push`) and TUI (`sync_push_selected`) while preserving identical behavior and rollback guarantees.
+
+Contract & Behavior:
+  - `src/adapter.rs`:
+    - Define `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub struct FeaturePushSummary { pub features_pushed: usize, pub modified: bool }`.
+    - Define `pub fn push_unpushed_features(adapters: &[&AdapterConfig], workdir: &Path, component: &mut Component) -> RfResult<FeaturePushSummary>`:
+      - Filter `adapters` to those with `push_feature_cmd.is_some()`. If empty, return `Ok(FeaturePushSummary::default())`.
+      - Snapshot indices of features in `component.features` where `!feature.pushed`. If empty, return `Ok(FeaturePushSummary::default())`.
+      - For each unpushed feature index, invoke `run_push_feature(active, workdir, &component.id, feature)?` across every filtered adapter, incrementing `features_pushed` and recording the first non-`None` `external_id`.
+      - Only after all adapter calls succeed for every unpushed feature, mark those features `pushed = true`, assign the recorded `external_id` if `Some`, and set `modified = true`.
+      - Return `Ok(FeaturePushSummary { features_pushed, modified })`.
+  - `src/cli.rs` (`Command::Push`):
+    - Replace the inline unpushed-feature loop with a call to `adapter::push_unpushed_features(&active_adapters, root, comp)?`, accumulating `features_pushed` and persisting via `storage::save_component(root, comp)?` when `summary.modified` is true.
+  - `src/tui/app.rs` (`sync_push_selected`):
+    - Replace the inline unpushed-feature loop with a call to `push_unpushed_features(&active_adapters, &self.root, comp)?` on the `candidate` project clone, preserving disk-save-before-commit rollback (`BUG-0004`).
+
+Tests:
+  - In `src/adapter.rs`:
+    - Unit test `push_unpushed_features_sends_to_all_adapters_and_records_first_id` using 2 mock `sh` adapters.
+    - Unit test `push_unpushed_features_leaves_unpushed_on_second_adapter_error` verifying `feature.pushed` stays `false` and `external_id` stays `None` when the second adapter exits non-zero.
+  - All existing CLI, TUI, and E2E multi-adapter tests must continue to pass without modification.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn push_unpushed_features\b' src/adapter.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8B: Confirm-Delete Modal State and Key Handling
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8B: Add ConfirmDelete modal state, target enum, and confirmation key handling in src/tui/modal.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs:107-160 (ModalState, ModalAction)
+  - src/tui/modal.rs:200-350 (ModalState::title, handle_modal_key)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub enum ModalState\b' src/tui/modal.rs && grep -qE 'pub enum ModalAction\b' src/tui/modal.rs
+
+[MUTATION_SPEC]
+Goal:
+  Provide a pure, testable confirmation modal for deleting components or connections so destructive TUI actions require explicit confirmation (`Enter`/`y`) and can display disk-error feedback without closing.
+
+Contract & Behavior:
+  - In `src/tui/modal.rs`:
+    - Define `#[derive(Debug, Clone, PartialEq, Eq)] pub enum ConfirmDeleteTarget`:
+      - `Component { id: String, name: String, affected_connections: usize }`
+      - `Connection { from: String, to: String }`
+    - Define `#[derive(Debug, Clone, PartialEq, Eq)] pub struct ConfirmDeleteForm { pub target: ConfirmDeleteTarget, pub error: Option<String> }`.
+    - Add variant `ModalState::ConfirmDelete(ConfirmDeleteForm)`.
+    - Add variants to `ModalAction`:
+      - `DeleteComponent { id: String }`
+      - `DeleteConnection { from: String, to: String }`
+    - Add constructors on `ModalState`:
+      - `pub fn confirm_delete_component(id: impl Into<String>, name: impl Into<String>, affected_connections: usize) -> Self`
+      - `pub fn confirm_delete_connection(from: impl Into<String>, to: impl Into<String>) -> Self`
+    - Update `ModalState::title(&self)` to return `"Delete Component"` for `ConfirmDeleteTarget::Component { .. }` and `"Delete Connection"` for `ConfirmDeleteTarget::Connection { .. }`.
+    - Update `handle_modal_key`:
+      - For `ModalState::ConfirmDelete(form)`:
+        - `KeyCode::Enter | KeyCode::Char('y' | 'Y')`: clear `form.error = None` and return `ModalAction::DeleteComponent { id }` or `ModalAction::DeleteConnection { from, to }`.
+        - `KeyCode::Esc | KeyCode::Char('n' | 'N')`: return `ModalAction::Cancel`.
+        - All other keys: return `ModalAction::None`.
+
+Tests:
+  - In `src/tui/modal.rs`:
+    - Unit tests verifying `Enter` and `'y'` emit `ModalAction::DeleteComponent` / `ModalAction::DeleteConnection`, `'n'` and `Esc` emit `ModalAction::Cancel`, and unrelated keys emit `ModalAction::None`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub enum ConfirmDeleteTarget\b' src/tui/modal.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8C: Wire Delete Component (`d`) and Delete Connection (`D`) in TUI + E2E Verification
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8C: Wire d (delete component) and D (delete connection) keybinds, atomic rollback persistence, ConfirmDelete/Help modal rendering, and E2E tests in src/tui/app.rs, src/tui/ui.rs, and tests/e2e.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+  - src/tui/ui.rs
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs (ConfirmDeleteForm, ConfirmDeleteTarget, ModalAction::DeleteComponent, ModalAction::DeleteConnection)
+  - src/storage.rs:165-197 (delete_component, save_project_config)
+  - src/tui/ui.rs:385-510 (ModalState::Help, render_modal)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or tests/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+  - Test fixtures must use reserved placeholder data only (`example.com`, `192.0.2.0/24`, `testuser`).
+
+[PRE_GATE]
+grep -qE 'pub enum ConfirmDeleteTarget\b' src/tui/modal.rs && grep -qE 'pub fn delete_component\b' src/storage.rs
+
+[MUTATION_SPEC]
+Goal:
+  Complete TUI CRUD workflows by enabling safe, confirmation-guarded deletion of components (`d`, including cleanup of incident connections) and connections (`D`), with disk-failure rollback and unclipped 80x24 help rendering.
+
+Contract & Behavior:
+  - `src/tui/app.rs`:
+    - In `InputMode::Navigate`:
+      - `'d'`: if a component is selected, count `affected_connections` where `conn.from == comp.id || conn.to == comp.id`, open `ModalState::confirm_delete_component(comp.id.clone(), comp.name.clone(), affected_connections)`, set `self.mode = InputMode::Modal`, and set status `"Confirm delete component {}"`. If no component is selected, set status `"No component selected to delete"`.
+      - `'D'`: if a component is selected, locate the first connection on it (preferring outgoing `conn.from == comp.id`, falling back to incoming `conn.to == comp.id`, matching `'E'`), open `ModalState::confirm_delete_connection(conn.from.clone(), conn.to.clone())`, set `self.mode = InputMode::Modal`, and set status `"Confirm delete connection {} -> {}"`. If none exists, set status `"No connection on selected component to delete"`.
+    - In `apply_modal_action`:
+      - `ModalAction::DeleteComponent { id }`:
+        - Build `candidate_config` with all connections where `conn.from == id || conn.to == id` removed.
+        - When `self.root.join(ROCKET_DIR).exists()`:
+          - Delete component files via `crate::storage::delete_component(&self.root, &id)`.
+          - On `Err(err)`: set `form.error = Some(msg.clone())`, `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project` unchanged, and return.
+          - If `candidate_config.connections.len() != self.project.config.connections.len()`, persist `save_project_config(&self.root, &candidate_config)`. On `Err(err)`: best-effort re-save the deleted component via `save_component`, set `form.error = Some(msg.clone())`, re-attach modal, keep `InputMode::Modal`, leave `self.project` unchanged, and return.
+        - On success: remove the component from `self.project.components`, commit `self.project.config = candidate_config`, call `self.clamp_selection()`, reset `self.detail_scroll = 0`, call `self.refresh_audit()`, set `self.mode = InputMode::Navigate`, and set status `"Deleted component {id}"`.
+      - `ModalAction::DeleteConnection { from, to }`:
+        - Build `candidate_config` with the `(from, to)` connection removed.
+        - When `self.root.join(ROCKET_DIR).exists()`, persist `save_project_config(&self.root, &candidate_config)`. On `Err(err)`: set `form.error = Some(msg.clone())`, `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project.config` unchanged, and return.
+        - On success: commit `self.project.config = candidate_config`, call `self.refresh_audit()`, set `self.mode = InputMode::Navigate`, and set status `"Deleted connection {from} -> {to}"`.
+  - `src/tui/ui.rs`:
+    - Handle `ModalState::ConfirmDelete(form)` in `render_modal`:
+      - For `ConfirmDeleteTarget::Component { id, name, affected_connections }`: display `"  Delete component '{name}' ({id})?"` and when `affected_connections > 0`, a warning line noting that `{affected_connections}` connection(s) will also be removed.
+      - For `ConfirmDeleteTarget::Connection { from, to }`: display `"  Delete connection '{from} -> {to}'?"`.
+      - Return `form.error.as_deref()` for standard error rendering and use footer hint `"  [Enter/y] Confirm Delete  [Esc/n] Cancel"`.
+    - Update `ModalState::Help` under `"  Editing & Canvas"` to document `d / D` (`"    d / D             Delete component / Delete edge"`) while keeping every Help line `<= 70` cols and total Help popup height `<= 22` rows so `80x24` terminals render unclipped with `"[Esc/?/Enter/q] Close"` visible.
+  - `tests/e2e.rs`:
+    - Add E2E test `e2e_tui_delete_connection_and_component_persists_to_disk` driving `'D'` + `'y'` to delete a connection, `'d'` + `'n'` to cancel component deletion, and `'d'` + `'y'` to delete a component with incident edges, verifying `.rocket/` on disk via `storage::load_project` after each step.
+
+Tests:
+  - Unit tests in `src/tui/app.rs` for delete component (including incident connection cleanup), delete connection, cancel via `Esc`/`n`, and save-failure rollback keeping modal open with `form.error`.
+  - Unit tests in `src/tui/ui.rs` verifying `ModalState::ConfirmDelete` rendering and `80x24` `ModalState::Help` rendering with both `"Delete component / Delete edge"` and `"[Esc/?/Enter/q] Close"` intact.
+  - E2E test in `tests/e2e.rs` passing under `cargo test --workspace`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/ tests/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8D: User & Adapter Documentation (`README.md`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8D: Create README.md documenting Rocket Factory installation, CLI commands, TUI keybindings, .rocket/ workspace layout, RON themes, and external adapter contracts.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - README.md (NEW)
+READ_ONLY_REFS:
+  - Rocket Factory.md (product overview)
+  - src/cli.rs (CLI subcommands and flags)
+  - src/main.rs (RF_POLL_INTERVAL_SECS, default paths)
+  - src/tui/ui.rs (ModalState::Help keybindings)
+  - src/adapter.rs (AdaptersFile, AdapterConfig, PushFeaturePayload, PushResponse, PullStatusResponse)
+  - src/theme.rs (DEFAULT_CRT_AMBER_RON, theme search paths)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No sensitive data (use only reserved placeholders: `example.com`, `192.0.2.0/24`, `testuser`).
+  - No marketing, sales, or hype language; list only features, flags, keybindings, and contracts verified directly in the current codebase.
+
+[PRE_GATE]
+test ! -f README.md && grep -qE 'Delete component / Delete edge' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal:
+  Provide strictly factual, informative documentation at the repository root covering only features, commands, keybindings, file formats, and adapter contracts actually implemented and verifiable in the codebase (no sales or hype).
+
+Contract & Behavior:
+  - Create `README.md` with sections:
+    1. **Overview & Quickstart**: build/install (`cargo build --release`, `cargo install --path .`), `rf init --name <name> --description <desc>`, launching TUI (`rf --path <dir>`).
+    2. **CLI Reference**: `rf init`, `rf audit [--strict]`, `rf export --format <manifest|roadmap|json> [--component <id>]`, `rf push [--component <id>] [--adapter <name>]`, `rf pull [--adapter <name>]`, global flags (`--path`, `--adapters-file`), and environment variables (`RF_POLL_INTERVAL_SECS`, `$EDITOR`).
+    3. **TUI Keyboard Reference**: complete table matching `ModalState::Help` (`Tab`/`Shift+Tab`, `hjkl`/Arrows, `f`, `n`/`e`/`E`, `d`/`D`, `m`/`c`, `v`, `r`/`S`, `p`, `t`, `?`, `Esc`/`q`).
+    4. **Workspace Layout**: `.rocket/project.toml`, `.rocket/components/<id>.toml`, `.rocket/components/<id>.md`, and `.rocket/themes/*.ron`.
+    5. **RON Themes**: search order (`.rocket/themes/`, `~/.config/rocket-factory/themes/`, built-in `crt_amber`) and minimal custom `.ron` example.
+    6. **External Adapters (`adapters.toml`)**: default path (`~/.config/rocket-factory/adapters.toml`), `AdapterConfig` schema, and JSON stdin/stdout contracts for `push_component_cmd`, `push_feature_cmd`, and `pull_status_cmd`.
+
+[POST_GATE]
+test -s README.md && grep -q 'rf init' README.md && grep -q 'adapters.toml' README.md && grep -q 'Delete component' README.md && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

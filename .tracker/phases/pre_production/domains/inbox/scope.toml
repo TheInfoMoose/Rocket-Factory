@@ -349,3 +349,31 @@ title = "Deduplicate multi-adapter feature push loop between src/cli.rs and src/
 status = "pending"
 severity = "low"
 created_at = "2026-11-22T04:49:30Z"
+
+[[items.tasks]]
+id = "TASK-0040"
+title = "adapter"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T05:08:06Z"
+
+[[items.tasks]]
+id = "TASK-0041"
+title = "modal"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T05:08:06Z"
+
+[[items.tasks]]
+id = "TASK-0042"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T05:08:06Z"
+
+[[items.tasks]]
+id = "TASK-0043"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T05:08:06Z"
