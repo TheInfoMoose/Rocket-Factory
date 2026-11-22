@@ -105,10 +105,25 @@ impl EditConnectionForm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeSwitcherForm {
+    pub themes: Vec<String>,
+    pub selected_index: usize,
+    pub error: Option<String>,
+}
+
+impl ThemeSwitcherForm {
+    pub fn selected_theme(&self) -> Option<&str> {
+        self.themes.get(self.selected_index).map(String::as_str)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     NewComponent(NewComponentForm),
     EditComponent(EditComponentForm),
     EditConnection(EditConnectionForm),
+    Help,
+    ThemeSwitcher(ThemeSwitcherForm),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +148,9 @@ pub enum ModalAction {
         to: String,
         kind: EdgeKind,
         label: Option<String>,
+    },
+    SelectTheme {
+        name: String,
     },
 }
 
@@ -190,11 +208,26 @@ impl ModalState {
         })
     }
 
+    pub fn help() -> Self {
+        Self::Help
+    }
+
+    pub fn theme_switcher(themes: Vec<String>, current_theme: &str) -> Self {
+        let selected_index = themes.iter().position(|t| t == current_theme).unwrap_or(0);
+        Self::ThemeSwitcher(ThemeSwitcherForm {
+            themes,
+            selected_index,
+            error: None,
+        })
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             Self::NewComponent(_) => "New Component",
             Self::EditComponent(_) => "Edit Component",
             Self::EditConnection(_) => "Edit Connection",
+            Self::Help => "Keyboard Help",
+            Self::ThemeSwitcher(_) => "Switch Theme",
         }
     }
 
@@ -207,6 +240,8 @@ impl ModalState {
             Self::NewComponent(form) => handle_new_component_key(form, key),
             Self::EditComponent(form) => handle_edit_component_key(form, key),
             Self::EditConnection(form) => handle_edit_connection_key(form, key),
+            Self::Help => handle_help_key(key),
+            Self::ThemeSwitcher(form) => handle_theme_switcher_key(form, key),
         }
     }
 }
@@ -400,6 +435,35 @@ fn handle_edit_connection_key(form: &mut EditConnectionForm, key: KeyEvent) -> M
     }
 }
 
+fn handle_help_key(key: KeyEvent) -> ModalAction {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('?') | KeyCode::Char('q') => ModalAction::Cancel,
+        _ => ModalAction::None,
+    }
+}
+
+fn handle_theme_switcher_key(form: &mut ThemeSwitcherForm, key: KeyEvent) -> ModalAction {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            form.selected_index = cycle_prev(form.selected_index, form.themes.len());
+            form.error = None;
+            ModalAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            form.selected_index = cycle_next(form.selected_index, form.themes.len());
+            form.error = None;
+            ModalAction::None
+        }
+        KeyCode::Enter => match form.selected_theme() {
+            Some(name) => ModalAction::SelectTheme {
+                name: name.to_string(),
+            },
+            None => ModalAction::Cancel,
+        },
+        _ => ModalAction::None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +617,69 @@ mod tests {
 
         // Esc cancels
         assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+    }
+
+    #[test]
+    fn help_modal_dismisses_on_esc_question_enter_and_q() {
+        let mut modal = ModalState::help();
+        assert_eq!(modal.title(), "Keyboard Help");
+
+        assert_eq!(modal.handle_key(key(KeyCode::Char('a'))), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('?'))),
+            ModalAction::Cancel
+        );
+        assert_eq!(modal.handle_key(key(KeyCode::Enter)), ModalAction::Cancel);
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('q'))),
+            ModalAction::Cancel
+        );
+    }
+
+    #[test]
+    fn theme_switcher_navigates_wraps_and_selects_theme() {
+        let themes = vec![
+            "amber_alt".to_string(),
+            "crt_amber".to_string(),
+            "phosphor_green".to_string(),
+        ];
+        let mut modal = ModalState::theme_switcher(themes, "crt_amber");
+        assert_eq!(modal.title(), "Switch Theme");
+
+        let ModalState::ThemeSwitcher(ref form) = modal else {
+            panic!("expected ThemeSwitcher");
+        };
+        assert_eq!(form.selected_index, 1);
+        assert_eq!(form.selected_theme(), Some("crt_amber"));
+
+        // Down -> phosphor_green, Down -> wraps to amber_alt
+        assert_eq!(modal.handle_key(key(KeyCode::Down)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Char('j'))), ModalAction::None);
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Enter)),
+            ModalAction::SelectTheme {
+                name: "amber_alt".to_string()
+            }
+        );
+
+        // Up from 0 wraps to last (phosphor_green)
+        assert_eq!(modal.handle_key(key(KeyCode::Char('k'))), ModalAction::None);
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Enter)),
+            ModalAction::SelectTheme {
+                name: "phosphor_green".to_string()
+            }
+        );
+
+        // Esc cancels
+        assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+
+        // Empty theme list cancels on Enter
+        let mut empty_modal = ModalState::theme_switcher(Vec::new(), "crt_amber");
+        assert_eq!(
+            empty_modal.handle_key(key(KeyCode::Enter)),
+            ModalAction::Cancel
+        );
     }
 }

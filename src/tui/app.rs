@@ -57,6 +57,7 @@ pub struct App {
     pub root: PathBuf,
     pub project: Project,
     pub theme: Theme,
+    pub theme_dirs: Vec<PathBuf>,
     pub focus: FocusColumn,
     pub mode: InputMode,
     pub filter: ListFilter,
@@ -75,10 +76,12 @@ pub struct App {
 impl App {
     pub fn new(root: PathBuf, project: Project, theme: Theme) -> Self {
         let audit_findings = audit_project(&project);
+        let theme_dirs = crate::tui::terminal::default_theme_dirs(&root);
         Self {
             root,
             project,
             theme,
+            theme_dirs,
             focus: FocusColumn::List,
             mode: InputMode::Navigate,
             filter: ListFilter::All,
@@ -705,6 +708,40 @@ impl App {
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
             }
+            ModalAction::SelectTheme { name } => {
+                let resolved_theme = match crate::theme::resolve_theme(&name, &self.theme_dirs) {
+                    Ok(theme) => theme,
+                    Err(err) => {
+                        let msg = format!("Failed to load theme '{name}': {err}");
+                        if let ModalState::ThemeSwitcher(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        return;
+                    }
+                };
+
+                let mut candidate_config = self.project.config.clone();
+                candidate_config.theme = name.clone();
+
+                if self.root.join(ROCKET_DIR).exists() {
+                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                        let msg = format!("Failed to save theme '{name}': {err}");
+                        if let ModalState::ThemeSwitcher(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        return;
+                    }
+                }
+
+                self.project.config = candidate_config;
+                self.theme = resolved_theme;
+                self.mode = InputMode::Navigate;
+                self.status_message = format!("Theme switched to {name}");
+            }
         }
     }
 
@@ -828,6 +865,22 @@ impl App {
                 } else {
                     self.status_message = "No component selected to push".to_string();
                 }
+            }
+            KeyCode::Char('?') => {
+                self.connect_source_id = None;
+                self.modal = Some(ModalState::help());
+                self.mode = InputMode::Modal;
+                self.status_message = "Keyboard Help".to_string();
+            }
+            KeyCode::Char('t') => {
+                self.connect_source_id = None;
+                let themes = crate::theme::list_available_themes(&self.theme_dirs);
+                self.modal = Some(ModalState::theme_switcher(
+                    themes,
+                    &self.project.config.theme,
+                ));
+                self.mode = InputMode::Modal;
+                self.status_message = "Switch Theme".to_string();
             }
             KeyCode::Enter if self.mode == InputMode::Connect => {
                 self.confirm_connect();
@@ -1568,5 +1621,82 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
             disk_comp.features[0].external_id.as_deref(),
             Some("FEAT-42")
         );
+    }
+
+    #[test]
+    fn app_theme_switcher_applies_persists_and_rolls_back_on_error() {
+        use crate::storage::{init_workspace, load_project, PROJECT_FILE};
+        use crate::theme::DEFAULT_CRT_AMBER_RON;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Theme Test", "Theme switcher persistence")
+            .expect("init workspace");
+
+        let themes_dir = dir.path().join("custom_themes");
+        std::fs::create_dir_all(&themes_dir).expect("create themes dir");
+        let amber_alt_ron = DEFAULT_CRT_AMBER_RON.replace("\"crt_amber\"", "\"amber_alt\"");
+        std::fs::write(themes_dir.join("amber_alt.ron"), amber_alt_ron)
+            .expect("write amber_alt.ron");
+        std::fs::write(themes_dir.join("broken_theme.ron"), "not valid ron (")
+            .expect("write broken_theme.ron");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        app.theme_dirs = vec![themes_dir];
+
+        // Open '?' help overlay and close it with '?'
+        app.handle_key(key(KeyCode::Char('?')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(app.modal, Some(ModalState::Help));
+        app.handle_key(key(KeyCode::Char('?')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+
+        // Open 't' theme switcher: sorted list is ["amber_alt", "broken_theme", "crt_amber"]
+        // Pre-selected index should be 2 ("crt_amber")
+        app.handle_key(key(KeyCode::Char('t')));
+        assert_eq!(app.mode, InputMode::Modal);
+        let Some(ModalState::ThemeSwitcher(ref form)) = app.modal else {
+            panic!("expected ThemeSwitcher modal");
+        };
+        assert_eq!(form.selected_theme(), Some("crt_amber"));
+
+        // Move Up to "broken_theme" and press Enter -> stays open with error
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(app.theme.name, "crt_amber");
+        assert_eq!(app.project.config.theme, "crt_amber");
+        let Some(ModalState::ThemeSwitcher(ref form)) = app.modal else {
+            panic!("expected ThemeSwitcher modal to remain open on parse error");
+        };
+        assert!(form.error.is_some());
+
+        // Move Up to "amber_alt" and press Enter -> applies and persists
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.theme.name, "amber_alt");
+        assert_eq!(app.project.config.theme, "amber_alt");
+        assert_eq!(app.status_message, "Theme switched to amber_alt");
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(reloaded.config.theme, "amber_alt");
+
+        // Break project.toml to verify rollback on save failure
+        let project_file = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        std::fs::remove_file(&project_file).expect("remove project.toml");
+        std::fs::create_dir(&project_file).expect("replace project.toml with dir");
+
+        app.handle_key(key(KeyCode::Char('t')));
+        // Currently on "amber_alt" (index 0); move Up wraps to "crt_amber" (index 2)
+        app.handle_key(key(KeyCode::Up));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(app.theme.name, "amber_alt");
+        assert_eq!(app.project.config.theme, "amber_alt");
+        assert!(app.status_message.contains("Failed to save theme"));
     }
 }

@@ -42,7 +42,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_footer(frame, chunks[2], app);
 
     if let Some(modal) = &app.modal {
-        render_modal(frame, area, modal, &app.theme);
+        render_modal(frame, area, modal, &app.theme, &app.project.config.theme);
     }
 }
 
@@ -262,7 +262,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     let footer = Paragraph::new(
-        " [Tab] Focus  [j/k ↑/↓] Navigate  [n] New  [e] Edit  [E] Edge  [v] Edit MD  [f] Gaps  [m] Move  [c] Connect  [q] Quit",
+        " [Tab] Focus [n/e/E] Edit [v] Edit MD [f] Gaps [m] Move [c] Conn [r/S] Sync [p] Push [t] Theme [?] Help [q] Quit",
     )
     .style(style::muted_style(&app.theme));
     frame.render_widget(footer, area);
@@ -289,9 +289,18 @@ fn modal_field_line(label: &str, value: &str, active: bool, theme: &Theme) -> Li
     ))
 }
 
-fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalState, theme: &Theme) {
+fn render_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &ModalState,
+    theme: &Theme,
+    current_theme: &str,
+) {
     let base = style::base_style(theme);
     let muted = style::muted_style(theme);
+    let heading_style = Style::default()
+        .fg(style::to_color(theme.palette.accent))
+        .add_modifier(Modifier::BOLD);
     let error_style = Style::default()
         .fg(style::to_color(theme.palette.alert_error))
         .add_modifier(Modifier::BOLD);
@@ -375,6 +384,82 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalState, theme: &Theme
             ));
             form.error.as_deref()
         }
+        ModalState::Help => {
+            lines.push(Line::from(Span::styled("  Navigation", heading_style)));
+            lines.push(Line::from(Span::styled(
+                "    Tab / Shift+Tab   Cycle focus (List / Canvas / Detail)",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    hjkl / Arrows     Move selection / Scroll detail",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    f                 Toggle Gaps Only filter",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Editing & Canvas",
+                heading_style,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    n / e / E         New component / Edit component / Edit edge",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    m / c             Move card mode / Connect components",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    v                 Open component Markdown in $EDITOR",
+                base,
+            )));
+            lines.push(Line::from(Span::styled("  Sync & Display", heading_style)));
+            lines.push(Line::from(Span::styled(
+                "    r / S             Pull status from active adapters",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    p                 Push selected component & features",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    t                 Switch RON theme",
+                base,
+            )));
+            lines.push(Line::from(Span::styled("  General", heading_style)));
+            lines.push(Line::from(Span::styled(
+                "    ?                 Toggle this keyboard help",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
+                "    Esc / q           Cancel mode / Quit",
+                base,
+            )));
+            None
+        }
+        ModalState::ThemeSwitcher(form) => {
+            if form.themes.is_empty() {
+                lines.push(Line::from(Span::styled("  (no themes found)", muted)));
+            } else {
+                for (idx, theme_name) in form.themes.iter().enumerate() {
+                    let is_selected = idx == form.selected_index;
+                    let is_active = theme_name == current_theme;
+                    let prefix = if is_selected { "> " } else { "  " };
+                    let suffix = if is_active { " [active]" } else { "" };
+                    let row_style = if is_selected {
+                        style::selected_row_style(theme)
+                    } else {
+                        base
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!("{prefix}{theme_name}{suffix}"),
+                        row_style,
+                    )));
+                }
+            }
+            form.error.as_deref()
+        }
     };
 
     if let Some(err) = error_text {
@@ -385,11 +470,16 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalState, theme: &Theme
         )));
     }
 
+    let footer_hint = match modal {
+        ModalState::Help => "  [Esc/?/Enter/q] Close",
+        ModalState::ThemeSwitcher(_) => "  [↑/↓] Select  [Enter] Apply  [Esc] Cancel",
+        ModalState::NewComponent(_)
+        | ModalState::EditComponent(_)
+        | ModalState::EditConnection(_) => "  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel",
+    };
+
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel",
-        muted,
-    )));
+    lines.push(Line::from(Span::styled(footer_hint, muted)));
 
     let popup_width = ((u32::from(area.width) * 60 / 100) as u16).clamp(54, 76);
     let popup_height = (lines.len() as u16).saturating_add(2);
@@ -598,5 +688,36 @@ mod tests {
         let backend = TestBackend::new(1200, 35);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &mut app)).unwrap();
+    }
+
+    #[test]
+    fn render_help_and_theme_switcher_modals_display_entries_and_footer_hints() {
+        let mut app = make_test_app();
+        let base_text = render_to_string(&mut app);
+        assert!(base_text.contains("[r/S] Sync"));
+        assert!(base_text.contains("[p] Push"));
+        assert!(base_text.contains("[t] Theme"));
+        assert!(base_text.contains("[?] Help"));
+
+        // Help modal
+        app.modal = Some(ModalState::help());
+        let help_text = render_to_string(&mut app);
+        assert!(help_text.contains("Keyboard Help"));
+        assert!(help_text.contains("Tab / Shift+Tab"));
+        assert!(help_text.contains("hjkl / Arrows"));
+        assert!(help_text.contains("Switch RON theme"));
+        assert!(help_text.contains("Pull status from active adapters"));
+        assert!(help_text.contains("Push selected component"));
+
+        // Theme switcher modal
+        app.modal = Some(ModalState::theme_switcher(
+            vec!["amber_alt".to_string(), "crt_amber".to_string()],
+            "crt_amber",
+        ));
+        let theme_text = render_to_string(&mut app);
+        assert!(theme_text.contains("Switch Theme"));
+        assert!(theme_text.contains("amber_alt"));
+        assert!(theme_text.contains("crt_amber [active]"));
+        assert!(theme_text.contains("[↑/↓] Select  [Enter] Apply  [Esc] Cancel"));
     }
 }
