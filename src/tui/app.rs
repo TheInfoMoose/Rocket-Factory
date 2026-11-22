@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -6,10 +7,12 @@ use crate::adapter::{
     load_adapters_file, push_unpushed_features, reconcile_status, resolve_active_adapters,
     run_pull_status, run_push_component,
 };
-use crate::archetype::scaffold_component;
+use crate::archetype::{scaffold_component, scaffold_sub_component};
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
 use crate::error::{RfError, RfResult};
-use crate::model::{CardStatus, Component, Connection, EdgeKind, FeatureItem, GridPos, Project};
+use crate::model::{
+    CardStatus, Component, ComponentKind, Connection, EdgeKind, FeatureItem, GridPos, Project,
+};
 use crate::storage::{
     save_component, save_project_config, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
 };
@@ -71,6 +74,7 @@ pub struct App {
     pub modal: Option<ModalState>,
     pub pending_editor_component: Option<String>,
     pub pending_sync: Option<SyncRequest>,
+    pub expanded_components: HashSet<String>,
 }
 
 impl App {
@@ -95,6 +99,7 @@ impl App {
             modal: None,
             pending_editor_component: None,
             pending_sync: None,
+            expanded_components: HashSet::new(),
         }
     }
 
@@ -255,16 +260,115 @@ impl App {
             .count()
     }
 
-    pub fn visible_component_indices(&self) -> Vec<usize> {
+    pub fn has_sub_components(&self, component_id: &str) -> bool {
+        !self.project.sub_components(component_id).is_empty()
+    }
+
+    pub fn is_expanded(&self, component_id: &str) -> bool {
+        self.expanded_components.contains(component_id)
+    }
+
+    fn matches_filter(&self, comp: &Component) -> bool {
         match self.filter {
-            ListFilter::All => (0..self.project.components.len()).collect(),
-            ListFilter::GapsOnly => self
-                .project
-                .components
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| (compute_card_status(c) == CardStatus::Gap).then_some(i))
-                .collect(),
+            ListFilter::All => true,
+            ListFilter::GapsOnly => compute_card_status(comp) == CardStatus::Gap,
+        }
+    }
+
+    fn push_visible_component(
+        &self,
+        idx: usize,
+        out: &mut Vec<usize>,
+        visited: &mut HashSet<usize>,
+    ) {
+        if !visited.insert(idx) {
+            return;
+        }
+        let Some(comp) = self.project.components.get(idx) else {
+            return;
+        };
+        if self.matches_filter(comp) {
+            out.push(idx);
+        }
+        if self.expanded_components.contains(&comp.id) {
+            let parent_id = comp.id.as_str();
+            for (child_idx, child) in self.project.components.iter().enumerate() {
+                if child.parent_id.as_deref() == Some(parent_id) {
+                    self.push_visible_component(child_idx, out, visited);
+                }
+            }
+        }
+    }
+
+    pub fn visible_component_indices(&self) -> Vec<usize> {
+        let existing_ids: HashSet<&str> = self
+            .project
+            .components
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        let mut out = Vec::new();
+        let mut visited = HashSet::new();
+
+        for (idx, comp) in self.project.components.iter().enumerate() {
+            let is_top_level = match comp.parent_id.as_deref() {
+                None => true,
+                Some(pid) => !existing_ids.contains(pid),
+            };
+            if is_top_level {
+                self.push_visible_component(idx, &mut out, &mut visited);
+            }
+        }
+
+        out
+    }
+
+    pub fn toggle_expand_selected(&mut self) {
+        let Some((comp_id, comp_name)) = self
+            .selected_component()
+            .map(|c| (c.id.clone(), c.name.clone()))
+        else {
+            return;
+        };
+
+        if !self.has_sub_components(&comp_id) {
+            return;
+        }
+
+        if self.expanded_components.contains(&comp_id) {
+            self.expanded_components.remove(&comp_id);
+            self.clamp_selection();
+            self.status_message = format!("Collapsed {comp_name}");
+        } else {
+            let before_visible: HashSet<String> = self
+                .visible_component_indices()
+                .into_iter()
+                .filter_map(|idx| self.project.components.get(idx).map(|c| c.id.clone()))
+                .collect();
+
+            self.expanded_components.insert(comp_id.clone());
+
+            let newly_revealed: Vec<String> = self
+                .visible_component_indices()
+                .into_iter()
+                .filter_map(|idx| self.project.components.get(idx).map(|c| c.id.clone()))
+                .filter(|id| !before_visible.contains(id))
+                .collect();
+
+            let mut save_errors = Vec::new();
+            for revealed_id in &newly_revealed {
+                save_errors.extend(self.resolve_visible_collisions_for(revealed_id));
+            }
+
+            let child_count = self.project.sub_components(&comp_id).len();
+            self.status_message = if save_errors.is_empty() {
+                format!("Expanded {comp_name} ({child_count} sub-component(s))")
+            } else {
+                format!(
+                    "Expanded {comp_name} ({child_count} sub-component(s)) (save warning: {})",
+                    save_errors.join("; ")
+                )
+            };
         }
     }
 
@@ -501,7 +605,7 @@ impl App {
                 kind: EdgeKind::DependsOn,
                 label: None,
             });
-            format!("Connected {source_id} -> {target_id}")
+            format!("Connected: {source_id} depends on {target_id}")
         };
 
         let save_result = if self.root.join(ROCKET_DIR).exists() {
@@ -542,6 +646,222 @@ impl App {
         None
     }
 
+    fn find_proximity_grid_pos(&self, anchor: GridPos) -> GridPos {
+        let occupied: HashSet<GridPos> = self
+            .visible_component_indices()
+            .into_iter()
+            .filter_map(|idx| self.project.components.get(idx).map(|c| c.position))
+            .collect();
+
+        let cols = self.project.config.grid.cols.max(1);
+        let rows = self.project.config.grid.rows.max(1);
+        let max_dist = cols.saturating_add(rows);
+
+        let is_free_in_bounds =
+            |pos: GridPos| -> bool { pos.col < cols && pos.row < rows && !occupied.contains(&pos) };
+
+        for dist in 1..=max_dist {
+            // 1. Right / below anchor first: (+dist, 0), ..., (0, +dist)
+            for dr in 0..=dist {
+                let dc = dist - dr;
+                if let (Some(col), Some(row)) =
+                    (anchor.col.checked_add(dc), anchor.row.checked_add(dr))
+                {
+                    let candidate = GridPos { col, row };
+                    if is_free_in_bounds(candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            // 2. Right / above anchor: dc > 0, dr < 0
+            for dr in 1..dist {
+                let dc = dist - dr;
+                if let (Some(col), Some(row)) =
+                    (anchor.col.checked_add(dc), anchor.row.checked_sub(dr))
+                {
+                    let candidate = GridPos { col, row };
+                    if is_free_in_bounds(candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            // 3. Left / below anchor: dc < 0, dr > 0
+            for dc in 1..dist {
+                let dr = dist - dc;
+                if let (Some(col), Some(row)) =
+                    (anchor.col.checked_sub(dc), anchor.row.checked_add(dr))
+                {
+                    let candidate = GridPos { col, row };
+                    if is_free_in_bounds(candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            // 4. Left / above anchor: dc <= 0, dr <= 0
+            for dr in 0..=dist {
+                let dc = dist - dr;
+                if let (Some(col), Some(row)) =
+                    (anchor.col.checked_sub(dc), anchor.row.checked_sub(dr))
+                {
+                    let candidate = GridPos { col, row };
+                    if is_free_in_bounds(candidate) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        // Grid is full within current bounds: expand to the right of the grid at anchor.row.
+        let mut extra_col = cols;
+        loop {
+            let candidate = GridPos {
+                col: extra_col,
+                row: anchor.row,
+            };
+            if !occupied.contains(&candidate) {
+                return candidate;
+            }
+            extra_col = extra_col.saturating_add(1);
+        }
+    }
+
+    fn ensure_grid_contains(&mut self, pos: GridPos) -> bool {
+        let mut expanded = false;
+        if pos.col >= self.project.config.grid.cols {
+            self.project.config.grid.cols = pos.col.saturating_add(1);
+            expanded = true;
+        }
+        if pos.row >= self.project.config.grid.rows {
+            self.project.config.grid.rows = pos.row.saturating_add(1);
+            expanded = true;
+        }
+        expanded
+    }
+
+    fn resolve_visible_collisions_for(&mut self, protected_id: &str) -> Vec<String> {
+        let Some(protected_pos) = self.project.component(protected_id).map(|c| c.position) else {
+            return Vec::new();
+        };
+
+        let colliding_indices: Vec<usize> = self
+            .visible_component_indices()
+            .into_iter()
+            .filter(|&idx| {
+                self.project
+                    .components
+                    .get(idx)
+                    .is_some_and(|c| c.id != protected_id && c.position == protected_pos)
+            })
+            .collect();
+
+        let has_rocket = self.root.join(ROCKET_DIR).exists();
+        let mut grid_expanded_any = false;
+        let mut errors = Vec::new();
+
+        for idx in colliding_indices {
+            let new_pos = self.find_proximity_grid_pos(protected_pos);
+            if self.ensure_grid_contains(new_pos) {
+                grid_expanded_any = true;
+            }
+            if let Some(comp) = self.project.components.get_mut(idx) {
+                comp.position = new_pos;
+                if has_rocket {
+                    if let Err(err) = save_component(&self.root, comp) {
+                        errors.push(format!("failed to save {}: {err}", comp.id));
+                    }
+                }
+            }
+        }
+
+        if grid_expanded_any && has_rocket {
+            if let Err(err) = save_project_config(&self.root, &self.project.config) {
+                errors.push(format!("failed to save grid config: {err}"));
+            }
+        }
+
+        errors
+    }
+
+    fn is_descendant_of(&self, node_id: &str, ancestor_id: &str) -> bool {
+        if node_id == ancestor_id {
+            return true;
+        }
+        let mut current = node_id;
+        let mut visited = HashSet::new();
+        while visited.insert(current) {
+            let Some(comp) = self.project.component(current) else {
+                return false;
+            };
+            let Some(parent_id) = comp.parent_id.as_deref() else {
+                return false;
+            };
+            if parent_id == ancestor_id {
+                return true;
+            }
+            current = parent_id;
+        }
+        false
+    }
+
+    fn derive_unique_sub_component_id(&self, parent_id: &str, sub_name: &str) -> String {
+        let mut slug = String::new();
+        let mut prev_underscore = false;
+        for ch in sub_name.chars() {
+            let lower = ch.to_ascii_lowercase();
+            if lower.is_ascii_lowercase() || lower.is_ascii_digit() {
+                slug.push(lower);
+                prev_underscore = false;
+            } else if !prev_underscore && !slug.is_empty() {
+                slug.push('_');
+                prev_underscore = true;
+            }
+        }
+        while slug.ends_with('_') {
+            slug.pop();
+        }
+        if slug.len() > 56 {
+            slug.truncate(56);
+            while slug.ends_with('_') {
+                slug.pop();
+            }
+        }
+
+        if validate_component_id(&slug).is_ok() {
+            if self.project.component(&slug).is_none() {
+                return slug;
+            }
+            let mut n = 2usize;
+            loop {
+                let candidate = format!("{slug}_{n}");
+                if validate_component_id(&candidate).is_ok()
+                    && self.project.component(&candidate).is_none()
+                {
+                    return candidate;
+                }
+                n += 1;
+            }
+        }
+
+        let base = if parent_id.len() > 50 {
+            &parent_id[..50]
+        } else {
+            parent_id
+        };
+        let mut n = 1usize;
+        loop {
+            let candidate = format!("{base}_sub_{n}");
+            if validate_component_id(&candidate).is_ok()
+                && self.project.component(&candidate).is_none()
+            {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
     fn apply_modal_action(&mut self, mut modal: ModalState, action: ModalAction) {
         match action {
             ModalAction::None => {
@@ -555,7 +875,7 @@ impl App {
                 id,
                 name,
                 kind,
-                parent_id: _,
+                parent_id,
             } => {
                 if self.project.component(&id).is_some() {
                     let err = format!("component id '{id}' already exists");
@@ -567,19 +887,44 @@ impl App {
                     return;
                 }
 
-                let Some(pos) = self.first_unoccupied_grid_pos() else {
-                    let err = format!(
-                        "grid ({}x{}) is full; no free cell available",
-                        self.project.config.grid.cols, self.project.config.grid.rows
-                    );
-                    if let ModalState::NewComponent(ref mut form) = modal {
-                        form.error = Some(err.clone());
+                let (comp, grid_expanded_config) = if let Some(ref pid) = parent_id {
+                    let Some(parent_pos) = self.project.component(pid).map(|c| c.position) else {
+                        let err = format!("parent component '{pid}' not found");
+                        if let ModalState::NewComponent(ref mut form) = modal {
+                            form.error = Some(err.clone());
+                        }
+                        self.status_message = err;
+                        self.modal = Some(modal);
+                        return;
+                    };
+                    let pos = self.find_proximity_grid_pos(parent_pos);
+                    let mut candidate_config = self.project.config.clone();
+                    let mut expanded = false;
+                    if pos.col >= candidate_config.grid.cols {
+                        candidate_config.grid.cols = pos.col.saturating_add(1);
+                        expanded = true;
                     }
-                    self.status_message = err;
-                    self.modal = Some(modal);
-                    return;
+                    if pos.row >= candidate_config.grid.rows {
+                        candidate_config.grid.rows = pos.row.saturating_add(1);
+                        expanded = true;
+                    }
+                    let comp = scaffold_sub_component(&id, &name, kind, pos, pid);
+                    (comp, expanded.then_some(candidate_config))
+                } else {
+                    let Some(pos) = self.first_unoccupied_grid_pos() else {
+                        let err = format!(
+                            "grid ({}x{}) is full; no free cell available",
+                            self.project.config.grid.cols, self.project.config.grid.rows
+                        );
+                        if let ModalState::NewComponent(ref mut form) = modal {
+                            form.error = Some(err.clone());
+                        }
+                        self.status_message = err;
+                        self.modal = Some(modal);
+                        return;
+                    };
+                    (scaffold_component(&id, &name, kind, pos), None)
                 };
-                let comp = scaffold_component(&id, &name, kind, pos);
 
                 if self.root.join(ROCKET_DIR).exists() {
                     if let Err(err) = save_component(&self.root, &comp) {
@@ -591,10 +936,30 @@ impl App {
                         self.modal = Some(modal);
                         return;
                     }
+                    if let Some(ref cfg) = grid_expanded_config {
+                        if let Err(err) = save_project_config(&self.root, cfg) {
+                            let msg = format!("Failed to save grid config: {err}");
+                            if let ModalState::NewComponent(ref mut form) = modal {
+                                form.error = Some(msg.clone());
+                            }
+                            self.status_message = msg;
+                            self.modal = Some(modal);
+                            return;
+                        }
+                    }
                 }
 
+                if let Some(cfg) = grid_expanded_config {
+                    self.project.config = cfg;
+                }
                 self.project.components.push(comp);
                 let new_comp_idx = self.project.components.len() - 1;
+                let save_errors = if let Some(ref pid) = parent_id {
+                    self.expanded_components.insert(pid.clone());
+                    self.resolve_visible_collisions_for(&id)
+                } else {
+                    Vec::new()
+                };
                 if let Some(vis_idx) = self
                     .visible_component_indices()
                     .iter()
@@ -605,7 +970,16 @@ impl App {
                 }
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
-                self.status_message = format!("Created component {name} ({id})");
+                let base_msg = if parent_id.is_some() {
+                    format!("Created sub-component {name} ({id})")
+                } else {
+                    format!("Created component {name} ({id})")
+                };
+                self.status_message = if save_errors.is_empty() {
+                    base_msg
+                } else {
+                    format!("{base_msg} (save warning: {})", save_errors.join("; "))
+                };
             }
             ModalAction::UpdateComponent {
                 component_id,
@@ -615,7 +989,7 @@ impl App {
                 relative_path,
                 tags,
                 add_feature,
-                add_sub_component: _,
+                add_sub_component,
             } => {
                 let Some(comp_idx) = self
                     .project
@@ -650,8 +1024,43 @@ impl App {
                     });
                 }
 
-                let save_result = if self.root.join(ROCKET_DIR).exists() {
-                    save_component(&self.root, &candidate)
+                let (new_sub_comp, grid_expanded_config) =
+                    if let Some(ref sub_name) = add_sub_component {
+                        let sub_id = self.derive_unique_sub_component_id(&component_id, sub_name);
+                        let sub_pos = self.find_proximity_grid_pos(candidate.position);
+                        let mut candidate_config = self.project.config.clone();
+                        let mut expanded = false;
+                        if sub_pos.col >= candidate_config.grid.cols {
+                            candidate_config.grid.cols = sub_pos.col.saturating_add(1);
+                            expanded = true;
+                        }
+                        if sub_pos.row >= candidate_config.grid.rows {
+                            candidate_config.grid.rows = sub_pos.row.saturating_add(1);
+                            expanded = true;
+                        }
+                        let sub_comp = scaffold_sub_component(
+                            &sub_id,
+                            sub_name,
+                            ComponentKind::Concept,
+                            sub_pos,
+                            &component_id,
+                        );
+                        (Some(sub_comp), expanded.then_some(candidate_config))
+                    } else {
+                        (None, None)
+                    };
+
+                let has_rocket = self.root.join(ROCKET_DIR).exists();
+                let save_result = if has_rocket {
+                    save_component(&self.root, &candidate).and_then(|()| {
+                        if let Some(ref sub_comp) = new_sub_comp {
+                            save_component(&self.root, sub_comp)?;
+                        }
+                        if let Some(ref cfg) = grid_expanded_config {
+                            save_project_config(&self.root, cfg)?;
+                        }
+                        Ok(())
+                    })
                 } else {
                     Ok(())
                 };
@@ -659,7 +1068,29 @@ impl App {
                 match save_result {
                     Ok(()) => {
                         self.project.components[comp_idx] = candidate;
-                        self.status_message = format!("Updated component {name}");
+                        if let Some(cfg) = grid_expanded_config {
+                            self.project.config = cfg;
+                        }
+                        if let Some(sub_comp) = new_sub_comp {
+                            let sub_id = sub_comp.id.clone();
+                            let sub_name = sub_comp.name.clone();
+                            self.project.components.push(sub_comp);
+                            let save_errors = if self.expanded_components.contains(&component_id) {
+                                self.resolve_visible_collisions_for(&sub_id)
+                            } else {
+                                Vec::new()
+                            };
+                            let base_msg = format!(
+                                "Updated component {name} and added sub-component {sub_name} ({sub_id})"
+                            );
+                            self.status_message = if save_errors.is_empty() {
+                                base_msg
+                            } else {
+                                format!("{base_msg} (save warning: {})", save_errors.join("; "))
+                            };
+                        } else {
+                            self.status_message = format!("Updated component {name}");
+                        }
                     }
                     Err(err) => {
                         let msg = format!("Failed to save {name}: {err}");
@@ -692,21 +1123,45 @@ impl App {
                     return;
                 };
 
+                let prev_kind = conn.kind;
+                if kind == EdgeKind::Contains && self.is_descendant_of(&from, &to) {
+                    let msg =
+                        format!("Cannot set Contains: '{from}' is already a descendant of '{to}'");
+                    if let ModalState::EditConnection(ref mut form) = modal {
+                        form.error = Some(msg.clone());
+                    }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    self.mode = InputMode::Modal;
+                    return;
+                }
+
                 conn.kind = kind;
                 conn.label = label;
 
-                let save_result = if self.root.join(ROCKET_DIR).exists() {
-                    save_project_config(&self.root, &candidate_config)
+                let updated_to_comp = if kind == EdgeKind::Contains {
+                    self.project.component(&to).map(|c| {
+                        let mut updated = c.clone();
+                        updated.parent_id = Some(from.clone());
+                        updated
+                    })
+                } else if prev_kind == EdgeKind::Contains {
+                    self.project.component(&to).and_then(|c| {
+                        if c.parent_id.as_deref() == Some(from.as_str()) {
+                            let mut updated = c.clone();
+                            updated.parent_id = None;
+                            Some(updated)
+                        } else {
+                            None
+                        }
+                    })
                 } else {
-                    Ok(())
+                    None
                 };
 
-                match save_result {
-                    Ok(()) => {
-                        self.project.config = candidate_config;
-                        self.status_message = format!("Updated connection {from} -> {to}");
-                    }
-                    Err(err) => {
+                let has_rocket = self.root.join(ROCKET_DIR).exists();
+                if has_rocket {
+                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
                         let msg = format!("Failed to save connections: {err}");
                         if let ModalState::EditConnection(ref mut form) = modal {
                             form.error = Some(msg.clone());
@@ -716,7 +1171,46 @@ impl App {
                         self.mode = InputMode::Modal;
                         return;
                     }
+                    if let Some(ref updated_comp) = updated_to_comp {
+                        if let Err(err) = save_component(&self.root, updated_comp) {
+                            let msg = match save_project_config(&self.root, &self.project.config) {
+                                Ok(()) => format!("Failed to save component {to}: {err}"),
+                                Err(rollback_err) => format!(
+                                    "Failed to save component {to}: {err} (rollback failed: {rollback_err})"
+                                ),
+                            };
+                            if let ModalState::EditConnection(ref mut form) = modal {
+                                form.error = Some(msg.clone());
+                            }
+                            self.status_message = msg;
+                            self.modal = Some(modal);
+                            self.mode = InputMode::Modal;
+                            return;
+                        }
+                    }
                 }
+
+                self.project.config = candidate_config;
+                if let Some(updated_comp) = updated_to_comp {
+                    if let Some(slot) = self.project.component_mut(&to) {
+                        *slot = updated_comp;
+                    }
+                }
+                let save_errors =
+                    if kind == EdgeKind::Contains && self.expanded_components.contains(&from) {
+                        self.resolve_visible_collisions_for(&to)
+                    } else {
+                        Vec::new()
+                    };
+                self.clamp_selection();
+                self.status_message = if save_errors.is_empty() {
+                    format!("Updated connection {from} -> {to}")
+                } else {
+                    format!(
+                        "Updated connection {from} -> {to} (save warning: {})",
+                        save_errors.join("; ")
+                    )
+                };
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
             }
@@ -762,7 +1256,8 @@ impl App {
                 let connections_changed =
                     candidate_config.connections.len() != self.project.config.connections.len();
 
-                if self.root.join(ROCKET_DIR).exists() {
+                let has_rocket = self.root.join(ROCKET_DIR).exists();
+                if has_rocket {
                     if connections_changed {
                         if let Err(err) = save_project_config(&self.root, &candidate_config) {
                             let msg =
@@ -793,6 +1288,18 @@ impl App {
                 }
 
                 self.project.components.retain(|c| c.id != id);
+                let mut detach_errors = Vec::new();
+                for child in &mut self.project.components {
+                    if child.parent_id.as_deref() == Some(id.as_str()) {
+                        child.parent_id = None;
+                        if has_rocket {
+                            if let Err(err) = save_component(&self.root, child) {
+                                detach_errors.push(format!("failed to detach {}: {err}", child.id));
+                            }
+                        }
+                    }
+                }
+                self.expanded_components.remove(&id);
                 self.project.config = candidate_config;
                 self.connect_source_id = None;
                 if self.pending_editor_component.as_deref() == Some(id.as_str()) {
@@ -802,7 +1309,14 @@ impl App {
                 self.detail_scroll = 0;
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
-                self.status_message = format!("Deleted component {id}");
+                self.status_message = if detach_errors.is_empty() {
+                    format!("Deleted component {id}")
+                } else {
+                    format!(
+                        "Deleted component {id} (warning: {})",
+                        detach_errors.join("; ")
+                    )
+                };
             }
             ModalAction::DeleteConnection { from, to } => {
                 let mut candidate_config = self.project.config.clone();
@@ -868,6 +1382,18 @@ impl App {
                 self.modal = Some(ModalState::new_component());
                 self.mode = InputMode::Modal;
                 self.status_message = "New Component".to_string();
+            }
+            KeyCode::Char('a') if self.mode == InputMode::Navigate => {
+                if let Some(comp) = self.selected_component() {
+                    let parent_id = comp.id.clone();
+                    let parent_name = comp.name.clone();
+                    self.connect_source_id = None;
+                    self.modal = Some(ModalState::new_sub_component(parent_id));
+                    self.mode = InputMode::Modal;
+                    self.status_message = format!("New Sub-Component under {parent_name}");
+                } else {
+                    self.status_message = "No parent component selected".to_string();
+                }
             }
             KeyCode::Char('e') => {
                 if let Some(comp) = self.selected_component() {
@@ -982,8 +1508,9 @@ impl App {
                     let name = comp.name.clone();
                     self.connect_source_id = Some(id);
                     self.mode = InputMode::Connect;
-                    self.status_message =
-                        format!("Connect from {name}: select target and press Enter");
+                    self.status_message = format!(
+                        "Connect: select dependency for {name} ({name} depends on <target>), Enter to confirm"
+                    );
                 } else {
                     self.status_message = "No component selected to connect".to_string();
                 }
@@ -1035,6 +1562,9 @@ impl App {
             }
             KeyCode::Enter if self.mode == InputMode::Connect => {
                 self.confirm_connect();
+            }
+            KeyCode::Char(' ') | KeyCode::Enter if self.mode == InputMode::Navigate => {
+                self.toggle_expand_selected();
             }
             KeyCode::Left | KeyCode::Char('h') => self.handle_direction_key(Direction::Left),
             KeyCode::Right | KeyCode::Char('l') => self.handle_direction_key(Direction::Right),
@@ -2222,5 +2752,380 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         assert_eq!(app.mode, InputMode::Modal);
         assert!(app.connect_source_id.is_none());
         assert!(matches!(app.modal, Some(ModalState::ConfirmDelete(_))));
+    }
+
+    #[test]
+    fn sub_component_expand_collapse_hides_and_shows_children() {
+        let mut parent = make_component("parent_svc");
+        parent.position = GridPos { col: 0, row: 0 };
+
+        let mut child = make_component("child_mod");
+        child.parent_id = Some("parent_svc".to_string());
+        child.position = GridPos { col: 1, row: 0 };
+
+        let mut sibling = make_component("sibling_svc");
+        sibling.position = GridPos { col: 2, row: 0 };
+
+        let mut orphan = make_component("orphan_mod");
+        orphan.parent_id = Some("missing_parent".to_string());
+        orphan.position = GridPos { col: 3, row: 0 };
+
+        let mut app = make_app(vec![parent, child, sibling, orphan]);
+
+        assert!(app.has_sub_components("parent_svc"));
+        assert!(!app.has_sub_components("sibling_svc"));
+        assert!(!app.is_expanded("parent_svc"));
+
+        // Initially collapsed: child_mod is hidden, dangling orphan_mod is treated as top-level
+        let visible_ids = |a: &App| -> Vec<String> {
+            a.visible_component_indices()
+                .into_iter()
+                .map(|i| a.project.components[i].id.clone())
+                .collect()
+        };
+        assert_eq!(
+            visible_ids(&app),
+            vec!["parent_svc", "sibling_svc", "orphan_mod"]
+        );
+
+        // Expand parent_svc via Space -> child_mod appears immediately after parent_svc
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(app.is_expanded("parent_svc"));
+        assert!(app.status_message.contains("Expanded"));
+        assert_eq!(
+            visible_ids(&app),
+            vec!["parent_svc", "child_mod", "sibling_svc", "orphan_mod"]
+        );
+
+        // Collapse parent_svc via Enter -> child_mod hidden again
+        app.handle_key(key(KeyCode::Enter));
+        assert!(!app.is_expanded("parent_svc"));
+        assert!(app.status_message.contains("Collapsed"));
+        assert_eq!(
+            visible_ids(&app),
+            vec!["parent_svc", "sibling_svc", "orphan_mod"]
+        );
+
+        // Create a new sub-component via 'a' -> auto-expands parent and places near parent
+        app.handle_key(key(KeyCode::Char('a')));
+        assert_eq!(app.mode, InputMode::Modal);
+        type_keys(&mut app, "child_two");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Child Two");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.is_expanded("parent_svc"));
+        let child_two = app
+            .project
+            .component("child_two")
+            .expect("child_two created");
+        assert_eq!(child_two.parent_id.as_deref(), Some("parent_svc"));
+        assert_eq!(
+            visible_ids(&app),
+            vec![
+                "parent_svc",
+                "child_mod",
+                "child_two",
+                "sibling_svc",
+                "orphan_mod"
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_shifts_colliding_card_without_overwriting() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Collision Test", "Expand collision shift")
+            .expect("init workspace");
+
+        let mut parent = make_component("parent_svc");
+        parent.position = GridPos { col: 0, row: 0 };
+
+        let mut child = make_component("child_mod");
+        child.parent_id = Some("parent_svc".to_string());
+        child.position = GridPos { col: 1, row: 0 };
+
+        let mut blocker = make_component("blocker_svc");
+        blocker.position = GridPos { col: 1, row: 0 };
+
+        save_component(dir.path(), &parent).expect("save parent");
+        save_component(dir.path(), &child).expect("save child");
+        save_component(dir.path(), &blocker).expect("save blocker");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        // Tight 2x1 grid forces grid expansion when shifting blocker right
+        project.config.grid = GridConfig { cols: 2, rows: 1 };
+        save_project_config(dir.path(), &project.config).expect("save tight grid");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Select parent_svc (index 0 in visible list: [blocker_svc, parent_svc] sorted by id)
+        let parent_vis_idx = app
+            .visible_component_indices()
+            .into_iter()
+            .position(|i| app.project.components[i].id == "parent_svc")
+            .expect("parent visible");
+        app.selected_index = parent_vis_idx;
+
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(app.is_expanded("parent_svc"));
+
+        let child_pos = app.project.component("child_mod").unwrap().position;
+        let blocker_pos = app.project.component("blocker_svc").unwrap().position;
+        let parent_pos = app.project.component("parent_svc").unwrap().position;
+
+        assert_eq!(child_pos, GridPos { col: 1, row: 0 });
+        assert_ne!(blocker_pos, child_pos);
+        assert_ne!(blocker_pos, parent_pos);
+        assert_eq!(blocker_pos, GridPos { col: 2, row: 0 });
+        assert!(app.project.config.grid.cols >= 3);
+
+        // Persisted shifted card and expanded grid on disk
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(
+            reloaded.component("blocker_svc").unwrap().position,
+            GridPos { col: 2, row: 0 }
+        );
+        assert!(reloaded.config.grid.cols >= 3);
+    }
+
+    #[test]
+    fn edit_component_changes_archetype_without_clobbering_and_adds_sub_component() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Edit Sub Test", "Archetype and sub-component")
+            .expect("init workspace");
+
+        let mut comp = make_component("core_engine");
+        comp.kind = ComponentKind::Concept;
+        comp.description = "Existing description".to_string();
+        comp.markdown_body = "# Core Engine\nCustom architecture notes.\n".to_string();
+        comp.position = GridPos { col: 0, row: 0 };
+        comp.features.push(FeatureItem {
+            id: "core_engine_f1".to_string(),
+            title: "Existing feature".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        save_component(dir.path(), &comp).expect("save core_engine");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Open Edit Component modal
+        app.handle_key(key(KeyCode::Char('e')));
+        assert_eq!(app.mode, InputMode::Modal);
+
+        // Tab to Archetype (field 1), move right twice: Concept -> Interface -> Logic
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Right));
+
+        // Tab through Description (2), Path (3), Tags (4), Add Feature (5) to Add Sub-Component (6)
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Token Parser");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.status_message.contains("Token Parser"));
+
+        let updated = app
+            .project
+            .component("core_engine")
+            .expect("core_engine exists");
+        assert_eq!(updated.kind, ComponentKind::Logic);
+        assert_eq!(updated.description, "Existing description");
+        assert_eq!(updated.features.len(), 1);
+        assert_eq!(updated.features[0].title, "Existing feature");
+        assert_eq!(
+            updated.markdown_body,
+            "# Core Engine\nCustom architecture notes.\n"
+        );
+
+        let sub = app
+            .project
+            .component("token_parser")
+            .expect("sub-component created with snake_case id");
+        assert_eq!(sub.name, "Token Parser");
+        assert_eq!(sub.kind, ComponentKind::Concept);
+        assert_eq!(sub.parent_id.as_deref(), Some("core_engine"));
+        assert_eq!(sub.position, GridPos { col: 1, row: 0 });
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(
+            reloaded.component("core_engine").unwrap().kind,
+            ComponentKind::Logic
+        );
+        assert_eq!(
+            reloaded
+                .component("token_parser")
+                .unwrap()
+                .parent_id
+                .as_deref(),
+            Some("core_engine")
+        );
+    }
+
+    #[test]
+    fn edit_connection_contains_ingests_and_detaches_sub_component() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Contains Test", "EdgeKind::Contains ingestion")
+            .expect("init workspace");
+
+        let mut alpha = make_component("alpha");
+        alpha.position = GridPos { col: 0, row: 0 };
+        let mut beta = make_component("beta");
+        beta.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &alpha).expect("save alpha");
+        save_component(dir.path(), &beta).expect("save beta");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+        project.config.connections.push(Connection {
+            from: "beta".to_string(),
+            to: "alpha".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+        save_project_config(dir.path(), &project.config).expect("save config");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Edit alpha -> beta to EdgeKind::Contains (index 0 -> 4 via 4 Right presses)
+        app.handle_key(key(KeyCode::Char('E')));
+        assert_eq!(app.mode, InputMode::Modal);
+        for _ in 0..4 {
+            app.handle_key(key(KeyCode::Right));
+        }
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::Contains);
+        assert_eq!(
+            app.project.component("beta").unwrap().parent_id.as_deref(),
+            Some("alpha")
+        );
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(
+            reloaded.component("beta").unwrap().parent_id.as_deref(),
+            Some("alpha")
+        );
+
+        // Expand alpha, select beta, and try to set beta -> alpha to Contains -> rejected as cycle
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(app.is_expanded("alpha"));
+        app.selected_index = 1; // beta
+        assert_eq!(app.selected_component().unwrap().id, "beta");
+
+        app.handle_key(key(KeyCode::Char('E')));
+        for _ in 0..4 {
+            app.handle_key(key(KeyCode::Right));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.status_message.contains("descendant"));
+        assert_eq!(app.project.component("alpha").unwrap().parent_id, None);
+        app.handle_key(key(KeyCode::Esc));
+
+        // Select alpha again and change alpha -> beta from Contains to Custom -> detaches beta
+        app.selected_index = 0;
+        app.handle_key(key(KeyCode::Char('E')));
+        app.handle_key(key(KeyCode::Right)); // Contains -> Custom
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::Custom);
+        assert_eq!(app.project.component("beta").unwrap().parent_id, None);
+
+        let reloaded_after = load_project(dir.path()).expect("reload after detach");
+        assert_eq!(reloaded_after.component("beta").unwrap().parent_id, None);
+    }
+
+    #[test]
+    fn delete_parent_detaches_sub_components() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Delete Parent", "Detach children on delete")
+            .expect("init workspace");
+
+        let mut parent = make_component("parent_box");
+        parent.position = GridPos { col: 0, row: 0 };
+        let mut child = make_component("child_box");
+        child.parent_id = Some("parent_box".to_string());
+        child.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &parent).expect("save parent");
+        save_component(dir.path(), &child).expect("save child");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Expand parent_box then delete it
+        app.handle_key(key(KeyCode::Char(' ')));
+        assert!(app.is_expanded("parent_box"));
+
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Char('y')));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.project.component("parent_box").is_none());
+        assert!(!app.is_expanded("parent_box"));
+        let detached = app
+            .project
+            .component("child_box")
+            .expect("child_box still exists");
+        assert_eq!(detached.parent_id, None);
+        assert_eq!(app.visible_component_indices().len(), 1);
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert!(reloaded.component("parent_box").is_none());
+        assert_eq!(reloaded.component("child_box").unwrap().parent_id, None);
+    }
+
+    #[test]
+    fn connect_prompt_states_dependency_direction() {
+        let mut alpha = make_component("alpha");
+        alpha.name = "Alpha Service".to_string();
+        alpha.position = GridPos { col: 0, row: 0 };
+        let mut beta = make_component("beta");
+        beta.name = "Beta Store".to_string();
+        beta.position = GridPos { col: 1, row: 0 };
+
+        let mut app = make_app(vec![alpha, beta]);
+        app.focus = FocusColumn::Canvas;
+
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(
+            app.status_message,
+            "Connect: select dependency for Alpha Service (Alpha Service depends on <target>), Enter to confirm"
+        );
+
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.status_message, "Connected: alpha depends on beta");
     }
 }
