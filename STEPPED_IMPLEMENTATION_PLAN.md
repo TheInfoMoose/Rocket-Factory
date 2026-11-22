@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 5):** Fix the horizontal edge-label arrowhead collision (`BUG-0001`), wire the Snap Grid Canvas and keyboard controls (`4F`), and implement interactive TUI modals (`5A`–`5B`) plus suspend-to-`$EDITOR` Markdown reload (`5C`) — with zero references to any specific external tracker in `src/`.
+**Phase goal (Phase 6):** Resolve all Phase 5 review findings (`BUG-0002`–`BUG-0004`, `TASK-0027`–`TASK-0028`), wire live TUI adapter sync (`r`/`S` pull, `p` push, startup pull, optional auto-poll), add `?` help and `t` RON theme switcher overlays, and verify end-to-end with CLI + mock-adapter + `TestBackend` integration tests (`tests/e2e.rs`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,11 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 4E** | `/goal` | canvas | `src/tui/canvas.rs` | — |
-| 2 | **STEP 4F** | `/goal` | canvas | `src/tui/app.rs`, `src/tui/ui.rs` | — |
-| 3 | **STEP 5A** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/mod.rs` | — |
-| 4 | **STEP 5B** | `/goal` | modal | `src/tui/app.rs`, `src/tui/ui.rs` | STEP 5A |
-| 5 | **STEP 5C** | `/goal` | editor | `src/tui/app.rs`, `src/tui/terminal.rs` | — |
+| 1 | **STEP 6A** | `/goal` | editor | `src/tui/terminal.rs` | — |
+| 2 | **STEP 6B** | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` | — |
+| 3 | **STEP 6C** | `/goal` | sync | `src/tui/app.rs`, `src/tui/terminal.rs`, `src/main.rs` | STEP 6A, STEP 6B |
+| 4 | **STEP 6D** | `/goal` | theme | `src/theme.rs` | — |
+| 5 | **STEP 6E** | `/goal` | overlay | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs` | STEP 6B, STEP 6D |
+| 6 | **STEP 6F** | `/goal` | tests | `tests/e2e.rs` | STEP 6C, STEP 6E |
 
 ### Completed
 
@@ -54,15 +55,15 @@
 | **STEP 4B** | Done (`20884cc`) | `/goal` | canvas | `src/tui/canvas.rs` |
 | **STEP 4C** | Withdrawn (→ 4E, 4F) | `/goal` | canvas | `src/tui/ui.rs`, `src/tui/app.rs` |
 | **STEP 4D** | Withdrawn (→ 4F) | `/goal` | canvas | `src/tui/app.rs` |
+| **STEP 4E** | Done (`5c5e038`) | `/goal` | canvas | `src/tui/canvas.rs` |
+| **STEP 4F** | Done (`6035b49`) | `/goal` | canvas | `src/tui/app.rs`, `src/tui/ui.rs` |
+| **STEP 5A** | Done (`3e71980`) | `/goal` | modal | `src/tui/modal.rs`, `src/tui/mod.rs` |
+| **STEP 5B** | Done (`b488452`) | `/goal` | modal | `src/tui/app.rs`, `src/tui/ui.rs` |
+| **STEP 5C** | Done (`2b3dd73`) | `/goal` | editor | `src/tui/app.rs`, `src/tui/terminal.rs` |
 
 ### Future phases
 
-Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write` and `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase).
-
-- **Phase 6: Live Sync Integration, Help Overlay & End-to-End Verification**
-  - TUI startup pull, manual sync trigger (`r`/`S`), and optional background auto-poll interval
-  - `?` Keyboard help overlay and RON theme switcher modal
-  - End-to-end integration tests (CLI + mock adapter scripts + Ratatui `TestBackend` snapshot render tests)
+_None planned — Phase 6 completes the initial Rocket Factory milestone._
 
 ### Open Questions
 
@@ -1371,6 +1372,377 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 6 Step Blocks
+
+### STEP 6A: Editor Path-Containment Parity, `$EDITOR` Args, and Unit-Tested Editor Flow (`BUG-0002`, `TASK-0027`, `TASK-0028`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6A: Enforce ID validation and canonical path containment before $EDITOR launch, support $EDITOR arguments, and extract + unit-test the editor workflow in src/tui/terminal.rs (BUG-0002, TASK-0027, TASK-0028).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/tui/terminal.rs:68-174 (suspend_for_editor, run_event_loop)
+  - src/storage.rs:12-106 (validate_component_id, ensure_contained, save_component, COMPONENTS_DIR, ROCKET_DIR)
+  - src/tui/app.rs:90-125 (reload_component_markdown)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal:
+  Close BUG-0002 (path-containment parity before launching $EDITOR), resolve TASK-0027 (unit-test the editor orchestration flow), and fix TASK-0028 item (6) ($EDITOR strings with arguments).
+
+Contract & Behavior:
+  - `$EDITOR` parsing:
+    - Split the `$EDITOR` value on ASCII whitespace into `(program, args)` (defaulting to `"vi"` with empty args when unset/blank) so values like `"code --wait"` execute `Command::new("code").args(["--wait"]).arg(file_path)`.
+  - Path containment parity & component validation:
+    - Before launching the editor for a queued `comp_id`:
+      1. Validate `comp_id` with `crate::storage::validate_component_id(&comp_id)`.
+      2. Confirm the component exists in `app.project.component(&comp_id)` (never launch `$EDITOR` on a nonexistent component or nonexistent `.md` file; record a clear error in `app.status_message` and return).
+      3. Ensure `<root>/.rocket/components/<comp_id>.md` exists on disk (persisting via `save_component` if missing; record any save error in `app.status_message` and return without launching `$EDITOR`).
+      4. Canonicalize `<root>/.rocket/components` and the target `<comp_id>.md` path and verify `canon_md.starts_with(&canon_dir)` (rejecting symlink escapes or traversal with an error in `app.status_message` without launching `$EDITOR`).
+  - Testable orchestration helper (no unwired scaffolding):
+    - Extract a helper (e.g., `fn process_pending_editor_with<F>(app: &mut App, mut run_editor: F) where F: FnMut(&Path) -> RfResult<()>`) that drains `app.pending_editor_component.take()`, runs the validation/auto-save/containment checks, invokes `run_editor(&canon_md)`, and calls `app.reload_component_markdown(&comp_id)` on `Ok(())` (surfacing reload or editor errors in `app.status_message`).
+    - Wire `run_event_loop` to call `process_pending_editor_with(app, |path| suspend_for_editor(terminal, path))`.
+
+Tests:
+  - Unit tests in `src/tui/terminal.rs` covering:
+    - `$EDITOR` parsing with arguments (e.g. `"code --wait"`) and blank/default fallback (`"vi"`).
+    - Auto-saving a missing `.md` file, invoking the mock editor closure to modify the file, and verifying `app.project` reloads the updated `markdown_body`.
+    - Rejecting an invalid component ID (e.g. `"../escape"`), an unknown component ID, and a symlink pointing outside `.rocket/components/` — verifying the mock editor closure is never called and `app.status_message` reports the error.
+    - Surfacing a mock editor `Err(...)` in `app.status_message` without panicking.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6B: Transactional TUI Mutation Rollback, Canvas Viewport Panning & Phase 5 Polish (`BUG-0003`, `BUG-0004`, `TASK-0028`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6B: Wire CanvasViewport auto-panning via ensure_visible, add rollback on disk-save failure for TUI mutations, and resolve remaining Phase 5 polish items in src/tui/app.rs, src/tui/ui.rs, and src/tui/canvas.rs (BUG-0003, BUG-0004, TASK-0028).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+  - src/tui/ui.rs
+  - src/tui/canvas.rs
+READ_ONLY_REFS:
+  - src/tui/app.rs:280-660 (move_selected_card, confirm_connect, first_unoccupied_grid_pos, apply_modal_action, handle_key)
+  - src/tui/ui.rs:13-42,258-265,380-406 (render, render_footer, render_modal)
+  - src/tui/canvas.rs:72-86,294-348 (ensure_visible, compute_label_pos)
+  - src/tui/terminal.rs:110-120 (run_event_loop draw call passing &mut App)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal:
+  Resolve BUG-0003 (wire `App::viewport` / `ensure_visible` so off-screen cards pan into view), BUG-0004 (prevent in-memory state desync when disk saves fail), and TASK-0028 items (1)–(5).
+
+Contract & Behavior:
+  - Canvas viewport panning (`BUG-0003`, no unwired scaffolding):
+    - Update `src/tui/ui.rs` `pub fn render(frame: &mut Frame, app: &mut App)` (note `terminal.rs` already passes `app: &mut App`) so before calling `crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport)`, it computes the canvas inner `Rect` (`Block::default().borders(Borders::ALL).inner(cols[1])`) and calls `crate::tui::canvas::ensure_visible(canvas_inner, &mut app.viewport, selected.position)` whenever `app.selected_component()` is `Some(selected)`.
+  - Transactional rollback on disk save failure (`BUG-0004`):
+    - In `src/tui/app.rs`, ensure `move_selected_card`, `confirm_connect`, `ModalAction::UpdateComponent`, and `ModalAction::UpdateConnection` never leave `self.project` mutated in memory if `save_component` or `save_project_config` returns `Err`:
+      - Validate/save a candidate clone (or restore the previous component / connection state on `Err`), keep `self.audit_findings` consistent via `refresh_audit()`, and record the failure in `self.status_message`.
+  - Phase 5 polish (`TASK-0028` items 1–5):
+    1. `src/tui/canvas.rs` `compute_label_pos`: avoid placing L-bend corner midpoint labels onto occupied horizontal segment cells (prefer placing above/below the corner or on a clear non-segment cell inside `bounds`).
+    2. `src/tui/app.rs` `first_unoccupied_grid_pos`: return `Option<GridPos>` instead of silently falling back to `(0, 0)` when the grid is full; in `ModalAction::CreateComponent`, reject creation with a clear error message on the modal and `status_message` when no grid cell is free.
+    3. `src/tui/ui.rs` `render_modal`: compute `popup_width` using `u32` arithmetic (`(u32::from(area.width) * 60 / 100) as u16`) before `.clamp(54, 76)` so wide terminals (`width > 1092`) cannot overflow `u16`.
+    4. `src/tui/app.rs` `'v'` key handler: clear `self.connect_source_id = None` and set `self.mode = InputMode::Navigate` before queueing `pending_editor_component`.
+    5. `src/tui/ui.rs` `render_footer`: include `[v] Edit MD` in the footer keybind hint bar.
+
+Tests:
+  - In `src/tui/ui.rs`:
+    - Render an `App` with a selected component at an off-screen grid cell (e.g. `col: 4, row: 2`) onto `TestBackend::new(120, 35)`; assert `app.viewport` updated (`scroll_col > 0 || scroll_row > 0`) and the off-screen component's name appears in the rendered buffer.
+    - Verify footer text includes `[v]`.
+  - In `src/tui/app.rs`:
+    - Test save-failure rollback for at least `move_selected_card`, `confirm_connect`, `UpdateComponent`, and `UpdateConnection` (e.g., making `.rocket/components` or `.rocket/project.toml` unwritable or a directory so save fails) and assert in-memory `self.project` remains unchanged.
+    - Test `CreateComponent` on a full `1x1` grid rejects creation without overwriting `(0, 0)`.
+    - Test pressing `'v'` while in `Connect` mode clears `connect_source_id` and returns to `InputMode::Navigate`.
+  - In `src/tui/canvas.rs`:
+    - Test L-bend labeled edge rendering preserves all horizontal/corner segment cells and arrowhead without label overwrite.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6C: Live Adapter Sync in TUI (Startup Pull, Manual Pull `r`/`S`, Push `p`, and Optional Auto-Poll)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6C: Implement live adapter sync in the TUI (startup pull, manual pull 'r'/'S', push selected 'p', and optional auto-poll interval) across src/tui/app.rs, src/tui/terminal.rs, and src/main.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+  - src/tui/terminal.rs
+  - src/main.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:75-265 (load_adapters_file, resolve_active_adapters, reconcile_status, run_push_component, run_push_feature, run_pull_status)
+  - src/cli.rs:140-235 (push and pull execution semantics)
+  - src/storage.rs:138-200 (save_component, ROCKET_DIR)
+  - src/main.rs:1-39 (main, adapters_path)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter any CLI subcommand handling (`Some(command)` arm) in src/main.rs.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn run_pull_status\b' src/adapter.rs && grep -qE 'pub fn reconcile_status\b' src/adapter.rs
+
+[MUTATION_SPEC]
+Goal:
+  Enable live external tracker synchronization inside the TUI: automatic pull on startup (when active adapters are configured), manual pull (`'r'` / `'S'`), manual push of the selected component and its unpushed features (`'p'`), and optional periodic auto-poll in the event loop.
+
+Contract & Behavior:
+  - `src/tui/app.rs`:
+    - Define `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum SyncRequest { Pull, PushSelected }`.
+    - Add `pub pending_sync: Option<SyncRequest>` to `App` (initialized to `None`).
+    - In non-modal `handle_key`:
+      - `'r'` or `'S'` clears `connect_source_id`, resets `mode` to `InputMode::Navigate`, queues `self.pending_sync = Some(SyncRequest::Pull)`, and sets `status_message = "Syncing status from active adapters...".to_string()`.
+      - `'p'` clears `connect_source_id`, resets `mode` to `InputMode::Navigate`; if a component is selected, queues `self.pending_sync = Some(SyncRequest::PushSelected)` with a status message, else sets `"No component selected to push"`.
+    - Add `pub fn sync_pull(&mut self, adapters_path: &Path) -> RfResult<String>`:
+      - If `self.project.config.active_adapters.is_empty()`, sets `status_message = "No active adapters configured"` and returns `Ok(...)`.
+      - Loads `adapters_path` via `load_adapters_file`, resolves `active_adapters`, runs `run_pull_status` on each adapter with `pull_status_cmd`, reconciles into a candidate/clone (or rolls back on `save_component` failure), persists updated components via `save_component` when `<root>/.rocket` exists, calls `refresh_audit()`, updates `status_message` with a summary (components updated, tasks synced, features linked), and returns `Ok(summary_msg)`.
+    - Add `pub fn sync_push_selected(&mut self, adapters_path: &Path) -> RfResult<String>`:
+      - Requires a selected component and non-empty `active_adapters` (returning clear status message if none).
+      - Runs `run_push_component` (if configured) and `run_push_feature` for each unpushed feature (marking `pushed = true` and recording `external_id` on success), persists the component via `save_component` when `<root>/.rocket` exists (without leaving partial desync on save failure), calls `refresh_audit()`, updates `status_message`, and returns `Ok(summary_msg)`.
+  - `src/tui/terminal.rs`:
+    - Update `pub fn run_tui(root: &Path, theme_dirs: &[PathBuf], adapters_path: &Path, poll_interval: Option<Duration>) -> RfResult<()>`:
+      - On startup, if `!app.project.config.active_adapters.is_empty()`, run an initial `app.sync_pull(adapters_path)` (recording any error in `app.status_message` without aborting TUI startup).
+      - Pass `adapters_path` and `poll_interval` into `run_event_loop`.
+    - Extract a testable helper `fn process_pending_sync(app: &mut App, adapters_path: &Path)` that drains `app.pending_sync.take()` and dispatches `SyncRequest::Pull` / `SyncRequest::PushSelected`, surfacing any `Err(err)` in `app.status_message`.
+    - In `run_event_loop`, call `process_pending_sync(app, adapters_path)` after key handling; when `poll_interval` is `Some(interval)` and `!app.project.config.active_adapters.is_empty()` and `last_poll.elapsed() >= interval` (and no modal is open), trigger `app.sync_pull(adapters_path)` (recording errors in `app.status_message`) and reset `last_poll`.
+  - `src/main.rs`:
+    - In the `None =>` TUI launch arm, read optional `RF_POLL_INTERVAL_SECS` env var (parsing positive `u64` seconds into `Some(Duration::from_secs(secs))`, otherwise `None`) and pass `&adapters_path` and `poll_interval` to `rocket_factory::tui::run_tui`.
+
+Tests:
+  - In `src/tui/app.rs`:
+    - Verify `'r'`, `'S'`, and `'p'` queue the expected `SyncRequest` variants.
+    - Using `tempfile::tempdir()` and a mock `sh` adapter in `adapters.toml`, test `sync_pull` updates `external_tasks`, flips component `CardStatus` to `Complete`, persists to disk, and updates `status_message`.
+    - Using a mock `sh` adapter, test `sync_push_selected` marks unpushed features as `pushed = true` with returned `external_id` and persists to disk.
+  - In `src/tui/terminal.rs`:
+    - Test `process_pending_sync` executes queued `Pull` and surfaces adapter errors into `app.status_message` without panicking.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6D: Path-Safe Theme Resolution and RON Theme Discovery (`src/theme.rs`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6D: Add path-traversal validation to resolve_theme and implement list_available_themes in src/theme.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/theme.rs
+READ_ONLY_REFS:
+  - src/theme.rs:62-125 (default_theme, load_theme_file, resolve_theme)
+  - src/storage.rs:12-23 (validate_component_id style)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No ratatui dependency in src/theme.rs (keep core theme module UI-library-agnostic).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn resolve_theme\b' src/theme.rs
+
+[MUTATION_SPEC]
+Goal:
+  Ensure theme name resolution enforces path-containment parity and provide deterministic discovery of available `.ron` themes for the interactive theme switcher.
+
+Contract & Behavior:
+  - Path-safe theme name validation in `src/theme.rs`:
+    - Validate `theme_name` inside `resolve_theme` (and helper `pub fn validate_theme_name(name: &str) -> RfResult<()>`): reject empty names, names containing path separators (`'/'`, `'\\'`), `".."`, or characters outside `[a-zA-Z0-9_-]`.
+    - When resolving `<dir>/<theme_name>.ron`, verify canonical path containment (`canonicalize(&candidate)` starts with `canonicalize(dir)`) before calling `load_theme_file`, returning `RfError::PathEscape` on symlink escape.
+  - `pub fn list_available_themes(search_dirs: &[PathBuf]) -> Vec<String>`:
+    - Always includes `"crt_amber"`.
+    - Scans each existing directory in `search_dirs` for `.ron` files whose file stem passes `validate_theme_name` and whose canonical path is contained within that directory.
+    - Deduplicates and returns sorted theme names (`Vec<String>`).
+
+Tests:
+  - Unit tests in `src/theme.rs` covering:
+    - `resolve_theme` rejects traversal names (`"../secret"`, `"a/b"`, `""`) and symlink escapes pointing outside the search dir.
+    - `list_available_themes` always includes `"crt_amber"`, discovers custom `.ron` files across multiple dirs, ignores non-`.ron` files and invalid names, and returns deduplicated sorted names.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn list_available_themes\b' src/theme.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6E: Keyboard Help Overlay (`?`) and RON Theme Switcher Modal (`t`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6E: Implement the '?' keyboard help overlay and 't' RON theme switcher modal across src/tui/modal.rs, src/tui/app.rs, and src/tui/ui.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/app.rs
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/theme.rs:62-140 (resolve_theme, list_available_themes, Theme)
+  - src/tui/terminal.rs:28-36 (default_theme_dirs)
+  - src/tui/modal.rs:1-150 (ModalState, ModalAction, handle_key)
+  - src/tui/ui.rs:258-406 (render_footer, render_modal)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn list_available_themes\b' src/theme.rs && grep -qE 'pub enum ModalState\b' src/tui/modal.rs
+
+[MUTATION_SPEC]
+Goal:
+  Provide an in-app `?` keyboard reference overlay and an interactive `t` RON theme switcher modal that applies and persists the selected theme.
+
+Contract & Behavior:
+  - `src/tui/modal.rs`:
+    - Add `#[derive(Debug, Clone, PartialEq, Eq)] pub struct ThemeSwitcherForm { pub themes: Vec<String>, pub selected_index: usize, pub error: Option<String> }` with helper `pub fn selected_theme(&self) -> Option<&str>`.
+    - Extend `ModalState` with:
+      - `Help`
+      - `ThemeSwitcher(ThemeSwitcherForm)`
+    - Extend `ModalAction` with:
+      - `SelectTheme { name: String }`
+    - Add constructors `ModalState::help()` and `ModalState::theme_switcher(themes: Vec<String>, current_theme: &str)` (pre-selecting `current_theme` if present).
+    - Update `title(&self)` (`"Keyboard Help"`, `"Switch Theme"`) and `handle_key`:
+      - `Help`: `Esc`, `Enter`, `'?'`, or `'q'` returns `ModalAction::Cancel`.
+      - `ThemeSwitcher`: `Up`/`'k'` and `Down`/`'j'` move `selected_index` with wrap-around; `Enter` returns `ModalAction::SelectTheme { name }` (or `Cancel` if empty); `Esc` returns `ModalAction::Cancel`.
+  - `src/tui/app.rs`:
+    - Add `pub theme_dirs: Vec<PathBuf>` to `App`, initialized in `App::new` to `crate::tui::terminal::default_theme_dirs(&root)` (preserving `App::new` signature).
+    - Non-modal `handle_key`:
+      - `'?'` clears `connect_source_id`, opens `ModalState::help()`, sets `mode = InputMode::Modal`, and updates `status_message`.
+      - `'t'` clears `connect_source_id`, discovers themes via `crate::theme::list_available_themes(&self.theme_dirs)`, opens `ModalState::theme_switcher(themes, &self.project.config.theme)`, sets `mode = InputMode::Modal`, and updates `status_message`.
+    - In `apply_modal_action`, handle `ModalAction::SelectTheme { name }`:
+      - Resolve the theme via `crate::theme::resolve_theme(&name, &self.theme_dirs)`. On error, display error in the modal and `status_message` without closing.
+      - Persist updated `project.config.theme = name` via `save_project_config` when `<root>/.rocket` exists — rolling back `project.config.theme` and keeping the previous `self.theme` if saving fails (BUG-0004 parity).
+      - On success, update `self.theme`, close modal, return to `InputMode::Navigate`, and set `status_message = format!("Theme switched to {name}")`.
+  - `src/tui/ui.rs`:
+    - Render `ModalState::Help` in `render_modal` with a concise, organized list of all TUI keybindings (`Tab/Shift+Tab`, `hjkl`/Arrows, `n`, `e`, `E`, `m`, `c`, `v`, `f`, `r`/`S`, `p`, `t`, `?`, `Esc`, `q`).
+    - Render `ModalState::ThemeSwitcher` in `render_modal` listing available themes with the selected row highlighted, active marker for current theme, error line if any, and `[↑/↓] Select  [Enter] Apply  [Esc] Cancel` footer hint.
+    - Update `render_footer` to include concise hints for `[r/S] Sync`, `[p] Push`, `[t] Theme`, and `[?] Help`.
+
+Tests:
+  - In `src/tui/modal.rs`: test `Help` dismissal (`Esc`/`?`) and `ThemeSwitcher` navigation + `Enter` returning `ModalAction::SelectTheme`.
+  - In `src/tui/app.rs`: write a custom `amber_alt.ron` in a tempdir, set `app.theme_dirs`, drive `'t'` → select `amber_alt` → `Enter`, and verify `app.theme.name == "amber_alt"`, `project.config.theme == "amber_alt"`, and persisted `project.toml` reflects `"amber_alt"`.
+  - In `src/tui/ui.rs`: render both `ModalState::Help` and `ModalState::ThemeSwitcher` onto `TestBackend` and assert titles and keybind/theme entries appear.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6F: End-to-End Integration Test Suite (`tests/e2e.rs`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6F: Add end-to-end integration tests in tests/e2e.rs covering CLI workflows, mock adapter push/pull scripts, live TUI sync, theme switching, and Ratatui TestBackend snapshot rendering.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs (NEW)
+READ_ONLY_REFS:
+  - src/lib.rs (public module exports)
+  - src/cli.rs (Command, ExportKind, execute_command)
+  - src/tui/app.rs (App, sync_pull, sync_push_selected, handle_key)
+  - src/tui/ui.rs (render)
+  - src/theme.rs (DEFAULT_CRT_AMBER_RON, resolve_theme)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or tests/.
+  - Test fixtures must use reserved placeholder data only (`example.com`, `192.0.2.0/24`, `testuser`).
+
+[PRE_GATE]
+grep -qE 'pub fn sync_pull\b' src/tui/app.rs && grep -qE 'pub fn list_available_themes\b' src/theme.rs
+
+[MUTATION_SPEC]
+Goal:
+  Verify the complete Rocket Factory platform end-to-end from the public library API across CLI commands, subprocess mock adapters, persistence, live TUI sync, overlays, and Ratatui `TestBackend` rendering.
+
+Contract & Behavior:
+  - Create `tests/e2e.rs` with integration tests exercising:
+    1. **CLI lifecycle + mock adapter roundtrip**:
+       - `init` a workspace in a `tempfile::tempdir()`.
+       - Scaffold and save components (`view_box`, `data_stream`) with a connection and an unpushed feature.
+       - Run `Command::Audit { strict: true }` and assert non-zero exit code when a gap component exists.
+       - Run `Command::Export` for `Manifest`, `Roadmap`, and `Json` formats and verify key output fields.
+       - Configure a mock `sh` adapter in `adapters.toml` and run `Command::Push` followed by `Command::Pull`, verifying features become `pushed = true` with `external_id` and `external_tasks` reconcile to `TaskStatus::Complete`.
+       - Re-run `Command::Audit { strict: true }` after closing gaps and assert exit code `0`.
+    2. **TUI live sync + complete-green border snapshot**:
+       - Load the workspace into `App`, trigger `sync_pull` against a mock `sh` adapter returning `Complete` tasks for a component, render onto `TestBackend::new(140, 40)` via `rocket_factory::tui::ui::render`, and assert:
+         - Rendered buffer shows the component name, `Tasks 1/1`, connector arrow, and zero gaps.
+         - At least one border cell of the completed card uses the theme's `status_complete` RGB color (`Color::Rgb(r, g, b)` with `g > r`).
+    3. **TUI interactive workflows snapshot (viewport panning, modals, theme switch, help)**:
+       - Place a component off-screen (e.g. `col: 4, row: 2`), select it, render onto `TestBackend::new(120, 35)`, and assert viewport pans and renders the off-screen component.
+       - Drive `'t'` to switch to a custom `.ron` theme file in a tempdir, verify persistence in `.rocket/project.toml`, and render onto `TestBackend` verifying the new theme's background/foreground RGB color appears in the buffer.
+       - Drive `'?'` and verify the `"Keyboard Help"` overlay renders with keybinding documentation.
+
+Tests:
+  - All integration tests in `tests/e2e.rs` must pass under `cargo test --workspace` with zero clippy warnings.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/ tests/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
