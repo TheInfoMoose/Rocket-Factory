@@ -462,7 +462,7 @@ created_at = "2026-11-22T15:03:37Z"
 [[items.tasks]]
 id = "TASK-0051"
 title = "core"
-status = "open"
+status = "pending"
 severity = "medium"
 created_at = "2026-11-22T17:40:07Z"
 
@@ -486,3 +486,10 @@ title = "ui"
 status = "open"
 severity = "medium"
 created_at = "2026-11-22T17:40:07Z"
+
+[[items.tasks]]
+id = "TASK-0055"
+title = "Add tests/e2e.rs to STEP 11A ALLOWED_FILES to populate test features explicitly"
+status = "pending"
+severity = "high"
+created_at = "2026-11-22T18:28:24Z"
