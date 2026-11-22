@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 3):** Build the Ratatui TUI shell, terminal lifecycle manager, keyboard-driven `App` state machine, CRT-amber style adapter, and top-down 3-column layout (header bar, filterable Left Column component list with gap indicators, Middle Column canvas frame, Right Column component detail breakdown) wired into `rf` — with zero references to any specific external tracker in `src/`.
+**Phase goal (Phase 4):** Replace the Middle Column placeholder with the interactive cell-based Snap Grid Canvas — rendering themed component cards (name, status glyph, task progress, brief description, status-colored borders), orthogonal Unicode box-drawing connectors with directional arrows and edge labels, and keyboard-only `Navigate`, `MoveCard`, and `Connect` controls — with zero references to any specific external tracker in `src/`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 3A** | `/goal` | tui | `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/tui/mod.rs`, `src/tui/app.rs` | — |
-| 2 | **STEP 3B** | `/goal` | tui | `src/tui/style.rs`, `src/tui/mod.rs` | STEP 3A |
-| 3 | **STEP 3C** | `/goal` | tui | `src/tui/ui.rs`, `src/tui/mod.rs` | STEP 3B |
-| 4 | **STEP 3D** | `/goal` | tui | `src/tui/terminal.rs`, `src/tui/mod.rs`, `src/main.rs` | STEP 3C |
+| 1 | **STEP 4A** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/mod.rs` | — |
+| 2 | **STEP 4B** | `/goal` | canvas | `src/tui/canvas.rs` | STEP 4A |
+| 3 | **STEP 4C** | `/goal` | canvas | `src/tui/ui.rs`, `src/tui/app.rs` | STEP 4B |
+| 4 | **STEP 4D** | `/goal` | canvas | `src/tui/app.rs` | STEP 4C |
 
 ### Completed
 
@@ -45,16 +45,15 @@
 | **STEP 2B** | Done (`56aca5a`) | `/goal` | adapter | `src/adapter.rs` |
 | **STEP 2C** | Done (`94cdbb8`) | `/goal` | cli | `Cargo.toml`, `Cargo.lock`, `src/cli.rs`, `src/lib.rs` |
 | **STEP 2D** | Done (`eb80b6e`) | `/goal` | cli | `Cargo.toml`, `src/main.rs` |
+| **STEP 3A** | Done (`7e72722`) | `/goal` | tui | `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `src/tui/mod.rs`, `src/tui/app.rs` |
+| **STEP 3B** | Done (`bc090b6`) | `/goal` | tui | `src/tui/style.rs`, `src/tui/mod.rs` |
+| **STEP 3C** | Done (`b678069`) | `/goal` | tui | `src/tui/ui.rs`, `src/tui/mod.rs` |
+| **STEP 3D** | Done (`da2155b`) | `/goal` | tui | `src/tui/terminal.rs`, `src/tui/mod.rs`, `src/main.rs` |
 
 ### Future phases
 
 Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write` and `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase).
 
-- **Phase 4: Snap Grid Canvas & Orthogonal Vector Connectors**
-  - Cell-based snap grid viewport (panning, cell coordinates, routing gutters)
-  - Component card widget (name, status badge, progress `done/total`, brief description, themed status border)
-  - Orthogonal Unicode box-drawing connector router (`─ │ ┌ ┐ └ ┘ ▶ ◀ ▲ ▼`) with directional arrows and typed edge labels
-  - Keyboard-only canvas controls (`Navigate`, `MoveCard`, `Connect` modes with arrows and `hjkl` aliases)
 - **Phase 5: Interactive Editing, Scaffolding Modals & `$EDITOR` Integration**
   - New Component archetype picker and scaffold modal
   - Structured TOML field & inline feature editor modal
@@ -883,6 +882,224 @@ grep -qE 'pub fn render\b' src/tui/ui.rs && grep -qE 'fn main\b' src/main.rs
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo run --quiet --bin rf -- --help | grep -qE 'Rocket Factory' && grep -qE 'pub fn run_tui\b' src/tui/terminal.rs && grep -qE 'pub fn suspend_for_editor\b' src/tui/terminal.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 4 Step Blocks
+
+### STEP 4A: Snap Grid Geometry and Viewport Projection
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 4A: Implement cell-based snap grid constants, CanvasViewport, card rectangle projection, viewport panning, and card anchor geometry in src/tui/canvas.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/canvas.rs (NEW)
+  - src/tui/mod.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-10 (GridPos)
+  - src/tui/mod.rs:1-8 (module exports)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No edge routing or widget rendering in src/tui/canvas.rs yet (belongs to STEP 4B).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub mod ui;' src/tui/mod.rs && grep -qE 'pub struct GridPos\b' src/model.rs
+
+[MUTATION_SPEC]
+1. src/tui/mod.rs:1 — anchor `pub mod app;` → add `pub mod canvas;` directly beneath `pub mod app;`.
+2. src/tui/canvas.rs (NEW) — define snap-grid layout constants, viewport, and projection helpers:
+   - `pub const CARD_WIDTH: u16 = 22;`
+   - `pub const CARD_HEIGHT: u16 = 5;`
+   - `pub const GUTTER_X: u16 = 4;`
+   - `pub const GUTTER_Y: u16 = 2;`
+   - `pub const CELL_STRIDE_X: u16 = CARD_WIDTH + GUTTER_X;`
+   - `pub const CELL_STRIDE_Y: u16 = CARD_HEIGHT + GUTTER_Y;`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub struct CanvasViewport { pub scroll_col: u16, pub scroll_row: u16 }`
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct CardAnchors { pub top: (u16, u16), pub bottom: (u16, u16), pub left: (u16, u16), pub right: (u16, u16) }`
+   - `pub fn card_rect(inner: ratatui::layout::Rect, viewport: CanvasViewport, pos: crate::model::GridPos) -> Option<ratatui::layout::Rect>`:
+     - If `pos.col < viewport.scroll_col || pos.row < viewport.scroll_row`, return `None`.
+     - Compute `rel_col = pos.col - viewport.scroll_col` and `rel_row = pos.row - viewport.scroll_row`.
+     - Compute `x = inner.x.saturating_add(1).saturating_add(rel_col.saturating_mul(CELL_STRIDE_X))` and `y = inner.y.saturating_add(1).saturating_add(rel_row.saturating_mul(CELL_STRIDE_Y))`.
+     - If `x.saturating_add(CARD_WIDTH) > inner.x.saturating_add(inner.width)` or `y.saturating_add(CARD_HEIGHT) > inner.y.saturating_add(inner.height)`, return `None`.
+     - Return `Some(Rect { x, y, width: CARD_WIDTH, height: CARD_HEIGHT })`.
+   - `pub fn visible_grid_capacity(inner: ratatui::layout::Rect) -> (u16, u16)`: computes `cols = inner.width.saturating_sub(1).saturating_add(GUTTER_X) / CELL_STRIDE_X` (at least 1) and `rows = inner.height.saturating_sub(1).saturating_add(GUTTER_Y) / CELL_STRIDE_Y` (at least 1).
+   - `pub fn ensure_visible(inner: ratatui::layout::Rect, viewport: &mut CanvasViewport, pos: crate::model::GridPos)`:
+     - Computes `(vis_cols, vis_rows) = visible_grid_capacity(inner)`.
+     - If `pos.col < viewport.scroll_col`, sets `viewport.scroll_col = pos.col`; else if `pos.col >= viewport.scroll_col.saturating_add(vis_cols)`, sets `viewport.scroll_col = pos.col.saturating_sub(vis_cols.saturating_sub(1))`.
+     - Same for `pos.row` / `viewport.scroll_row` / `vis_rows`.
+   - `pub fn card_anchor_points(rect: ratatui::layout::Rect) -> CardAnchors`:
+     - `mid_x = rect.x + rect.width / 2`, `mid_y = rect.y + rect.height / 2`
+     - `top = (mid_x, rect.y)`, `bottom = (mid_x, rect.y + rect.height.saturating_sub(1))`, `left = (rect.x, mid_y)`, `right = (rect.x + rect.width.saturating_sub(1), mid_y)`.
+3. Tests in `src/tui/canvas.rs`:
+   - `card_rect_projects_grid_positions_and_culls_offscreen`: use `inner = Rect::new(0, 0, 60, 20)` and default `viewport`; assert `card_rect(inner, viewport, GridPos { col: 0, row: 0 }) == Some(Rect::new(1, 1, 22, 5))`, `card_rect(inner, viewport, GridPos { col: 1, row: 1 }) == Some(Rect::new(27, 8, 22, 5))`, and `card_rect(inner, viewport, GridPos { col: 5, row: 0 }).is_none()`.
+   - `ensure_visible_pans_viewport_to_target`: use `inner = Rect::new(0, 0, 60, 20)` and default `viewport`; call `ensure_visible(inner, &mut viewport, GridPos { col: 4, row: 3 })`; assert `card_rect(inner, viewport, GridPos { col: 4, row: 3 }).is_some()`.
+   - `card_anchor_points_centers_edges`: use `Rect::new(10, 4, 22, 5)`; assert `anchors.top == (21, 4)`, `anchors.bottom == (21, 8)`, `anchors.left == (10, 6)`, `anchors.right == (31, 6)`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct CanvasViewport\b' src/tui/canvas.rs && grep -qE 'pub fn card_rect\b' src/tui/canvas.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 4B: Orthogonal Unicode Connector Router and Snap Grid Card Renderer
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 4B: Implement orthogonal Unicode box-drawing connector routing and component card rendering in src/tui/canvas.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/canvas.rs
+READ_ONLY_REFS:
+  - src/tui/app.rs:1-120 (App, FocusColumn, selected_component, visible_component_indices)
+  - src/tui/style.rs:1-85 (base_style, muted_style, panel_border_style, card_border_color, status_glyph)
+  - src/audit.rs:30-75 (compute_card_status, task_progress)
+  - src/model.rs:50-135 (Component, Connection, EdgeKind)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct CanvasViewport\b' src/tui/canvas.rs && grep -qE 'pub fn card_anchor_points\b' src/tui/canvas.rs
+
+[MUTATION_SPEC]
+1. src/tui/canvas.rs — add orthogonal edge router and canvas renderer:
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct RoutedEdge { pub segments: Vec<(u16, u16, char)>, pub label_pos: Option<(u16, u16)>, pub label: Option<String> }`
+   - `pub fn route_orthogonal_edge(from_rect: Rect, to_rect: Rect, label: Option<&str>, bounds: Rect) -> RoutedEdge`:
+     - Computes `from_a = card_anchor_points(from_rect)` and `to_a = card_anchor_points(to_rect)`.
+     - Chooses horizontal-first routing when `to_rect.x >= from_rect.x + from_rect.width` (start at `(from_a.right.0 + 1, from_a.right.1)`, end at `(to_a.left.0.saturating_sub(1), to_a.left.1)` with arrow `'▶'`) or `from_rect.x >= to_rect.x + to_rect.width` (start at `(from_a.left.0.saturating_sub(1), from_a.left.1)`, end at `(to_a.right.0 + 1, to_a.right.1)` with arrow `'◀'`).
+     - Otherwise chooses vertical routing: downward if `to_rect.y >= from_rect.y + from_rect.height` (start `(from_a.bottom.0, from_a.bottom.1 + 1)`, end `(to_a.top.0, to_a.top.1.saturating_sub(1))`, arrow `'▼'`), else upward (start `(from_a.top.0, from_a.top.1.saturating_sub(1))`, end `(to_a.bottom.0, to_a.bottom.1 + 1)`, arrow `'▲'`).
+     - Emits orthogonal segments using `'─'`, `'│'`, and corner characters (`'┌'`, `'┐'`, `'└'`, `'┘'`) via a midpoint gutter bend when both `x` and `y` differ, placing the directional arrow at the final endpoint cell. Filters all `(x, y, ch)` to lie inside `bounds`.
+     - If `label` is `Some(text)` and `!text.is_empty()` and `!segments.is_empty()`, sets `label_pos` to the midpoint segment coordinate `(mid.0, mid.1)` and `label = Some(text.to_string())`.
+   - `fn truncate_text(s: &str, max_chars: usize) -> String`: truncates cleanly at character boundary with `'…'` when `s.chars().count() > max_chars` (and `max_chars >= 1`).
+   - `pub fn render_canvas(frame: &mut ratatui::Frame, area: Rect, app: &crate::tui::app::App, viewport: CanvasViewport)`:
+     - Renders outer bordered block titled `format!(" Snap Grid ({}x{}) ", app.project.config.grid.cols, app.project.config.grid.rows)` with `panel_border_style(&app.theme, app.focus == FocusColumn::Canvas)` and computes `inner = block.inner(area)`.
+     - Collects `(comp_idx, Rect)` for all visible components (`app.visible_component_indices()`) via `card_rect(inner, viewport, comp.position)` into a map keyed by `comp.id.as_str()`.
+     - Determines `selected_id = app.selected_component().map(|c| c.id.as_str())`.
+     - Draws routed edges for each `conn` in `&app.project.config.connections` whose `from` and `to` rects are both visible: writes each `(x, y, ch)` directly into `frame.buffer_mut()[(x, y)]` using accent color if `selected_id == Some(conn.from.as_str()) || selected_id == Some(conn.to.as_str())`, else `muted_style`; writes optional `conn.label` (or short edge kind tag) clipped inside `inner`.
+     - Draws each visible component card on top of the connectors:
+       - `status = compute_card_status(comp)`, `progress = task_progress(comp)`, `glyph = style::status_glyph(status)`, `is_selected = selected_id == Some(comp.id.as_str())`.
+       - Uses `BorderType::Double` when `is_selected`, `BorderType::Plain` otherwise; border color from `style::card_border_color(&app.theme, status)` (adding `Modifier::BOLD` when selected).
+       - Renders 3 lines inside the card (`Paragraph` with `Block::bordered()`):
+         1. `truncate_text(&format!("{glyph} {}", comp.name), inner_w)`
+         2. `truncate_text(&format!("Tasks {}/{} [{:?}]", progress.complete, progress.total, comp.kind), inner_w)`
+         3. `truncate_text(&comp.description, inner_w)`
+2. Tests in `src/tui/canvas.rs`:
+   - `route_horizontal_edge_emits_line_and_right_arrow`: route from `Rect::new(1, 1, 22, 5)` to `Rect::new(27, 1, 22, 5)` inside `Rect::new(0, 0, 80, 25)`; assert `edge.segments.iter().any(|&(_, _, ch)| ch == '─')` and `edge.segments.last().map(|&(_, _, ch)| ch) == Some('▶')`.
+   - `route_l_bend_edge_emits_corners_and_arrow`: route from `Rect::new(1, 1, 22, 5)` to `Rect::new(27, 8, 22, 5)` inside `Rect::new(0, 0, 80, 25)` with `Some("events")`; assert `edge.segments.iter().any(|&(_, _, ch)| ch == '│')`, `edge.segments.last().map(|&(_, _, ch)| ch) == Some('▶')`, and `edge.label.as_deref() == Some("events")`.
+   - `route_vertical_edge_emits_down_arrow`: route from `Rect::new(1, 1, 22, 5)` to `Rect::new(1, 8, 22, 5)` inside `Rect::new(0, 0, 80, 25)`; assert `edge.segments.last().map(|&(_, _, ch)| ch) == Some('▼')`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn route_orthogonal_edge\b' src/tui/canvas.rs && grep -qE 'pub fn render_canvas\b' src/tui/canvas.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 4C: Wire Snap Grid Canvas into 3-Column TUI Layout
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 4C: Add CanvasViewport and connect_source_id to App and wire render_canvas into the Middle Column of src/tui/ui.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/canvas.rs:1-40 (CanvasViewport, render_canvas)
+  - src/tui/app.rs:25-65 (App struct and App::new)
+  - src/tui/ui.rs:1-40 (render, render_canvas_placeholder)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No keyboard MoveCard/Connect logic changes in src/tui/app.rs yet (belongs to STEP 4D).
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn render_canvas\b' src/tui/canvas.rs && grep -qE 'pub fn render\b' src/tui/ui.rs
+
+[MUTATION_SPEC]
+1. src/tui/app.rs:5 — add `use crate::tui::canvas::CanvasViewport;` and at anchor `pub audit_findings: Vec<AuditFinding>,` → add directly beneath it:
+   - `pub viewport: CanvasViewport,`
+   - `pub connect_source_id: Option<String>,`
+   Initialize both in `App::new` (`viewport: CanvasViewport::default()`, `connect_source_id: None`).
+2. src/tui/ui.rs:32 — anchor `render_canvas_placeholder(frame, cols[1], app);` → replace with `crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport);` and remove the now-unused `fn render_canvas_placeholder` function (and unused `Alignment` import if no longer used).
+3. Tests in `src/tui/ui.rs`:
+   - Add `render_canvas_draws_component_cards_and_connectors`: build `make_test_app()` with a `Connection { from: "view_box".into(), to: "core_bus".into(), kind: EdgeKind::DataFlow, label: Some("events".into()) }`; draw onto `TestBackend::new(140, 35)`; assert rendered text contains `"view_box"`, `"core_bus"`, `"Tasks 1/1"`, and `'▶'`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub viewport: CanvasViewport' src/tui/app.rs && grep -qE 'render_canvas\(' src/tui/ui.rs && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 4D: Keyboard-Only Canvas Controls (Directional Navigation, Move Card, Connect Mode)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 4D: Implement keyboard-only directional selection, MoveCard snap-grid placement with collision detection, and Connect mode edge toggling in src/tui/app.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-85 (GridPos, Connection, EdgeKind, Project)
+  - src/storage.rs:138-165 (save_project_config, save_component, ROCKET_DIR)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub viewport: CanvasViewport' src/tui/app.rs && grep -qE 'pub connect_source_id: Option<String>' src/tui/app.rs
+
+[MUTATION_SPEC]
+1. src/tui/app.rs — add helper methods on `App`:
+   - `pub fn select_in_direction(&mut self, dcol: i32, drow: i32)`: finds the visible component in `self.visible_component_indices()` whose `(col - cur_col, row - cur_row)` has positive dot product with `(dcol, drow)` and minimizes Manhattan distance `|dx| + |dy|` (tie-breaking by index). Updates `self.selected_index` and resets `self.detail_scroll = 0`. If no neighbor exists in that direction, leaves selection unchanged.
+   - `pub fn move_selected_card(&mut self, dcol: i32, drow: i32)`: computes target `(new_col, new_row)` clamped to `0..self.project.config.grid.cols.saturating_sub(1)` and `0..self.project.config.grid.rows.saturating_sub(1)`. Checks if any other component occupies `GridPos { col: new_col, row: new_row }`; if occupied, sets `self.status_message = "Cell occupied".to_string()` and returns. Otherwise updates the selected component's `position`, sets `self.status_message = format!("Moved '{}' to ({new_col}, {new_row})", id)`, and if `self.root.join(crate::storage::ROCKET_DIR).is_dir()` persists via `crate::storage::save_component(&self.root, comp)` (recording error text in `self.status_message` on failure).
+   - `pub fn toggle_connection_to_selected(&mut self)`: requires `self.connect_source_id` and `self.selected_component()`. If source == target, sets `self.status_message = "Cannot connect component to itself".to_string()` and returns. Otherwise checks `self.project.config.connections` for an existing connection with `from == src && to == dst`: if present, removes it and sets `status_message = format!("Disconnected {src} -> {dst}")`; if absent, pushes `Connection { from: src, to: dst, kind: EdgeKind::DependsOn, label: None }` and sets `status_message = format!("Connected {src} -> {dst}")`. Persists `project.toml` via `crate::storage::save_project_config(&self.root, &self.project.config)` when `self.root.join(crate::storage::ROCKET_DIR).is_dir()`, calls `self.refresh_audit()`, clears `self.connect_source_id = None`, and sets `self.mode = InputMode::Navigate`.
+2. src/tui/app.rs — update `handle_key`:
+   - `KeyCode::Esc` → clears `self.connect_source_id = None`, sets `self.mode = InputMode::Navigate`, `self.status_message = "Mode: Navigate".to_string()`.
+   - `KeyCode::Char('c')` → captures `self.connect_source_id = self.selected_component().map(|c| c.id.clone())`, sets `self.mode = InputMode::Connect`, and updates `self.status_message` with the source ID (or `"Select a component first"` if none).
+   - `KeyCode::Enter` when `self.mode == InputMode::Connect` → calls `self.toggle_connection_to_selected()`.
+   - Arrow / `hjkl` keys:
+     - When `self.mode == InputMode::MoveCard`: `Left|'h' => move_selected_card(-1, 0)`, `Right|'l' => move_selected_card(1, 0)`, `Up|'k' => move_selected_card(0, -1)`, `Down|'j' => move_selected_card(0, 1)`.
+     - When `self.mode != InputMode::MoveCard` and `self.focus == FocusColumn::Canvas`: `Left|'h' => select_in_direction(-1, 0)`, `Right|'l' => select_in_direction(1, 0)`, `Up|'k' => select_in_direction(0, -1)`, `Down|'j' => select_in_direction(0, 1)`.
+     - Keep existing `List` and `Detail` `j`/`k`/`Up`/`Down` behavior unchanged.
+3. Tests in `src/tui/app.rs`:
+   - `move_card_updates_grid_pos_and_blocks_collision`: place `"a"` at `(0, 0)` and `"b"` at `(1, 0)`; press `'m'` then `Right` (assert `"a"` stays at `(0, 0)` and `app.status_message == "Cell occupied"`); press `Down` (assert `"a"` moves to `(0, 1)`).
+   - `connect_mode_adds_and_removes_edge`: place `"a"` at `(0, 0)` and `"b"` at `(1, 0)`; press `'c'` (assert `connect_source_id.as_deref() == Some("a")`); move selection to `"b"` and press `Enter` (assert `connections.len() == 1`, `from == "a"`, `to == "b"`, `mode == InputMode::Navigate`); repeat `'c'` from `"a"` to `"b"` + `Enter` (assert `connections.is_empty()`).
+   - `canvas_directional_selection_picks_neighbor`: place `"a"` at `(0, 0)` and `"b"` at `(2, 0)`; set `focus = FocusColumn::Canvas`; press `Right`; assert `app.selected_component().unwrap().id == "b"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn move_selected_card\b' src/tui/app.rs && grep -qE 'pub fn toggle_connection_to_selected\b' src/tui/app.rs && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
