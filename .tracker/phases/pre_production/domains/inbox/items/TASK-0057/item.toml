@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0057"
 type = "task"
 title = "ui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T19:34:07Z"
-updated_at = "2026-11-22T19:34:07Z"
+updated_at = "2026-11-22T19:51:53Z"
 source_ref = "STEP 12B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0057@2026-11-22T19:48:42Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "2bff7c6"
+summary = "STEP 12B: Per-Action Keyboard Help Modal & Underlined-Key Mnemonic Footer (phased check PASS)"
