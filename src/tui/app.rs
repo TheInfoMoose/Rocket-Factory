@@ -302,15 +302,19 @@ impl App {
         }
 
         let comp_name = self.project.components[comp_idx].name.clone();
-        self.project.components[comp_idx].position = target_pos;
+        let mut candidate = self.project.components[comp_idx].clone();
+        candidate.position = target_pos;
 
         if self.root.join(ROCKET_DIR).exists() {
-            if let Err(err) = save_component(&self.root, &self.project.components[comp_idx]) {
+            if let Err(err) = save_component(&self.root, &candidate) {
+                self.refresh_audit();
                 self.status_message = format!("Failed to save {comp_name}: {err}");
                 return;
             }
         }
 
+        self.project.components[comp_idx] = candidate;
+        self.refresh_audit();
         self.status_message = format!(
             "Moved {comp_name} to ({}, {})",
             target_pos.col, target_pos.row
@@ -357,17 +361,16 @@ impl App {
             return;
         }
 
-        let mut msg = if let Some(pos) = self
-            .project
-            .config
+        let mut candidate_config = self.project.config.clone();
+        let mut msg = if let Some(pos) = candidate_config
             .connections
             .iter()
             .position(|conn| conn.from == source_id && conn.to == target_id)
         {
-            self.project.config.connections.remove(pos);
+            candidate_config.connections.remove(pos);
             format!("Removed connection {source_id} -> {target_id}")
         } else {
-            self.project.config.connections.push(Connection {
+            candidate_config.connections.push(Connection {
                 from: source_id.clone(),
                 to: target_id.clone(),
                 kind: EdgeKind::DependsOn,
@@ -376,8 +379,17 @@ impl App {
             format!("Connected {source_id} -> {target_id}")
         };
 
-        if self.root.join(ROCKET_DIR).exists() {
-            if let Err(err) = save_project_config(&self.root, &self.project.config) {
+        let save_result = if self.root.join(ROCKET_DIR).exists() {
+            save_project_config(&self.root, &candidate_config)
+        } else {
+            Ok(())
+        };
+
+        match save_result {
+            Ok(()) => {
+                self.project.config = candidate_config;
+            }
+            Err(err) => {
                 msg = format!("Failed to save connections: {err}");
             }
         }
@@ -388,7 +400,7 @@ impl App {
         self.status_message = msg;
     }
 
-    fn first_unoccupied_grid_pos(&self) -> GridPos {
+    fn first_unoccupied_grid_pos(&self) -> Option<GridPos> {
         for row in 0..self.project.config.grid.rows {
             for col in 0..self.project.config.grid.cols {
                 let candidate = GridPos { col, row };
@@ -398,11 +410,11 @@ impl App {
                     .iter()
                     .any(|comp| comp.position == candidate)
                 {
-                    return candidate;
+                    return Some(candidate);
                 }
             }
         }
-        GridPos::default()
+        None
     }
 
     fn apply_modal_action(&mut self, mut modal: ModalState, action: ModalAction) {
@@ -425,7 +437,18 @@ impl App {
                     return;
                 }
 
-                let pos = self.first_unoccupied_grid_pos();
+                let Some(pos) = self.first_unoccupied_grid_pos() else {
+                    let err = format!(
+                        "grid ({}x{}) is full; no free cell available",
+                        self.project.config.grid.cols, self.project.config.grid.rows
+                    );
+                    if let ModalState::NewComponent(ref mut form) = modal {
+                        form.error = Some(err.clone());
+                    }
+                    self.status_message = err;
+                    self.modal = Some(modal);
+                    return;
+                };
                 let comp = scaffold_component(&id, &name, kind, pos);
 
                 if self.root.join(ROCKET_DIR).exists() {
@@ -462,25 +485,31 @@ impl App {
                 tags,
                 add_feature,
             } => {
-                let Some(comp) = self.project.component_mut(&component_id) else {
+                let Some(comp_idx) = self
+                    .project
+                    .components
+                    .iter()
+                    .position(|c| c.id == component_id)
+                else {
                     self.mode = InputMode::Navigate;
                     self.status_message = format!("Component '{component_id}' not found");
                     return;
                 };
 
-                comp.name = name.clone();
-                comp.description = description;
-                comp.relative_path = relative_path;
-                comp.tags = tags;
+                let mut candidate = self.project.components[comp_idx].clone();
+                candidate.name = name.clone();
+                candidate.description = description;
+                candidate.relative_path = relative_path;
+                candidate.tags = tags;
 
                 if let Some(title) = add_feature {
-                    let mut next_num = comp.features.len() + 1;
+                    let mut next_num = candidate.features.len() + 1;
                     let mut feat_id = format!("{component_id}_f{next_num}");
-                    while comp.features.iter().any(|f| f.id == feat_id) {
+                    while candidate.features.iter().any(|f| f.id == feat_id) {
                         next_num += 1;
                         feat_id = format!("{component_id}_f{next_num}");
                     }
-                    comp.features.push(FeatureItem {
+                    candidate.features.push(FeatureItem {
                         id: feat_id,
                         title,
                         pushed: false,
@@ -489,21 +518,22 @@ impl App {
                 }
 
                 let save_result = if self.root.join(ROCKET_DIR).exists() {
-                    save_component(&self.root, comp)
+                    save_component(&self.root, &candidate)
                 } else {
                     Ok(())
                 };
 
-                self.refresh_audit();
-                self.mode = InputMode::Navigate;
                 match save_result {
                     Ok(()) => {
+                        self.project.components[comp_idx] = candidate;
                         self.status_message = format!("Updated component {name}");
                     }
                     Err(err) => {
                         self.status_message = format!("Failed to save {name}: {err}");
                     }
                 }
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
             }
             ModalAction::UpdateConnection {
                 from,
@@ -511,9 +541,8 @@ impl App {
                 kind,
                 label,
             } => {
-                let Some(conn) = self
-                    .project
-                    .config
+                let mut candidate_config = self.project.config.clone();
+                let Some(conn) = candidate_config
                     .connections
                     .iter_mut()
                     .find(|c| c.from == from && c.to == to)
@@ -527,21 +556,22 @@ impl App {
                 conn.label = label;
 
                 let save_result = if self.root.join(ROCKET_DIR).exists() {
-                    save_project_config(&self.root, &self.project.config)
+                    save_project_config(&self.root, &candidate_config)
                 } else {
                     Ok(())
                 };
 
-                self.refresh_audit();
-                self.mode = InputMode::Navigate;
                 match save_result {
                     Ok(()) => {
+                        self.project.config = candidate_config;
                         self.status_message = format!("Updated connection {from} -> {to}");
                     }
                     Err(err) => {
                         self.status_message = format!("Failed to save connections: {err}");
                     }
                 }
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
             }
         }
     }
@@ -642,6 +672,8 @@ impl App {
                 if let Some(comp) = self.selected_component() {
                     let id = comp.id.clone();
                     let name = comp.name.clone();
+                    self.connect_source_id = None;
+                    self.mode = InputMode::Navigate;
                     self.pending_editor_component = Some(id);
                     self.status_message = format!("Opening {name} in $EDITOR...");
                 } else {
@@ -1110,5 +1142,136 @@ mod tests {
             updated_md
         );
         assert!(app.status_message.contains("Reloaded"));
+    }
+
+    #[test]
+    fn app_mutations_rollback_in_memory_state_on_disk_save_failure() {
+        use crate::storage::{init_workspace, load_project, save_component, PROJECT_FILE};
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir.path(), "Rollback Test", "Transactional save failure")
+            .expect("init workspace");
+
+        let mut a = make_component("alpha");
+        a.position = GridPos { col: 0, row: 0 };
+        a.description = "Original alpha".to_string();
+        let mut b = make_component("beta");
+        b.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &a).expect("save alpha");
+        save_component(dir.path(), &b).expect("save beta");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: Some("initial".to_string()),
+        });
+        save_project_config(dir.path(), &project.config).expect("save initial connections");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Break component saves by replacing .rocket/components with a regular file
+        let components_path = dir.path().join(ROCKET_DIR).join(COMPONENTS_DIR);
+        std::fs::remove_dir_all(&components_path).expect("remove components dir");
+        std::fs::write(&components_path, "not a directory").expect("create blocking file");
+
+        // 1. move_selected_card rolls back position on save failure
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(
+            app.project.component("alpha").unwrap().position,
+            GridPos { col: 0, row: 0 }
+        );
+        assert!(app.status_message.contains("Failed to save"));
+        app.handle_key(key(KeyCode::Char('m'))); // exit MoveCard
+
+        // 2. UpdateComponent rolls back fields and features on save failure
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Tab)); // description
+        type_keys(&mut app, " mutated");
+        app.handle_key(key(KeyCode::Tab)); // path
+        app.handle_key(key(KeyCode::Tab)); // tags
+        app.handle_key(key(KeyCode::Tab)); // add feature
+        type_keys(&mut app, "Unpersisted feature");
+        app.handle_key(key(KeyCode::Enter));
+
+        let alpha = app.project.component("alpha").unwrap();
+        assert_eq!(alpha.description, "Original alpha");
+        assert!(alpha.features.is_empty());
+        assert!(app.status_message.contains("Failed to save"));
+
+        // Break project.toml saves by replacing .rocket/project.toml with a directory
+        let project_file = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        std::fs::remove_file(&project_file).expect("remove project.toml");
+        std::fs::create_dir(&project_file).expect("replace project.toml with dir");
+
+        // 3. confirm_connect rolls back connection removal on save failure
+        app.focus = FocusColumn::Canvas;
+        app.handle_key(key(KeyCode::Char('c')));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.project.config.connections.len(), 1);
+        assert_eq!(app.project.config.connections[0].from, "alpha");
+        assert_eq!(app.project.config.connections[0].to, "beta");
+        assert!(app.status_message.contains("Failed to save connections"));
+
+        // 4. UpdateConnection rolls back kind/label on save failure
+        app.handle_key(key(KeyCode::Left)); // back to alpha
+        app.handle_key(key(KeyCode::Char('E')));
+        app.handle_key(key(KeyCode::Right)); // DependsOn -> DataFlow
+        app.handle_key(key(KeyCode::Tab)); // label
+        type_keys(&mut app, "_mut");
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::DependsOn);
+        assert_eq!(
+            app.project.config.connections[0].label.as_deref(),
+            Some("initial")
+        );
+        assert!(app.status_message.contains("Failed to save connections"));
+    }
+
+    #[test]
+    fn app_create_component_rejects_when_grid_is_full() {
+        let mut comp = make_component("only_card");
+        comp.position = GridPos { col: 0, row: 0 };
+        let mut app = make_app(vec![comp]);
+        app.project.config.grid = GridConfig { cols: 1, rows: 1 };
+
+        app.handle_key(key(KeyCode::Char('n')));
+        type_keys(&mut app, "second_card");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Second Card");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        assert_eq!(app.project.components.len(), 1);
+        assert_eq!(app.project.components[0].id, "only_card");
+        assert_eq!(
+            app.project.components[0].position,
+            GridPos { col: 0, row: 0 }
+        );
+        assert!(app.status_message.contains("full"));
+        if let Some(ModalState::NewComponent(ref form)) = app.modal {
+            assert!(form.error.as_deref().unwrap_or("").contains("full"));
+        } else {
+            panic!("expected NewComponent modal to remain open");
+        }
+    }
+
+    #[test]
+    fn app_v_key_clears_connect_mode_before_queueing_editor() {
+        let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
+
+        app.handle_key(key(KeyCode::Char('v')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.connect_source_id.is_none());
+        assert_eq!(app.pending_editor_component.as_deref(), Some("alpha"));
     }
 }

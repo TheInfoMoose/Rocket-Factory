@@ -10,7 +10,7 @@ use crate::tui::app::{App, FocusColumn, ListFilter};
 use crate::tui::modal::{edge_kind_label, ModalState};
 use crate::tui::style;
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     frame.render_widget(Block::default().style(style::base_style(&app.theme)), area);
 
@@ -29,6 +29,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         Constraint::Percentage(28),
     ])
     .split(chunks[1]);
+
+    if let Some(selected_pos) = app.selected_component().map(|selected| selected.position) {
+        let canvas_inner = Block::default().borders(Borders::ALL).inner(cols[1]);
+        crate::tui::canvas::ensure_visible(canvas_inner, &mut app.viewport, selected_pos);
+    }
 
     render_component_list(frame, cols[0], app);
     crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport);
@@ -257,7 +262,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     let footer = Paragraph::new(
-        " [Tab] Focus  [j/k ↑/↓] Navigate  [n] New  [e] Edit  [E] Edge  [f] Gaps  [m] Move  [c] Connect  [q] Quit",
+        " [Tab] Focus  [j/k ↑/↓] Navigate  [n] New  [e] Edit  [E] Edge  [v] Edit MD  [f] Gaps  [m] Move  [c] Connect  [q] Quit",
     )
     .style(style::muted_style(&app.theme));
     frame.render_widget(footer, area);
@@ -386,7 +391,7 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalState, theme: &Theme
         muted,
     )));
 
-    let popup_width = (area.width * 60 / 100).clamp(54, 76);
+    let popup_width = ((u32::from(area.width) * 60 / 100) as u16).clamp(54, 76);
     let popup_height = (lines.len() as u16).saturating_add(2);
     let popup_area = centered_rect(popup_width, popup_height, area);
 
@@ -472,7 +477,7 @@ mod tests {
         App::new(PathBuf::from("/tmp/example-project"), project, theme)
     }
 
-    fn render_to_string(app: &App) -> String {
+    fn render_to_string(app: &mut App) -> String {
         let backend = TestBackend::new(120, 35);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, app)).unwrap();
@@ -489,8 +494,8 @@ mod tests {
 
     #[test]
     fn render_three_column_layout_displays_header_list_and_details() {
-        let app = make_test_app();
-        let text = render_to_string(&app);
+        let mut app = make_test_app();
+        let text = render_to_string(&mut app);
 
         assert!(text.contains("ROCKET FACTORY"));
         assert!(text.contains("GAPS: 1"));
@@ -498,13 +503,14 @@ mod tests {
         assert!(text.contains("Snap Grid"));
         assert!(text.contains("Component Details"));
         assert!(text.contains("view_box"));
+        assert!(text.contains("[v] Edit MD"));
     }
 
     #[test]
     fn render_gaps_filter_hides_tracked_component() {
         let mut app = make_test_app();
         app.toggle_gaps_filter();
-        let text = render_to_string(&app);
+        let text = render_to_string(&mut app);
 
         assert!(text.contains("Components [GAPS]"));
         assert!(text.contains("view_box"));
@@ -523,7 +529,7 @@ mod tests {
             label: None,
         });
 
-        let text = render_to_string(&app);
+        let text = render_to_string(&mut app);
 
         assert!(text.contains("view_box"));
         assert!(text.contains("core_bus"));
@@ -541,7 +547,7 @@ mod tests {
         // Trigger validation error on empty submission
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        let text = render_to_string(&app);
+        let text = render_to_string(&mut app);
 
         assert!(text.contains("New Component"));
         assert!(text.contains("ID:"));
@@ -552,5 +558,45 @@ mod tests {
         assert!(text.contains("←/→"));
         assert!(text.contains("Enter"));
         assert!(text.contains("Esc"));
+    }
+
+    #[test]
+    fn render_pans_viewport_to_offscreen_selected_component() {
+        let mut app = make_test_app();
+        app.project.components.push(Component {
+            id: "far_node".to_string(),
+            name: "Far Outpost".to_string(),
+            kind: ComponentKind::ServiceCore,
+            description: "Remote grid card".to_string(),
+            relative_path: Some("src/far_node.rs".to_string()),
+            position: GridPos { col: 4, row: 2 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+        app.selected_index = 2;
+        assert_eq!(app.viewport.scroll_col, 0);
+        assert_eq!(app.viewport.scroll_row, 0);
+
+        let text = render_to_string(&mut app);
+
+        assert!(app.viewport.scroll_col > 0 || app.viewport.scroll_row > 0);
+        assert!(text.contains("Far Outpost"));
+    }
+
+    #[test]
+    fn render_modal_handles_wide_terminal_without_overflow() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = make_test_app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+
+        let backend = TestBackend::new(1200, 35);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
     }
 }

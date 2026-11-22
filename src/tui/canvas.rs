@@ -300,9 +300,34 @@ fn compute_label_pos(
         return None;
     }
 
+    let max_x = bounds.x.saturating_add(bounds.width);
+    let max_y = bounds.y.saturating_add(bounds.height);
+    let text_len = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+    let is_segment = |x: u16, y: u16| segments.iter().any(|&(sx, sy, _)| sx == x && sy == y);
+    let span_clear = |cx: u16, cy: u16| -> bool {
+        if !in_bounds(cx, cy, bounds) {
+            return false;
+        }
+        let end_x = cx.saturating_add(text_len).min(max_x);
+        (cx..end_x).all(|x| !is_segment(x, cy))
+    };
+    let pick_clear = |candidates: &[(u16, u16)]| -> Option<(u16, u16)> {
+        candidates
+            .iter()
+            .copied()
+            .find(|&(cx, cy)| span_clear(cx, cy))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .copied()
+                    .find(|&(cx, cy)| in_bounds(cx, cy, bounds) && !is_segment(cx, cy))
+            })
+    };
+
     let mid_idx = segments.len() / 2;
     let (mx, my, mch) = segments[mid_idx];
     let is_horizontal_seg = matches!(mch, '─' | '▶' | '◀');
+    let is_corner = matches!(mch, '┐' | '┘' | '└' | '┌');
 
     if is_horizontal_seg {
         let mut run_min_x = mx;
@@ -321,28 +346,48 @@ fn compute_label_pos(
         }
 
         let run_len = usize::from(run_max_x.saturating_sub(run_min_x)) + 1;
-        let text_len = text.chars().count();
-        let offset = u16::try_from(run_len.saturating_sub(text_len) / 2).unwrap_or(u16::MAX);
+        let offset =
+            u16::try_from(run_len.saturating_sub(text.chars().count()) / 2).unwrap_or(u16::MAX);
         let lx = run_min_x.saturating_add(offset);
 
-        let max_y = bounds.y.saturating_add(bounds.height);
-        let ly = if my > bounds.y {
-            my - 1
-        } else if my.saturating_add(1) < max_y {
-            my + 1
-        } else {
-            my
-        };
-
-        Some((lx, ly))
+        let mut candidates = Vec::new();
+        if my > bounds.y {
+            candidates.push((lx, my - 1));
+        }
+        if my.saturating_add(1) < max_y {
+            candidates.push((lx, my + 1));
+        }
+        pick_clear(&candidates)
+    } else if is_corner {
+        let mut candidates = Vec::new();
+        if my > bounds.y {
+            candidates.push((mx, my - 1));
+        }
+        if my.saturating_add(1) < max_y {
+            candidates.push((mx, my + 1));
+        }
+        if mx.saturating_add(1) < max_x {
+            candidates.push((mx + 1, my));
+        }
+        if mx > bounds.x {
+            candidates.push((mx - 1, my));
+        }
+        pick_clear(&candidates)
     } else {
-        let max_x = bounds.x.saturating_add(bounds.width);
-        let lx = if mx.saturating_add(1) < max_x {
-            mx + 1
-        } else {
-            mx
-        };
-        Some((lx, my))
+        let mut candidates = Vec::new();
+        if mx.saturating_add(1) < max_x {
+            candidates.push((mx + 1, my));
+        }
+        if my > bounds.y {
+            candidates.push((mx, my - 1));
+        }
+        if my.saturating_add(1) < max_y {
+            candidates.push((mx, my + 1));
+        }
+        if mx > bounds.x {
+            candidates.push((mx - 1, my));
+        }
+        pick_clear(&candidates)
     }
 }
 
@@ -397,7 +442,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
     let selected_id = app.selected_component().map(|c| c.id.as_str());
 
     let mut routed_edges: Vec<(RoutedEdge, Style)> = Vec::new();
-    let mut arrow_cells: Vec<(u16, u16)> = Vec::new();
+    let mut segment_cells: Vec<(u16, u16)> = Vec::new();
 
     for conn in &app.project.config.connections {
         let (Some(&from_rect), Some(&to_rect)) = (
@@ -424,12 +469,9 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             style::muted_style(&app.theme)
         };
 
-        if let Some(&(ax, ay, _)) = routed.segments.last() {
-            arrow_cells.push((ax, ay));
-        }
-
         let buf = frame.buffer_mut();
         for &(x, y, ch) in &routed.segments {
+            segment_cells.push((x, y));
             if let Some(cell) = buf.cell_mut((x, y)) {
                 let mut ch_buf = [0u8; 4];
                 cell.set_symbol(ch.encode_utf8(&mut ch_buf))
@@ -442,7 +484,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
 
     let is_blocked = |x: u16, y: u16| -> bool {
         !in_bounds(x, y, inner)
-            || arrow_cells.contains(&(x, y))
+            || segment_cells.contains(&(x, y))
             || visible_cards.iter().any(|&(_, rect)| in_bounds(x, y, rect))
     };
 
@@ -739,5 +781,54 @@ mod tests {
 
         assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
         assert!(row_text(&buf, edge_y - 1).contains("events"));
+    }
+
+    #[test]
+    fn compute_label_pos_avoids_horizontal_segment_cells_at_l_bend_corner() {
+        let bounds = Rect::new(0, 0, 80, 25);
+        // Short L-bend whose midpoint lands directly on the '└' corner at (24, 4).
+        let edge = route_orthogonal_edge(
+            Rect::new(1, 1, 22, 5),
+            Rect::new(27, 2, 22, 5),
+            Some("bus"),
+            bounds,
+        );
+        let label_pos = edge.label_pos.expect("expected label position");
+        for &(sx, sy, _) in &edge.segments {
+            assert_ne!(
+                label_pos,
+                (sx, sy),
+                "label start must not collide with segment ({sx}, {sy})"
+            );
+        }
+        // Corner '└' is at (24, 4) with '┐' above at (24, 3), so label should be below at (24, 5).
+        assert_eq!(label_pos, (24, 5));
+    }
+
+    #[test]
+    fn render_canvas_l_bend_preserves_all_segments_corners_and_arrowhead() {
+        let app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 1 },
+            Some("events"),
+        );
+        let buf = render_canvas_buffer(&app, 70, 20);
+        let inner = Rect::new(1, 1, 68, 18);
+        let from_rect =
+            card_rect(inner, CanvasViewport::default(), GridPos { col: 0, row: 0 }).unwrap();
+        let to_rect =
+            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 1 }).unwrap();
+        let expected = route_orthogonal_edge(from_rect, to_rect, Some("events"), inner);
+
+        for &(x, y, ch) in &expected.segments {
+            let mut ch_buf = [0u8; 4];
+            let expected_sym = ch.encode_utf8(&mut ch_buf);
+            assert_eq!(
+                buf[(x, y)].symbol(),
+                expected_sym,
+                "segment at ({x}, {y}) was overwritten"
+            );
+        }
+        assert_eq!(expected.segments.last().map(|&(_, _, ch)| ch), Some('▶'));
     }
 }
