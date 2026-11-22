@@ -18,13 +18,16 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 9):** Fix no-op `d`/`D` mode cleanup in `src/tui/app.rs`, configure and verify crate packaging (`Cargo.toml`, `LICENSE`, `cargo package`), and add GitHub Actions CI (`.github/workflows/ci.yml`) enforcing formatting, clippy, tests, and packaging.
+**Phase goal (Phase 10):** Add a Linux git build/install smoke-test job to GitHub Actions CI (`.github/workflows/ci.yml`) and fix the install and quickstart instructions in `README.md`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
 ### Up Next
 
-_None — Phase 9 complete._
+| # | Step | Command | Scope | Target Files | Waits on |
+| :---: | :--- | :---: | :--- | :--- | :--- |
+| 1 | **STEP 10A** | `/goal` | ci | `.github/workflows/ci.yml` | — |
+| 2 | **STEP 10B** | `/goal` | docs | `README.md` | — |
 
 ### Completed
 
@@ -73,7 +76,7 @@ _None — Phase 9 complete._
 
 ### Future phases
 
-_None planned — Phase 9 completes TUI delete edge-case cleanup, crate packaging verification, and automated CI._
+_None planned — Phase 10 adds Linux git build/install CI verification and fixes end-user installation and quickstart documentation._
 
 ### Open Questions
 
@@ -2383,6 +2386,126 @@ Contract & Behavior:
 
 [POST_GATE]
 test -s .github/workflows/ci.yml && grep -q 'cargo fmt --all -- --check' .github/workflows/ci.yml && grep -q 'cargo clippy --workspace --all-targets -- -D warnings' .github/workflows/ci.yml && grep -q 'cargo test --workspace' .github/workflows/ci.yml && grep -q 'cargo package --locked' .github/workflows/ci.yml && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' .github/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 10 Step Blocks
+
+### STEP 10A: Linux Git Build & Install Smoke-Test CI Job
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 10A: Extend .github/workflows/ci.yml with workflow_dispatch and a Linux git build/install smoke-test job verifying release build, cargo install --git, and installed rf CLI execution.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/ci.yml
+READ_ONLY_REFS:
+  - .github/workflows/ci.yml:1-41 (existing CI workflow)
+  - Cargo.toml:1-42 (package metadata and rf binary target)
+  - src/cli.rs:10-60 (CLI flags and subcommands)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not weaken or remove any step in the existing `check` job.
+  - No references to the string "nebulous" (case-insensitive) anywhere in .github/.
+  - No secrets, tokens, or host-specific paths.
+
+[PRE_GATE]
+test -s .github/workflows/ci.yml && grep -q 'cargo package --locked' .github/workflows/ci.yml
+
+[MUTATION_SPEC]
+Goal:
+  Verify on Linux (`ubuntu-latest`) in GitHub Actions that Rocket Factory builds cleanly in release mode from a git checkout, installs via `cargo install --git ... --locked`, and runs core CLI commands cleanly from the installed `rf` binary.
+
+Contract & Behavior:
+  - `.github/workflows/ci.yml`:
+    - Keep `name: CI`, `permissions: contents: read`, and the existing `check` job intact (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo package --locked`).
+    - Under `on:`, preserve `push` (`master`, `main`) and `pull_request`, and add `workflow_dispatch:` for manual runs.
+    - Add a second job `linux-git-build` (`name: Linux Git Build & Install`, `runs-on: ubuntu-latest`, `env: CARGO_TERM_COLOR: always`) with steps:
+      1. Checkout (`actions/checkout@v4`).
+      2. Install Rust toolchain (`dtolnay/rust-toolchain@stable`).
+      3. Cache Cargo (`Swatinem/rust-cache@v2`).
+      4. Build release binary (`cargo build --release --locked`) and verify `test -x target/release/rf`.
+      5. Install from the checked-out git repository into an isolated root:
+         `cargo install --git "file://${GITHUB_WORKSPACE}" --rev "$(git rev-parse HEAD)" --locked --root "${RUNNER_TEMP}/rf-install"`
+      6. Smoke-test the installed Linux `rf` binary (`RF_BIN="${RUNNER_TEMP}/rf-install/bin/rf"`, `WS="${RUNNER_TEMP}/smoke-ws"`):
+         - `"$RF_BIN" --help`
+         - `"$RF_BIN" --path "$WS" init --name "smoke-test" --description "Linux CI smoke test"`
+         - `"$RF_BIN" --path "$WS" audit --strict`
+         - `"$RF_BIN" --path "$WS" export --format json`
+         - `"$RF_BIN" --path "$WS" export --format roadmap`
+
+[POST_GATE]
+test -s .github/workflows/ci.yml && grep -q 'workflow_dispatch:' .github/workflows/ci.yml && grep -q 'linux-git-build:' .github/workflows/ci.yml && grep -q 'cargo build --release --locked' .github/workflows/ci.yml && grep -q 'cargo install --git' .github/workflows/ci.yml && grep -q 'audit --strict' .github/workflows/ci.yml && grep -q 'cargo fmt --all -- --check' .github/workflows/ci.yml && grep -q 'cargo clippy --workspace --all-targets -- -D warnings' .github/workflows/ci.yml && grep -q 'cargo test --workspace' .github/workflows/ci.yml && grep -q 'cargo package --locked' .github/workflows/ci.yml && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' .github/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 10B: Fix Install & Quick Start Instructions in `README.md`
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 10B: Fix the Prerequisites, Installation, and Quickstart sections in README.md so Linux/Unix users can install from Git or source and initialize/launch Rocket Factory without missing steps.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - README.md
+READ_ONLY_REFS:
+  - README.md:1-60 (current Overview & Quickstart and CLI Reference)
+  - Cargo.toml:1-30 (repository URL, crate name, rf binary name)
+  - src/cli.rs:10-88 (exact CLI flags and init command behavior)
+  - src/storage.rs:107-136 (init_workspace auto-creation of target directory)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter CLI Reference, TUI Keyboard Reference, Workspace Layout, RON Themes, or External Adapters sections except where needed for heading/link consistency.
+  - No references to the string "nebulous" (case-insensitive) anywhere in README.md.
+  - No real user credentials, hostnames, IPs, or local machine paths.
+
+[PRE_GATE]
+test -s README.md && grep -q '## Overview & Quickstart' README.md
+
+[MUTATION_SPEC]
+Goal:
+  Replace the incomplete `Overview & Quickstart` section in `README.md` with accurate, self-contained Prerequisites, Installation (direct Git install and clone-from-source paths), PATH verification, and Quickstart instructions that match the actual `rf` binary behavior.
+
+Contract & Behavior:
+  - `README.md` (`## Overview & Quickstart` / `## Installation` / `## Quick Start` at top of file, above `## CLI Reference`):
+    - **Prerequisites**: state that Rust (stable toolchain via `rustup`) and `git` are required.
+    - **Install directly from Git (recommended)**:
+      ```bash
+      cargo install --git https://github.com/TheInfoMoose/Rocket-Factory.git --locked
+      ```
+    - **Build and install from a local clone**:
+      ```bash
+      git clone https://github.com/TheInfoMoose/Rocket-Factory.git
+      cd Rocket-Factory
+
+      # Install `rf` into ~/.cargo/bin
+      cargo install --path . --locked
+
+      # Or build the release binary without installing (target/release/rf)
+      cargo build --release --locked
+      ```
+    - **Verify installation & PATH**: note that `cargo install` places `rf` in `~/.cargo/bin` (ensure `$HOME/.cargo/bin` is on `PATH`) and show `rf --help` to confirm the binary is available.
+    - **Quick Start** (clear, sequential steps):
+      1. Initialize a workspace (`rf --path ./my-project init --name "my-project" --description "Service architecture blueprint"` — noting `./my-project/.rocket/` is created automatically — or `rf init --name "my-project"` inside an existing project directory).
+      2. Launch the TUI (`rf --path ./my-project`, or `rf` inside the workspace directory), noting that `rf` requires an initialized `.rocket/` workspace (`rf init` must be run first).
+      3. Briefly note first interactive keys (`n` to add a component, `?` for keyboard help, `q` to quit) and optional CLI verification (`rf --path ./my-project audit`).
+    - Preserve all existing sections from `## CLI Reference` through the end of `README.md` intact.
+
+[POST_GATE]
+test -s README.md && grep -q 'cargo install --git https://github.com/TheInfoMoose/Rocket-Factory.git --locked' README.md && grep -q 'git clone https://github.com/TheInfoMoose/Rocket-Factory.git' README.md && grep -q 'cargo install --path . --locked' README.md && grep -q 'cargo build --release --locked' README.md && grep -q 'rf --help' README.md && grep -q '## CLI Reference' README.md && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' README.md
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

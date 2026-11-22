@@ -412,3 +412,17 @@ title = "ci"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T05:46:13Z"
+
+[[items.tasks]]
+id = "TASK-0049"
+title = "ci"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T15:03:37Z"
+
+[[items.tasks]]
+id = "TASK-0050"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T15:03:37Z"
