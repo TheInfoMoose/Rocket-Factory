@@ -4,8 +4,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::archetype::scaffold_component;
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
+use crate::error::{RfError, RfResult};
 use crate::model::{CardStatus, Component, Connection, EdgeKind, FeatureItem, GridPos, Project};
-use crate::storage::{save_component, save_project_config, ROCKET_DIR};
+use crate::storage::{
+    save_component, save_project_config, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
+};
 use crate::theme::Theme;
 use crate::tui::canvas::CanvasViewport;
 use crate::tui::modal::{ModalAction, ModalState};
@@ -55,6 +58,7 @@ pub struct App {
     pub viewport: CanvasViewport,
     pub connect_source_id: Option<String>,
     pub modal: Option<ModalState>,
+    pub pending_editor_component: Option<String>,
 }
 
 impl App {
@@ -75,11 +79,47 @@ impl App {
             viewport: CanvasViewport::default(),
             connect_source_id: None,
             modal: None,
+            pending_editor_component: None,
         }
     }
 
     pub fn refresh_audit(&mut self) {
         self.audit_findings = audit_project(&self.project);
+    }
+
+    pub fn reload_component_markdown(&mut self, component_id: &str) -> RfResult<()> {
+        validate_component_id(component_id)?;
+
+        let components_dir = self.root.join(ROCKET_DIR).join(COMPONENTS_DIR);
+        let md_path = components_dir.join(format!("{component_id}.md"));
+
+        let canon_dir = std::fs::canonicalize(&components_dir).map_err(|source| RfError::Io {
+            path: components_dir,
+            source,
+        })?;
+        let canon_md = std::fs::canonicalize(&md_path).map_err(|source| RfError::Io {
+            path: md_path,
+            source,
+        })?;
+        if !canon_md.starts_with(&canon_dir) {
+            return Err(RfError::PathEscape(canon_md));
+        }
+
+        let body = std::fs::read_to_string(&canon_md).map_err(|source| RfError::Io {
+            path: canon_md,
+            source,
+        })?;
+
+        let comp = self
+            .project
+            .component_mut(component_id)
+            .ok_or_else(|| RfError::NotFound(component_id.to_string()))?;
+        let comp_name = comp.name.clone();
+        comp.markdown_body = body;
+
+        self.refresh_audit();
+        self.status_message = format!("Reloaded Markdown for {comp_name}");
+        Ok(())
     }
 
     pub fn gap_count(&self) -> usize {
@@ -598,6 +638,16 @@ impl App {
                     self.status_message = "No component selected to connect".to_string();
                 }
             }
+            KeyCode::Char('v') => {
+                if let Some(comp) = self.selected_component() {
+                    let id = comp.id.clone();
+                    let name = comp.name.clone();
+                    self.pending_editor_component = Some(id);
+                    self.status_message = format!("Opening {name} in $EDITOR...");
+                } else {
+                    self.status_message = "No component selected to open in $EDITOR".to_string();
+                }
+            }
             KeyCode::Enter if self.mode == InputMode::Connect => {
                 self.confirm_connect();
             }
@@ -1015,5 +1065,50 @@ mod tests {
             reloaded.config.connections[0].label.as_deref(),
             Some("events")
         );
+    }
+
+    #[test]
+    fn app_v_key_queues_editor_and_reloads_markdown_from_disk() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir.path(), "Editor Test", "Markdown reload test").expect("init workspace");
+
+        let mut comp = make_component("alpha");
+        comp.markdown_body = "# Alpha\nInitial spec\n".to_string();
+        save_component(dir.path(), &comp).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        assert!(app.pending_editor_component.is_none());
+
+        let md_path = dir
+            .path()
+            .join(ROCKET_DIR)
+            .join(COMPONENTS_DIR)
+            .join("alpha.md");
+        let updated_md = "# Alpha\nUpdated spec from external editor\n";
+        std::fs::write(&md_path, updated_md).expect("write updated markdown");
+
+        app.handle_key(key(KeyCode::Char('v')));
+        assert_eq!(app.pending_editor_component.as_deref(), Some("alpha"));
+
+        let comp_id = app
+            .pending_editor_component
+            .take()
+            .expect("pending editor component id");
+        app.reload_component_markdown(&comp_id)
+            .expect("reload component markdown");
+
+        assert_eq!(
+            app.project
+                .component("alpha")
+                .expect("alpha exists")
+                .markdown_body,
+            updated_md
+        );
+        assert!(app.status_message.contains("Reloaded"));
     }
 }

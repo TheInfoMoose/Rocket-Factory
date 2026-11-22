@@ -12,6 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::error::{RfError, RfResult};
+use crate::storage::{save_component, COMPONENTS_DIR, ROCKET_DIR};
 use crate::tui::app::App;
 use crate::tui::ui;
 
@@ -120,6 +121,36 @@ fn run_event_loop(terminal: &mut TuiTerminal, app: &mut App) -> RfResult<()> {
             if let Event::Key(key) = event::read().map_err(terminal_io_err)? {
                 if key.kind == KeyEventKind::Press {
                     app.handle_key(key);
+
+                    if let Some(comp_id) = app.pending_editor_component.take() {
+                        let md_path = app
+                            .root
+                            .join(ROCKET_DIR)
+                            .join(COMPONENTS_DIR)
+                            .join(format!("{comp_id}.md"));
+
+                        if !md_path.exists() {
+                            if let Some(comp) = app.project.component(&comp_id) {
+                                if let Err(err) = save_component(&app.root, comp) {
+                                    app.status_message =
+                                        format!("Failed to save {comp_id} before editing: {err}");
+                                    continue;
+                                }
+                            }
+                        }
+
+                        match suspend_for_editor(terminal, &md_path) {
+                            Ok(()) => {
+                                if let Err(err) = app.reload_component_markdown(&comp_id) {
+                                    app.status_message =
+                                        format!("Failed to reload Markdown for {comp_id}: {err}");
+                                }
+                            }
+                            Err(err) => {
+                                app.status_message = format!("Editor error for {comp_id}: {err}");
+                            }
+                        }
+                    }
                 }
             }
         }
