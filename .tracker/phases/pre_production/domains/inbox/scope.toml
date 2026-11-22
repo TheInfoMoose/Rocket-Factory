@@ -150,21 +150,21 @@ created_at = "2026-11-22T00:59:05Z"
 [[items.tasks]]
 id = "TASK-0020"
 title = "canvas"
-status = "pending"
+status = "open"
 severity = "medium"
 created_at = "2026-11-22T01:37:28Z"
 
 [[items.tasks]]
 id = "TASK-0021"
 title = "canvas"
-status = "pending"
+status = "open"
 severity = "medium"
 created_at = "2026-11-22T01:37:28Z"
 
 [[items.tasks]]
 id = "TASK-0022"
 title = "canvas"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T01:37:28Z"
 
@@ -192,6 +192,6 @@ created_at = "2026-11-22T01:37:28Z"
 [[items.tasks]]
 id = "TASK-0026"
 title = "Resolve STEP 4E contradiction between 4-cell horizontal gutter and 6-char label assertion"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T01:40:28Z"

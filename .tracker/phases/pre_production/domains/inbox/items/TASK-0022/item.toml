@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0022"
 type = "task"
 title = "canvas"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T01:37:28Z"
-updated_at = "2026-11-22T01:42:37Z"
+updated_at = "2026-11-22T02:31:11Z"
 source_ref = "STEP 4G"
 
 [effort]
@@ -17,4 +17,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "e16e18c"
+summary = "Folded STEP 4G into STEP 4F (cohesive canvas wiring + keyboard controls step) during Phase 5 plan format reevaluation."

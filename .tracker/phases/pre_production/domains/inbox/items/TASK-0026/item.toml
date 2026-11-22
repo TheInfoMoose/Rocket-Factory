@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0026"
 type = "task"
 title = "Resolve STEP 4E contradiction between 4-cell horizontal gutter and 6-char label assertion"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-22T01:40:28Z"
-updated_at = "2026-11-22T01:40:44Z"
+updated_at = "2026-11-22T02:31:24Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "e16e18c"
+summary = "Resolved STEP 4E spec contradiction by rewriting Phase 5 steps in contract-based format without hardcoded conflicting test coordinates."

@@ -13,12 +13,12 @@
 **How to read this:** work goes strictly top to bottom through **Up Next**, one step at a time. The **#** column is the only order. Step IDs are kept because commits and notes cite them. A step whose "Waits on" names an Open Question or a **[USER]** action doesn't start until that's resolved.
 
 **Who runs what (phased workflow + Orrery `gemini-phased`):**
-- **Planner / Reviewer (Claude or review subagent)** writes the active phase (full step blocks to the zero-judgment bar), outlines future phases, and performs one phase review at the end of each phase using snapshot-backed step commits (`git show <sha>`).
+- **Planner / Reviewer (Claude or review subagent)** writes the active phase (contract-based step blocks specifying scope, public interface, behavioral invariants, and test outcomes — without pre-writing implementation code), outlines future phases, and performs one phase review at the end of each phase using snapshot-backed step commits (`git show <sha>`) checking scope adherence, code quality, functionality, and consistency.
 - **Orchestrator / Validator (Hydrogen / Orrery `agy-hydrogen-orch` + `agy-hydrogen-val`)** runs the phase. At the start of each step, `phased:step_start` (`scripts/phased-step.sh pregate` + `neb start` + `scripts/phased-step.sh start`) takes a repository snapshot. After Neon finishes, `phased:step_check` (`scripts/phased-step.sh check`) validates scope and `POST_GATE` strictly against that snapshot diff, the validator reads the diff, and `phased:step_commit` commits the step and closes its Nebulous task.
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 5):** Fix the horizontal edge-label arrowhead collision (`BUG-0001`), complete the Snap Grid Canvas wiring and keyboard controls (`4E`–`4G`), and implement interactive TUI modals (New Component archetype scaffolding, structured TOML/feature editor, Connection editor) plus suspend-to-`$EDITOR` Markdown reload — with zero references to any specific external tracker in `src/`.
+**Phase goal (Phase 5):** Fix the horizontal edge-label arrowhead collision (`BUG-0001`), wire the Snap Grid Canvas and keyboard controls (`4F`), and implement interactive TUI modals (`5A`–`5B`) plus suspend-to-`$EDITOR` Markdown reload (`5C`) — with zero references to any specific external tracker in `src/`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -27,11 +27,10 @@
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
 | 1 | **STEP 4E** | `/goal` | canvas | `src/tui/canvas.rs` | — |
-| 2 | **STEP 4F** | `/goal` | canvas | `src/tui/app.rs`, `src/tui/ui.rs` | STEP 4E |
-| 3 | **STEP 4G** | `/goal` | canvas | `src/tui/app.rs` | STEP 4F |
-| 4 | **STEP 5A** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/mod.rs` | — |
-| 5 | **STEP 5B** | `/goal` | modal | `src/tui/app.rs`, `src/tui/ui.rs` | STEP 4G, STEP 5A |
-| 6 | **STEP 5C** | `/goal` | editor | `src/tui/app.rs`, `src/tui/terminal.rs` | STEP 5B |
+| 2 | **STEP 4F** | `/goal` | canvas | `src/tui/app.rs`, `src/tui/ui.rs` | — |
+| 3 | **STEP 5A** | `/goal` | modal | `src/tui/modal.rs`, `src/tui/mod.rs` | — |
+| 4 | **STEP 5B** | `/goal` | modal | `src/tui/app.rs`, `src/tui/ui.rs` | STEP 5A |
+| 5 | **STEP 5C** | `/goal` | editor | `src/tui/app.rs`, `src/tui/terminal.rs` | — |
 
 ### Completed
 
@@ -54,7 +53,7 @@
 | **STEP 4A** | Done (`660165a`) | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/mod.rs` |
 | **STEP 4B** | Done (`20884cc`) | `/goal` | canvas | `src/tui/canvas.rs` |
 | **STEP 4C** | Withdrawn (→ 4E, 4F) | `/goal` | canvas | `src/tui/ui.rs`, `src/tui/app.rs` |
-| **STEP 4D** | Withdrawn (→ 4G) | `/goal` | canvas | `src/tui/app.rs` |
+| **STEP 4D** | Withdrawn (→ 4F) | `/goal` | canvas | `src/tui/app.rs` |
 
 ### Future phases
 
@@ -1117,31 +1116,37 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ```text
 [STEP_ID]
-STEP 4E: Fix edge label placement in src/tui/canvas.rs so labels render above horizontal edges and never overwrite the arrowhead cell (BUG-0001).
+STEP 4E: Fix edge label rendering in src/tui/canvas.rs so labels never overwrite connector arrowheads or card interiors (BUG-0001).
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
   - src/tui/canvas.rs
 READ_ONLY_REFS:
-  - src/tui/canvas.rs:340-405 (render_canvas edge loop)
+  - src/tui/canvas.rs (render_canvas, route_orthogonal_edge)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No references to the string "nebulous" (case-insensitive) anywhere in src/.
   - No `.unwrap()` or `.expect()` in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub fn render_canvas\b' src/tui/canvas.rs
+true
 
 [MUTATION_SPEC]
-1. src/tui/canvas.rs — in `render_canvas` (around lines 375-395), fix edge label placement so labels never overwrite the connector line or arrowhead:
-   - Compute `let arrow_pos = routed.segments.last().map(|&(x, y, _)| (x, y));`.
-   - When drawing `(lx, ly)` for `routed.label`, compute `let label_y = if ly > inner.y { ly.saturating_sub(1) } else { ly };` and `let label_x = lx.saturating_sub(1).max(inner.x);`.
-   - Write the truncated label characters one cell at a time at `(label_x + offset, label_y)` only when the cell coordinate is inside `inner`, does not equal `arrow_pos`, and does not fall inside any visible card `Rect`.
-2. Tests in `src/tui/canvas.rs`:
-   - `render_canvas_preserves_arrowhead_with_label`: build an `App` with `"view_box"` at `(0, 0)` and `"core_bus"` at `(1, 0)` connected by `Connection { from: "view_box".into(), to: "core_bus".into(), kind: EdgeKind::DataFlow, label: Some("events".into()) }`; draw `render_canvas(frame, frame.area(), &app, CanvasViewport::default())` onto `TestBackend::new(80, 20)`; collect buffer text; assert `text.contains('▶')` and `text.contains("events")`.
+Goal:
+  Resolve BUG-0001 so connection labels rendered by `render_canvas` do not overwrite the connector arrowhead cell or bleed into component card rectangles.
+
+Contract & Behavior:
+  - Keep existing `route_orthogonal_edge` and `render_canvas` public signatures intact.
+  - Place edge labels cleanly off the arrowhead cell (e.g., on the row above a horizontal segment when inside canvas bounds) and clip/skip any character cell that would fall outside `inner`, onto the arrowhead cell, or inside any visible component card `Rect`.
+  - Short or long labels must degrade gracefully via truncation/clipping without panicking or corrupting card borders.
+
+Tests:
+  - Add unit test(s) in `src/tui/canvas.rs` rendering `render_canvas` onto a `TestBackend` with a labeled horizontal edge between two cards:
+    - Verify the arrowhead (`'▶'`) is always preserved.
+    - Verify the label is rendered in available space (using card spacing or label length where the label fits, and/or verifying adjacent-card clipping preserves card borders and the arrowhead).
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn render_canvas_preserves_arrowhead_with_label\b' src/tui/canvas.rs && ! grep -rqi 'nebulous' src/
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -1149,42 +1154,53 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ---
 
-### STEP 4F: Wire Snap Grid Canvas into 3-Column TUI Layout
+### STEP 4F: Wire Snap Grid Canvas and Keyboard-Only Canvas Controls
 
 * **Recommended Command:** `/goal`
 
 ```text
 [STEP_ID]
-STEP 4F: Add CanvasViewport and connect_source_id to App and wire render_canvas into the Middle Column of src/tui/ui.rs (replaces withdrawn STEP 4C).
+STEP 4F: Wire render_canvas into the middle column of src/tui/ui.rs and implement keyboard-only canvas controls (directional selection, MoveCard with collision detection, Connect mode edge toggling) in src/tui/app.rs.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
   - src/tui/app.rs
   - src/tui/ui.rs
 READ_ONLY_REFS:
-  - src/tui/canvas.rs:1-40 (CanvasViewport, render_canvas)
-  - src/tui/app.rs:1-65 (App struct and App::new)
-  - src/tui/ui.rs:1-45 (render, render_canvas_placeholder)
+  - src/tui/canvas.rs (CanvasViewport, render_canvas)
+  - src/model.rs (GridPos, Connection, EdgeKind, Project)
+  - src/storage.rs (save_project_config, save_component, ROCKET_DIR)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
-  - No keyboard MoveCard/Connect logic changes in src/tui/app.rs yet (belongs to STEP 4G).
+  - No modal implementation yet (belongs to STEP 5A–5B).
   - No references to the string "nebulous" (case-insensitive) anywhere in src/.
   - No `.unwrap()` or `.expect()` in non-test code.
 
 [PRE_GATE]
-grep -qE 'fn render_canvas_preserves_arrowhead_with_label\b' src/tui/canvas.rs && grep -qE 'pub fn render\b' src/tui/ui.rs
+true
 
 [MUTATION_SPEC]
-1. src/tui/app.rs:5 — add `use crate::tui::canvas::CanvasViewport;` and at anchor `pub audit_findings: Vec<AuditFinding>,` → add directly beneath it:
-   - `pub viewport: CanvasViewport,`
-   - `pub connect_source_id: Option<String>,`
-   Initialize both in `App::new` (`viewport: CanvasViewport::default()`, `connect_source_id: None`).
-2. src/tui/ui.rs:32 — anchor `render_canvas_placeholder(frame, cols[1], app);` → replace with `crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport);` and remove the now-unused `fn render_canvas_placeholder` function (and unused `Alignment` import).
-3. Tests in `src/tui/ui.rs`:
-   - `render_canvas_draws_component_cards_and_connectors`: build `make_test_app()` with a `Connection { from: "view_box".into(), to: "core_bus".into(), kind: EdgeKind::DataFlow, label: Some("events".into()) }`; draw onto `TestBackend::new(140, 35)`; assert rendered text contains `"view_box"`, `"core_bus"`, `"Tasks 1/1"`, and `'▶'`.
+Goal:
+  Replace the canvas placeholder with the live Snap Grid Canvas and add keyboard-only spatial navigation, card repositioning, and connection toggling.
+
+Contract & Behavior:
+  - `App` fields (public, initialized in `App::new`):
+    - `pub viewport: CanvasViewport` (default)
+    - `pub connect_source_id: Option<String>` (`None`)
+  - UI wiring (`src/tui/ui.rs`):
+    - Replace the middle-column placeholder in `render` with `crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport)` and remove unused placeholder code/imports.
+  - Canvas controls (`src/tui/app.rs`):
+    - Directional selection (`Left`/`Right`/`Up`/`Down` or `h`/`j`/`k`/`l` when focused on `FocusColumn::Canvas` and not in `MoveCard`): move selection to the nearest visible component in the pressed direction (minimizing Manhattan distance; leave selection unchanged if none exists; reset `detail_scroll = 0`). Keep existing `List` and `Detail` navigation unchanged.
+    - MoveCard mode (`m` toggles `InputMode::MoveCard`; arrows/`hjkl` move the selected card by 1 cell): clamp to grid bounds (`0..cols`, `0..rows`), refuse occupied cells with a clear `status_message`, update position, and persist via `save_component` when `<root>/.rocket` exists (surfacing any I/O error in `status_message`).
+    - Connect mode (`c` captures selected component ID into `connect_source_id` and enters `InputMode::Connect`; `Enter` toggles a `Connection` from source to currently selected component): reject self-connections, remove an existing matching `(from, to)` edge or add a new `EdgeKind::DependsOn` edge, persist via `save_project_config` when `<root>/.rocket` exists, call `refresh_audit()`, clear `connect_source_id`, and return to `InputMode::Navigate`.
+    - `Esc` clears `connect_source_id`, returns to `InputMode::Navigate`, and updates `status_message`.
+
+Tests:
+  - In `src/tui/ui.rs`: render a test `App` with two connected components onto `TestBackend` and verify component names, task progress, and connector arrow appear.
+  - In `src/tui/app.rs`: test directional canvas selection, MoveCard movement + occupied-cell collision blocking, and Connect mode adding then removing an edge.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub viewport: CanvasViewport' src/tui/app.rs && grep -qE 'render_canvas\(' src/tui/ui.rs && ! grep -rqi 'nebulous' src/
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -1192,71 +1208,22 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ---
 
-### STEP 4G: Keyboard-Only Canvas Controls (Directional Navigation, Move Card, Connect Mode)
+### STEP 5A: Interactive Modal Forms (New Component, Edit Component, Edit Connection)
 
 * **Recommended Command:** `/goal`
 
 ```text
 [STEP_ID]
-STEP 4G: Implement keyboard-only directional selection, MoveCard snap-grid placement with collision detection, and Connect mode edge toggling in src/tui/app.rs (replaces withdrawn STEP 4D).
-
-[SCOPE_LOCK]
-ALLOWED_FILES:
-  - src/tui/app.rs
-READ_ONLY_REFS:
-  - src/model.rs:1-85 (GridPos, Connection, EdgeKind, Project)
-  - src/storage.rs:138-165 (save_project_config, save_component, ROCKET_DIR)
-FORBIDDEN_SCOPE:
-  - Any file not listed in ALLOWED_FILES.
-  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
-  - No `.unwrap()` or `.expect()` in non-test code.
-
-[PRE_GATE]
-grep -qE 'pub viewport: CanvasViewport' src/tui/app.rs && grep -qE 'pub connect_source_id: Option<String>' src/tui/app.rs
-
-[MUTATION_SPEC]
-1. src/tui/app.rs — add helper methods on `App`:
-   - `pub fn select_in_direction(&mut self, dcol: i32, drow: i32)`: finds the visible component in `self.visible_component_indices()` whose `(col - cur_col, row - cur_row)` has positive dot product with `(dcol, drow)` and minimizes Manhattan distance `|dx| + |dy|` (tie-breaking by index). Updates `self.selected_index` and resets `self.detail_scroll = 0`. If no neighbor exists in that direction, leaves selection unchanged.
-   - `pub fn move_selected_card(&mut self, dcol: i32, drow: i32)`: computes target `(new_col, new_row)` clamped to `0..self.project.config.grid.cols.saturating_sub(1)` and `0..self.project.config.grid.rows.saturating_sub(1)`. Checks if any other component occupies `GridPos { col: new_col, row: new_row }`; if occupied, sets `self.status_message = "Cell occupied".to_string()` and returns. Otherwise updates the selected component's `position`, sets `self.status_message = format!("Moved '{}' to ({new_col}, {new_row})", id)`, and if `self.root.join(crate::storage::ROCKET_DIR).is_dir()` persists via `crate::storage::save_component(&self.root, comp)` (recording error text in `self.status_message` on failure).
-   - `pub fn toggle_connection_to_selected(&mut self)`: requires `self.connect_source_id` and `self.selected_component()`. If source == target, sets `self.status_message = "Cannot connect component to itself".to_string()` and returns. Otherwise checks `self.project.config.connections` for an existing connection with `from == src && to == dst`: if present, removes it and sets `status_message = format!("Disconnected {src} -> {dst}")`; if absent, pushes `Connection { from: src, to: dst, kind: EdgeKind::DependsOn, label: None }` and sets `status_message = format!("Connected {src} -> {dst}")`. Persists `project.toml` via `crate::storage::save_project_config(&self.root, &self.project.config)` when `self.root.join(crate::storage::ROCKET_DIR).is_dir()`, calls `self.refresh_audit()`, clears `self.connect_source_id = None`, and sets `self.mode = InputMode::Navigate`.
-2. src/tui/app.rs — update `handle_key`:
-   - `KeyCode::Esc` → clears `self.connect_source_id = None`, sets `self.mode = InputMode::Navigate`, `self.status_message = "Mode: Navigate".to_string()`.
-   - `KeyCode::Char('c')` → captures `self.connect_source_id = self.selected_component().map(|c| c.id.clone())`, sets `self.mode = InputMode::Connect`, and updates `self.status_message` with the source ID (or `"Select a component first"` if none).
-   - `KeyCode::Enter` when `self.mode == InputMode::Connect` → calls `self.toggle_connection_to_selected()`.
-   - Arrow / `hjkl` keys:
-     - When `self.mode == InputMode::MoveCard`: `Left|'h' => move_selected_card(-1, 0)`, `Right|'l' => move_selected_card(1, 0)`, `Up|'k' => move_selected_card(0, -1)`, `Down|'j' => move_selected_card(0, 1)`.
-     - When `self.mode != InputMode::MoveCard` and `self.focus == FocusColumn::Canvas`: `Left|'h' => select_in_direction(-1, 0)`, `Right|'l' => select_in_direction(1, 0)`, `Up|'k' => select_in_direction(0, -1)`, `Down|'j' => select_in_direction(0, 1)`.
-     - Keep existing `List` and `Detail` `j`/`k`/`Up`/`Down` behavior unchanged.
-3. Tests in `src/tui/app.rs`:
-   - `move_card_updates_grid_pos_and_blocks_collision`: place `"a"` at `(0, 0)` and `"b"` at `(1, 0)`; press `'m'` then `Right` (assert `"a"` stays at `(0, 0)` and `app.status_message == "Cell occupied"`); press `Down` (assert `"a"` moves to `(0, 1)`).
-   - `connect_mode_adds_and_removes_edge`: place `"a"` at `(0, 0)` and `"b"` at `(1, 0)`; press `'c'` (assert `connect_source_id.as_deref() == Some("a")`); move selection to `"b"` and press `Enter` (assert `connections.len() == 1`, `from == "a"`, `to == "b"`, `mode == InputMode::Navigate`); repeat `'c'` from `"a"` to `"b"` + `Enter` (assert `connections.is_empty()`).
-   - `canvas_directional_selection_picks_neighbor`: place `"a"` at `(0, 0)` and `"b"` at `(2, 0)`; set `focus = FocusColumn::Canvas`; press `Right`; assert `app.selected_component().unwrap().id == "b"`.
-
-[POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn move_selected_card\b' src/tui/app.rs && grep -qE 'pub fn toggle_connection_to_selected\b' src/tui/app.rs && ! grep -rqi 'nebulous' src/
-
-[HALT_INVARIANT]
-Halt immediately after POST_GATE exits 0 and report verification status.
-```
-
----
-
-### STEP 5A: Interactive Modal Forms (New Component Archetype, Edit Component, Edit Connection)
-
-* **Recommended Command:** `/goal`
-
-```text
-[STEP_ID]
-STEP 5A: Implement structured TUI modal form state and key handling for NewComponent, EditComponent, and EditConnection in src/tui/modal.rs and expose from src/tui/mod.rs.
+STEP 5A: Implement structured TUI modal form state and key handling in src/tui/modal.rs and expose it from src/tui/mod.rs.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
   - src/tui/modal.rs (NEW)
   - src/tui/mod.rs
 READ_ONLY_REFS:
-  - src/archetype.rs:1-85 (ARCHETYPES, ArchetypeSpec, scaffold_component)
-  - src/model.rs:10-90 (Component, ComponentKind, EdgeKind, FeatureItem, GridPos)
-  - src/storage.rs:10-25 (validate_component_id)
+  - src/archetype.rs (ARCHETYPES, ArchetypeSpec, scaffold_component)
+  - src/model.rs (Component, ComponentKind, EdgeKind, FeatureItem, GridPos)
+  - src/storage.rs (validate_component_id)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No App or ui.rs edits in this step (belongs to STEP 5B).
@@ -1264,35 +1231,40 @@ FORBIDDEN_SCOPE:
   - No `.unwrap()` or `.expect()` in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub const ARCHETYPES\b' src/archetype.rs && grep -qE 'pub fn validate_component_id\b' src/storage.rs
+true
 
 [MUTATION_SPEC]
-1. src/tui/mod.rs:2 — anchor `pub mod canvas;` → add `pub mod modal;` directly beneath `pub mod canvas;`.
-2. src/tui/modal.rs (NEW) — define modal form state, input handling, and submission outcomes:
-   - `pub const EDGE_KINDS: &[EdgeKind] = &[EdgeKind::DependsOn, EdgeKind::DataFlow, EdgeKind::Renders, EdgeKind::Invokes, EdgeKind::Custom];`
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct NewComponentForm { pub id: String, pub name: String, pub archetype_idx: usize, pub active_field: usize, pub error: Option<String> }` (3 fields: `0 = id`, `1 = name`, `2 = archetype`).
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct EditComponentForm { pub component_id: String, pub name: String, pub description: String, pub relative_path: String, pub tags_csv: String, pub new_feature_title: String, pub active_field: usize, pub error: Option<String> }` (5 fields: `0 = name`, `1 = description`, `2 = relative_path`, `3 = tags_csv`, `4 = new_feature_title`).
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct EditConnectionForm { pub from: String, pub to: String, pub kind_idx: usize, pub label: String, pub active_field: usize }` (2 fields: `0 = kind`, `1 = label`).
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub enum ModalState { NewComponent(NewComponentForm), EditComponent(EditComponentForm), EditConnection(EditConnectionForm) }`
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub enum ModalAction { None, Cancel, CreateComponent { id: String, name: String, kind: ComponentKind }, UpdateComponent { component_id: String, name: String, description: String, relative_path: Option<String>, tags: Vec<String>, add_feature: Option<String> }, UpdateConnection { from: String, to: String, kind: EdgeKind, label: Option<String> } }`
-   - `impl ModalState`:
-     - `pub fn new_component() -> Self`
-     - `pub fn edit_component(comp: &Component) -> Self`
-     - `pub fn edit_connection(from: &str, to: &str, kind: EdgeKind, label: Option<&str>) -> Self`
-     - `pub fn title(&self) -> &'static str` (`" New Component "`, `" Edit Component "`, `" Edit Connection "`)
-     - `pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> ModalAction`:
-       - `Esc` → `ModalAction::Cancel`
-       - `Tab` / `Down` → next field (wrapping); `BackTab` / `Up` → previous field (wrapping)
-       - `Left` / `Right` on selector fields (`archetype_idx` in `NewComponent`, `kind_idx` in `EditConnection`) → cycle index modulo slice length
-       - `Backspace` → pop char from active text field
-       - `Char(ch)` (without Ctrl/Alt) → push `ch` onto active text field
-       - `Enter` → validates and returns `CreateComponent` (calling `validate_component_id(&form.id)` and requiring non-empty trimmed `name`, else sets `form.error = Some(...)` and returns `ModalAction::None`), `UpdateComponent` (splits `tags_csv` on `,` trimming empties; non-empty trimmed `new_feature_title` becomes `add_feature: Some(...)`), or `UpdateConnection`.
-3. Tests in `src/tui/modal.rs`:
-   - `new_component_modal_validates_id_and_creates`: construct `ModalState::new_component()`; press `Enter` (assert `ModalAction::None` and `error.is_some()`); type `"hud_panel"`, `Tab`, type `"HUD Panel"`, `Enter`; assert `ModalAction::CreateComponent { id: "hud_panel", name: "HUD Panel", kind: ComponentKind::UiView }`.
-   - `edit_component_modal_parses_tags_and_new_feature`: construct from a sample `Component`, navigate to `tags_csv` and `new_feature_title`, enter `"ui, core"` and `"Render frame"`, press `Enter`; assert `UpdateComponent` contains `tags == vec!["ui", "core"]` and `add_feature == Some("Render frame".into())`.
+Goal:
+  Create a self-contained, testable modal form state machine supporting component creation from archetypes, structured component editing (including adding a feature), and connection editing.
+
+Contract & Behavior:
+  - Expose `pub mod modal;` in `src/tui/mod.rs`.
+  - Public types in `src/tui/modal.rs`:
+    - `pub const EDGE_KINDS: &[EdgeKind]` covering all `EdgeKind` variants.
+    - `pub enum ModalState` with variants `NewComponent(NewComponentForm)`, `EditComponent(EditComponentForm)`, and `EditConnection(EditConnectionForm)` (with public form fields needed by `ui.rs` to render labels, values, active field index, and validation errors).
+    - `pub enum ModalAction` with variants:
+      - `None`
+      - `Cancel`
+      - `CreateComponent { id: String, name: String, kind: ComponentKind }`
+      - `UpdateComponent { component_id: String, name: String, description: String, relative_path: Option<String>, tags: Vec<String>, add_feature: Option<String> }`
+      - `UpdateConnection { from: String, to: String, kind: EdgeKind, label: Option<String> }`
+  - `ModalState` constructors & methods:
+    - `new_component()`, `edit_component(comp: &Component)`, `edit_connection(from: &str, to: &str, kind: EdgeKind, label: Option<&str>)`, `title(&self) -> &'static str`, and `handle_key(&mut self, key: crossterm::event::KeyEvent) -> ModalAction`.
+  - Key handling invariants:
+    - `Esc` returns `ModalAction::Cancel`.
+    - `Tab`/`Down` and `BackTab`/`Up` cycle active fields with wrap-around.
+    - `Left`/`Right` cycle selector fields (archetype in `NewComponent`, edge kind in `EditConnection`).
+    - Printable chars (without Ctrl/Alt) append to the active text field; `Backspace` pops the last char.
+    - `Enter` validates inputs: `NewComponent` validates ID via `validate_component_id` and requires non-empty trimmed name (setting `error` and returning `ModalAction::None` on failure); `EditComponent` splits comma-separated tags (trimming empties) and turns non-empty new feature title into `add_feature: Some(...)`; `EditConnection` returns `UpdateConnection` with trimmed optional label.
+
+Tests:
+  - Unit tests in `src/tui/modal.rs` covering:
+    - `NewComponent` validation rejection on empty/invalid input, then valid submission returning `CreateComponent`.
+    - `EditComponent` comma-separated tag parsing and optional `add_feature`.
+    - `EditConnection` kind cycling and label update, plus `Esc` cancellation.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub enum ModalState\b' src/tui/modal.rs && grep -qE 'pub enum ModalAction\b' src/tui/modal.rs && ! grep -rqi 'nebulous' src/
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -1306,48 +1278,49 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ```text
 [STEP_ID]
-STEP 5B: Wire ModalState into App (new component 'n', edit component 'e', edit connection 'E', delete 'd') and render centered modal overlays in src/tui/ui.rs.
+STEP 5B: Wire ModalState into App ('n', 'e', 'E') and render centered modal overlays in src/tui/ui.rs.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
   - src/tui/app.rs
   - src/tui/ui.rs
 READ_ONLY_REFS:
-  - src/tui/modal.rs:1-160 (ModalState, ModalAction, EDGE_KINDS)
-  - src/archetype.rs:75-125 (ARCHETYPES, scaffold_component)
-  - src/storage.rs:138-198 (save_project_config, save_component, delete_component, ROCKET_DIR)
+  - src/tui/modal.rs (ModalState, ModalAction, EDGE_KINDS)
+  - src/archetype.rs (ARCHETYPES, scaffold_component)
+  - src/storage.rs (save_project_config, save_component, ROCKET_DIR)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No references to the string "nebulous" (case-insensitive) anywhere in src/.
   - No `.unwrap()` or `.expect()` in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub fn move_selected_card\b' src/tui/app.rs && grep -qE 'pub enum ModalState\b' src/tui/modal.rs
+grep -qE 'pub enum ModalState\b' src/tui/modal.rs
 
 [MUTATION_SPEC]
-1. src/tui/app.rs — add `pub modal: Option<crate::tui::modal::ModalState>` to `App` (initialized to `None` in `App::new`).
-   - Add `fn next_free_grid_pos(&self) -> GridPos`: scans rows `0..grid.rows`, cols `0..grid.cols` and returns the first unoccupied `GridPos` (or `GridPos::default()` if full).
-   - Add `fn apply_modal_action(&mut self, action: ModalAction)`:
-     - `ModalAction::Cancel` → `self.modal = None; self.mode = InputMode::Navigate; self.status_message = "Cancelled".into();`
-     - `ModalAction::CreateComponent { id, name, kind }` → rejects duplicate `id` (sets status message); calls `scaffold_component(&id, &name, kind, self.next_free_grid_pos())`, persists via `save_component` if `.rocket` dir exists, pushes into `self.project.components`, refreshes audit, closes modal (`self.modal = None; self.mode = InputMode::Navigate`), selects the new component, and sets status message.
-     - `ModalAction::UpdateComponent { component_id, name, description, relative_path, tags, add_feature }` → updates matching component fields; if `add_feature` is `Some(title)`, pushes `FeatureItem { id: format!("{component_id}_f{}", comp.features.len() + 1), title, pushed: false, external_id: None }`; persists via `save_component` if `.rocket` dir exists; refreshes audit; closes modal.
-     - `ModalAction::UpdateConnection { from, to, kind, label }` → updates matching connection in `self.project.config.connections`, persists `project.toml` if `.rocket` dir exists, refreshes audit, closes modal.
-   - Update `handle_key`:
-     - At the top of `handle_key`: if `self.modal.is_some()` (and not `Ctrl+c`), forward `key` to `modal.handle_key(key)` and call `self.apply_modal_action(action)` then return.
-     - In non-modal mode:
-       - `KeyCode::Char('n')` → opens `ModalState::new_component()`, sets `self.mode = InputMode::Modal`.
-       - `KeyCode::Char('e')` → if `selected_component()` is `Some(comp)`, opens `ModalState::edit_component(comp)`, sets `self.mode = InputMode::Modal`.
-       - `KeyCode::Char('E')` → if `selected_component()` is `Some(comp)` and there is an outgoing connection from `comp.id`, opens `ModalState::edit_connection(...)` for the first outgoing connection and sets `self.mode = InputMode::Modal` (else sets status `"No outgoing connection to edit"`).
-2. src/tui/ui.rs — add `fn render_modal(frame: &mut Frame, area: Rect, app: &App, modal: &ModalState)`:
-   - Computes a centered `Rect` (60% width capped to `area.width.saturating_sub(4)`, height 13 capped to `area.height.saturating_sub(2)`).
-   - Renders `ratatui::widgets::Clear` over the modal rect, then a bordered `Paragraph` with `modal.title()`, active field highlighted with `selected_row_style`, validation error line in `alert_error` color if present, and footer hint `"[Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel"`.
-   - Call `if let Some(modal) = &app.modal { render_modal(frame, area, app, modal); }` at the end of `render`.
-3. Tests in `src/tui/app.rs` and `src/tui/ui.rs`:
-   - `app_new_component_modal_scaffolds_and_selects` (in `src/tui/app.rs`): press `'n'`, type `"bus_1"`, `Tab`, type `"Bus One"`, `Enter`; assert `app.project.component("bus_1").is_some()`, `app.mode == InputMode::Navigate`, and `app.modal.is_none()`.
-   - `render_modal_overlay_displays_title` (in `src/tui/ui.rs`): open `ModalState::new_component()` on `app`, render to `TestBackend::new(120, 35)`, assert buffer contains `"New Component"` and `"[Enter] Save"`.
+Goal:
+  Connect the modal forms to `App` keybindings and persistence, and render active modals as a centered overlay on top of the 3-column layout.
+
+Contract & Behavior:
+  - `App` state (`src/tui/app.rs`):
+    - Add `pub modal: Option<crate::tui::modal::ModalState>` (initialized to `None`).
+    - When `self.modal` is `Some` (and key is not `Ctrl+c`), intercept all key events in `handle_key`, delegate to `modal.handle_key(key)`, and apply the resulting `ModalAction`:
+      - `Cancel` closes the modal and returns to `InputMode::Navigate`.
+      - `CreateComponent` rejects duplicate IDs cleanly, scaffolds via `scaffold_component` at the first unoccupied grid position, persists via `save_component` when `<root>/.rocket` exists, appends and selects the new component, calls `refresh_audit()`, and closes the modal.
+      - `UpdateComponent` updates component fields, appends a new `FeatureItem` when `add_feature` is `Some`, persists via `save_component` when `<root>/.rocket` exists, calls `refresh_audit()`, and closes the modal.
+      - `UpdateConnection` updates the matching connection in `project.config.connections`, persists `project.toml` when `<root>/.rocket` exists, calls `refresh_audit()`, and closes the modal.
+    - Non-modal keybindings:
+      - `'n'` opens `ModalState::new_component()` (`InputMode::Modal`).
+      - `'e'` opens `ModalState::edit_component` for the selected component (`InputMode::Modal`).
+      - `'E'` opens `ModalState::edit_connection` for the selected component's first outgoing connection (`InputMode::Modal`), or sets a helpful `status_message` if none exists.
+  - Overlay rendering (`src/tui/ui.rs`):
+    - When `app.modal` is `Some(modal)`, render a centered bordered overlay on top of the main UI using `ratatui::widgets::Clear`, showing `modal.title()`, all fields with the active field highlighted, any validation error in the theme's error color, and a concise keybinding footer hint (`Tab`, `←/→`, `Enter`, `Esc`).
+
+Tests:
+  - In `src/tui/app.rs`: drive `'n'` through typing an ID/name and pressing `Enter`, verifying the new component is scaffolded, added, selected, and the modal closes back to `Navigate`.
+  - In `src/tui/ui.rs`: render an `App` with an open modal onto `TestBackend` and verify the modal title and keybinding hints appear.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub modal: Option<' src/tui/app.rs && grep -qE 'fn render_modal\b' src/tui/ui.rs && ! grep -rqi 'nebulous' src/
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -1368,30 +1341,36 @@ ALLOWED_FILES:
   - src/tui/app.rs
   - src/tui/terminal.rs
 READ_ONLY_REFS:
-  - src/tui/terminal.rs:60-130 (suspend_for_editor, run_event_loop)
-  - src/storage.rs:10-20 (ROCKET_DIR, COMPONENTS_DIR, save_component)
+  - src/tui/terminal.rs (suspend_for_editor, run_event_loop)
+  - src/storage.rs (ROCKET_DIR, COMPONENTS_DIR, save_component)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No references to the string "nebulous" (case-insensitive) anywhere in src/.
   - No `.unwrap()` or `.expect()` in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub modal: Option<' src/tui/app.rs && grep -qE 'pub fn suspend_for_editor\b' src/tui/terminal.rs
+true
 
 [MUTATION_SPEC]
-1. src/tui/app.rs — add `pub pending_editor_component: Option<String>` to `App` (initialized to `None` in `App::new`):
-   - In `handle_key` (non-modal mode): `KeyCode::Char('v')` → if `self.selected_component()` is `Some(comp)`, sets `self.pending_editor_component = Some(comp.id.clone())` and `self.status_message = format!("Opening {}.md in $EDITOR...", comp.id)`.
-   - Add `pub fn reload_component_markdown(&mut self, component_id: &str) -> crate::RfResult<()>`: reads `<root>/.rocket/components/<component_id>.md`, updates matching component's `markdown_body`, calls `self.refresh_audit()`, and sets `self.status_message = format!("Reloaded {component_id}.md")`.
-2. src/tui/terminal.rs — in `run_event_loop`:
-   - After `app.handle_key(key)`, check `if let Some(comp_id) = app.pending_editor_component.take()`:
-     - Ensure `<root>/.rocket/components/<comp_id>.md` exists (if missing and component exists in `app.project`, call `crate::storage::save_component(&app.root, comp)` first).
-     - Compute `md_path = app.root.join(crate::storage::ROCKET_DIR).join(crate::storage::COMPONENTS_DIR).join(format!("{comp_id}.md"))`.
-     - Call `suspend_for_editor(terminal, &md_path)`: on `Ok(())`, call `app.reload_component_markdown(&comp_id)` (writing any error into `app.status_message`); on `Err(err)`, set `app.status_message = format!("Editor error: {err}")` without crashing the TUI.
-3. Tests in `src/tui/app.rs`:
-   - `reload_component_markdown_updates_body_from_disk`: create `tempfile::tempdir()`, `init_workspace`, save component `"spec_box"`, overwrite `.rocket/components/spec_box.md` with `"# Updated Spec\nReady\n"`, construct `App`, press `'v'` (assert `app.pending_editor_component.as_deref() == Some("spec_box")`), call `app.reload_component_markdown("spec_box").unwrap()`, and assert `app.project.component("spec_box").unwrap().markdown_body == "# Updated Spec\nReady\n"`.
+Goal:
+  Allow the user to press `'v'` on any selected component to open its `.rocket/components/<id>.md` spec in `$EDITOR`, then automatically reload the edited Markdown and refresh audit state upon return.
+
+Contract & Behavior:
+  - `src/tui/app.rs`:
+    - Add `pub pending_editor_component: Option<String>` to `App` (initialized to `None`).
+    - In non-modal `handle_key`: `'v'` queues the selected component's ID into `pending_editor_component` and updates `status_message`.
+    - Add `pub fn reload_component_markdown(&mut self, component_id: &str) -> crate::RfResult<()>`: reads `<root>/.rocket/components/<component_id>.md`, updates that component's `markdown_body`, calls `refresh_audit()`, and updates `status_message`.
+  - `src/tui/terminal.rs`:
+    - In `run_event_loop`, after `app.handle_key(key)`, drain `app.pending_editor_component.take()`:
+      - Ensure the target `.md` file exists on disk (persisting the component via `save_component` first if missing).
+      - Invoke `suspend_for_editor(terminal, &md_path)`.
+      - On `Ok(())`, call `app.reload_component_markdown(&comp_id)` (capturing any error in `app.status_message`); on `Err(err)`, record the error in `app.status_message` without crashing the TUI.
+
+Tests:
+  - In `src/tui/app.rs`: using a `tempfile::tempdir()` workspace, save a component, modify its `.rocket/components/<id>.md` file on disk, press `'v'` (asserting `pending_editor_component` is set), call `reload_component_markdown`, and assert `markdown_body` matches the updated file.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn reload_component_markdown\b' src/tui/app.rs && grep -qE 'pending_editor_component' src/tui/terminal.rs && ! grep -rqi 'nebulous' src/
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

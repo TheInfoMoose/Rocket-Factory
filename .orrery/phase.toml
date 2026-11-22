@@ -11,10 +11,6 @@ step = "4F"
 item = "TASK-0021"
 
 [[queue]]
-step = "4G"
-item = "TASK-0022"
-
-[[queue]]
 step = "5A"
 item = "TASK-0023"
 
