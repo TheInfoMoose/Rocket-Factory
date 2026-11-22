@@ -481,7 +481,17 @@ fn render_modal(
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(footer_hint, muted)));
 
-    let popup_width = ((u32::from(area.width) * 60 / 100) as u16).clamp(54, 76);
+    let max_line_width = lines.iter().map(Line::width).max().unwrap_or(0);
+    let content_width = u16::try_from(max_line_width.saturating_add(4)).unwrap_or(u16::MAX);
+    let max_popup_width = if area.width > 2 {
+        area.width.saturating_sub(2)
+    } else {
+        area.width
+    };
+    let popup_width = ((u32::from(area.width) * 60 / 100) as u16)
+        .max(content_width)
+        .clamp(54, 76)
+        .min(max_popup_width);
     let popup_height = (lines.len() as u16).saturating_add(2);
     let popup_area = centered_rect(popup_width, popup_height, area);
 
@@ -719,5 +729,27 @@ mod tests {
         assert!(theme_text.contains("amber_alt"));
         assert!(theme_text.contains("crt_amber [active]"));
         assert!(theme_text.contains("[↑/↓] Select  [Enter] Apply  [Esc] Cancel"));
+    }
+
+    #[test]
+    fn render_help_modal_fits_80x24_without_wrapping_or_footer_clipping() {
+        let mut app = make_test_app();
+        app.modal = Some(ModalState::help());
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+
+        assert!(text.contains("Keyboard Help"));
+        assert!(text.contains("New component / Edit component / Edit edge"));
+        assert!(text.contains("[Esc/?/Enter/q] Close"));
     }
 }
