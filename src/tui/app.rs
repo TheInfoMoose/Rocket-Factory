@@ -746,6 +746,88 @@ impl App {
                 self.mode = InputMode::Navigate;
                 self.status_message = format!("Theme switched to {name}");
             }
+            ModalAction::DeleteComponent { id } => {
+                let mut candidate_config = self.project.config.clone();
+                candidate_config
+                    .connections
+                    .retain(|c| c.from != id && c.to != id);
+                let connections_changed =
+                    candidate_config.connections.len() != self.project.config.connections.len();
+
+                if self.root.join(ROCKET_DIR).exists() {
+                    if connections_changed {
+                        if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                            let msg =
+                                format!("Failed to save connections before deleting {id}: {err}");
+                            if let ModalState::ConfirmDelete(ref mut form) = modal {
+                                form.error = Some(msg.clone());
+                            }
+                            self.status_message = msg;
+                            self.modal = Some(modal);
+                            self.mode = InputMode::Modal;
+                            return;
+                        }
+                    }
+
+                    if let Err(err) = crate::storage::delete_component(&self.root, &id) {
+                        if connections_changed {
+                            let _ = save_project_config(&self.root, &self.project.config);
+                        }
+                        let msg = format!("Failed to delete component {id}: {err}");
+                        if let ModalState::ConfirmDelete(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
+                    }
+                }
+
+                self.project.components.retain(|c| c.id != id);
+                self.project.config = candidate_config;
+                self.connect_source_id = None;
+                if self.pending_editor_component.as_deref() == Some(id.as_str()) {
+                    self.pending_editor_component = None;
+                }
+                self.clamp_selection();
+                self.detail_scroll = 0;
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
+                self.status_message = format!("Deleted component {id}");
+            }
+            ModalAction::DeleteConnection { from, to } => {
+                let mut candidate_config = self.project.config.clone();
+                let Some(pos) = candidate_config
+                    .connections
+                    .iter()
+                    .position(|c| c.from == from && c.to == to)
+                else {
+                    self.mode = InputMode::Navigate;
+                    self.status_message = format!("Connection {from} -> {to} not found");
+                    return;
+                };
+                candidate_config.connections.remove(pos);
+
+                if self.root.join(ROCKET_DIR).exists() {
+                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                        let msg = format!("Failed to save connections: {err}");
+                        if let ModalState::ConfirmDelete(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
+                    }
+                }
+
+                self.project.config = candidate_config;
+                self.connect_source_id = None;
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
+                self.status_message = format!("Deleted connection {from} -> {to}");
+            }
         }
     }
 
@@ -817,6 +899,63 @@ impl App {
                     }
                 } else {
                     self.status_message = "No component selected".to_string();
+                }
+            }
+            KeyCode::Char('d') => {
+                self.connect_source_id = None;
+                if let Some(comp) = self.selected_component() {
+                    let comp_id = comp.id.clone();
+                    let comp_name = comp.name.clone();
+                    let affected_connections = self
+                        .project
+                        .config
+                        .connections
+                        .iter()
+                        .filter(|conn| conn.from == comp_id || conn.to == comp_id)
+                        .count();
+                    self.modal = Some(ModalState::confirm_delete_component(
+                        comp_id.clone(),
+                        comp_name,
+                        affected_connections,
+                    ));
+                    self.mode = InputMode::Modal;
+                    self.status_message = format!("Confirm delete component {comp_id}");
+                } else {
+                    self.status_message = "No component selected to delete".to_string();
+                }
+            }
+            KeyCode::Char('D') => {
+                self.connect_source_id = None;
+                if let Some(comp_id) = self.selected_component().map(|c| c.id.clone()) {
+                    let target_conn = self
+                        .project
+                        .config
+                        .connections
+                        .iter()
+                        .find(|conn| conn.from == comp_id)
+                        .or_else(|| {
+                            self.project
+                                .config
+                                .connections
+                                .iter()
+                                .find(|conn| conn.to == comp_id)
+                        });
+                    if let Some(conn) = target_conn {
+                        let from = conn.from.clone();
+                        let to = conn.to.clone();
+                        self.modal = Some(ModalState::confirm_delete_connection(
+                            from.clone(),
+                            to.clone(),
+                        ));
+                        self.mode = InputMode::Modal;
+                        self.status_message = format!("Confirm delete connection {from} -> {to}");
+                    } else {
+                        self.status_message =
+                            "No connection on selected component to delete".to_string();
+                    }
+                } else {
+                    self.status_message =
+                        "No connection on selected component to delete".to_string();
                 }
             }
             KeyCode::Char('m') => {
@@ -1821,5 +1960,219 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         assert_eq!(app.theme.name, "amber_alt");
         assert_eq!(app.project.config.theme, "amber_alt");
         assert!(app.status_message.contains("Failed to save theme"));
+    }
+
+    #[test]
+    fn app_delete_component_and_connection_cleanup_and_cancel() {
+        use crate::audit::FindingKind;
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Delete Test", "Delete component and connection")
+            .expect("init workspace");
+
+        let mut alpha = make_component("alpha");
+        alpha.position = GridPos { col: 0, row: 0 };
+        let mut beta = make_component("beta");
+        beta.position = GridPos { col: 1, row: 0 };
+        let mut gamma = make_component("gamma");
+        gamma.position = GridPos { col: 2, row: 0 };
+        save_component(dir.path(), &alpha).expect("save alpha");
+        save_component(dir.path(), &beta).expect("save beta");
+        save_component(dir.path(), &gamma).expect("save gamma");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections = vec![
+            Connection {
+                from: "alpha".to_string(),
+                to: "beta".to_string(),
+                kind: EdgeKind::DependsOn,
+                label: None,
+            },
+            Connection {
+                from: "gamma".to_string(),
+                to: "beta".to_string(),
+                kind: EdgeKind::DataFlow,
+                label: Some("feed".to_string()),
+            },
+            Connection {
+                from: "beta".to_string(),
+                to: "alpha".to_string(),
+                kind: EdgeKind::Invokes,
+                label: None,
+            },
+        ];
+        save_project_config(dir.path(), &project.config).expect("save config");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Selected is alpha (index 0). 'D' prefers outgoing alpha -> beta; cancel with Esc.
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(
+            app.modal,
+            Some(ModalState::confirm_delete_connection("alpha", "beta"))
+        );
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.config.connections.len(), 3);
+
+        // Confirm deleting outgoing alpha -> beta with 'y'
+        app.handle_key(key(KeyCode::Char('D')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.config.connections.len(), 2);
+        assert!(!app
+            .project
+            .config
+            .connections
+            .iter()
+            .any(|c| c.from == "alpha" && c.to == "beta"));
+
+        // Now alpha has no outgoing connection; 'D' falls back to incoming beta -> alpha
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(
+            app.modal,
+            Some(ModalState::confirm_delete_connection("beta", "alpha"))
+        );
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.project.config.connections.len(), 1);
+        assert_eq!(app.project.config.connections[0].from, "gamma");
+        assert_eq!(app.project.config.connections[0].to, "beta");
+
+        // Alpha now has no connections -> 'D' reports status and stays in Navigate
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(
+            app.status_message,
+            "No connection on selected component to delete"
+        );
+
+        // Select beta (index 1), press 'd' -> shows 1 affected connection (gamma -> beta), cancel with 'n'
+        app.selected_index = 1;
+        app.detail_scroll = 4;
+        app.pending_editor_component = Some("beta".to_string());
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(
+            app.modal,
+            Some(ModalState::confirm_delete_component("beta", "beta", 1))
+        );
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.project.component("beta").is_some());
+
+        // Delete beta with 'd' + 'y' -> removes component and incident edge gamma -> beta cleanly
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert!(app.project.component("beta").is_none());
+        assert!(app.project.config.connections.is_empty());
+        assert!(app.pending_editor_component.is_none());
+        assert_eq!(app.detail_scroll, 0);
+        assert_eq!(app.status_message, "Deleted component beta");
+        assert!(!app
+            .audit_findings
+            .iter()
+            .any(|f| f.kind == FindingKind::DanglingConnection));
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert!(reloaded.component("beta").is_none());
+        assert!(reloaded.config.connections.is_empty());
+        assert!(!audit_project(&reloaded)
+            .iter()
+            .any(|f| f.kind == FindingKind::DanglingConnection));
+    }
+
+    #[test]
+    fn app_delete_rolls_back_on_disk_failure_and_keeps_modal_open() {
+        use crate::storage::{init_workspace, load_project, save_component, PROJECT_FILE};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(
+            dir.path(),
+            "Delete Rollback",
+            "Transactional delete failure",
+        )
+        .expect("init workspace");
+
+        let alpha = make_component("alpha");
+        let beta = make_component("beta");
+        save_component(dir.path(), &alpha).expect("save alpha");
+        save_component(dir.path(), &beta).expect("save beta");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+        save_project_config(dir.path(), &project.config).expect("save config");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // 1. Delete alpha when its file on disk is already missing -> delete_component fails,
+        //    connections are restored on disk and in memory, modal stays open with form.error.
+        let alpha_toml = dir
+            .path()
+            .join(ROCKET_DIR)
+            .join(COMPONENTS_DIR)
+            .join("alpha.toml");
+        std::fs::remove_file(&alpha_toml).expect("remove alpha.toml");
+
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.project.component("alpha").is_some());
+        assert_eq!(app.project.config.connections.len(), 1);
+        if let Some(ModalState::ConfirmDelete(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected ConfirmDelete modal to remain open on delete_component error");
+        }
+        let reloaded = load_project(dir.path()).expect("reload after restore");
+        assert_eq!(reloaded.config.connections.len(), 1);
+
+        // Close modal
+        app.handle_key(key(KeyCode::Esc));
+
+        // 2. Break project.toml by replacing it with a directory -> DeleteConnection fails and rolls back
+        let project_file = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        std::fs::remove_file(&project_file).expect("remove project.toml");
+        std::fs::create_dir(&project_file).expect("replace project.toml with dir");
+
+        app.handle_key(key(KeyCode::Char('D')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert_eq!(app.project.config.connections.len(), 1);
+        assert!(app.status_message.contains("Failed to save connections"));
+        if let Some(ModalState::ConfirmDelete(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected ConfirmDelete modal to remain open on save failure");
+        }
+
+        // 3. DeleteComponent also fails cleanly when saving updated connections fails
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.project.component("alpha").is_some());
+        assert_eq!(app.project.config.connections.len(), 1);
+        if let Some(ModalState::ConfirmDelete(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected ConfirmDelete modal to remain open on config save failure");
+        }
     }
 }

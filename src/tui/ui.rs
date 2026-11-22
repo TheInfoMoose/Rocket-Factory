@@ -7,7 +7,7 @@ use ratatui::Frame;
 use crate::audit::{compute_card_status, task_progress};
 use crate::theme::Theme;
 use crate::tui::app::{App, FocusColumn, ListFilter};
-use crate::tui::modal::{edge_kind_label, ModalState};
+use crate::tui::modal::{edge_kind_label, ConfirmDeleteTarget, ModalState};
 use crate::tui::style;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -407,6 +407,10 @@ fn render_modal(
                 base,
             )));
             lines.push(Line::from(Span::styled(
+                "    d / D             Delete component / Delete edge",
+                base,
+            )));
+            lines.push(Line::from(Span::styled(
                 "    m / c             Move card mode / Connect components",
                 base,
             )));
@@ -460,6 +464,40 @@ fn render_modal(
             }
             form.error.as_deref()
         }
+        ModalState::ConfirmDelete(form) => {
+            match &form.target {
+                ConfirmDeleteTarget::Component {
+                    id,
+                    name,
+                    affected_connections,
+                } => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  Delete component '{name}' ({id})?"),
+                        base.add_modifier(Modifier::BOLD),
+                    )));
+                    if *affected_connections > 0 {
+                        let noun = if *affected_connections == 1 {
+                            "connection"
+                        } else {
+                            "connections"
+                        };
+                        lines.push(Line::from(Span::styled(
+                            format!(
+                                "  Warning: {affected_connections} {noun} will also be removed."
+                            ),
+                            error_style,
+                        )));
+                    }
+                }
+                ConfirmDeleteTarget::Connection { from, to } => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  Delete connection '{from} -> {to}'?"),
+                        base.add_modifier(Modifier::BOLD),
+                    )));
+                }
+            }
+            form.error.as_deref()
+        }
     };
 
     if let Some(err) = error_text {
@@ -473,6 +511,7 @@ fn render_modal(
     let footer_hint = match modal {
         ModalState::Help => "  [Esc/?/Enter/q] Close",
         ModalState::ThemeSwitcher(_) => "  [↑/↓] Select  [Enter] Apply  [Esc] Cancel",
+        ModalState::ConfirmDelete(_) => "  [Enter/y] Confirm Delete  [Esc/n] Cancel",
         ModalState::NewComponent(_)
         | ModalState::EditComponent(_)
         | ModalState::EditConnection(_) => "  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel",
@@ -750,6 +789,31 @@ mod tests {
 
         assert!(text.contains("Keyboard Help"));
         assert!(text.contains("New component / Edit component / Edit edge"));
+        assert!(text.contains("Delete component / Delete edge"));
         assert!(text.contains("[Esc/?/Enter/q] Close"));
+    }
+
+    #[test]
+    fn render_confirm_delete_modals_display_component_warning_and_connection_prompt() {
+        let mut app = make_test_app();
+
+        // Component target with affected connections
+        app.modal = Some(ModalState::confirm_delete_component(
+            "view_box", "View Box", 2,
+        ));
+        let comp_text = render_to_string(&mut app);
+        assert!(comp_text.contains("Delete Component"));
+        assert!(comp_text.contains("Delete component 'View Box' (view_box)?"));
+        assert!(comp_text.contains("2 connections will also be removed"));
+        assert!(comp_text.contains("[Enter/y] Confirm Delete  [Esc/n] Cancel"));
+
+        // Connection target
+        app.modal = Some(ModalState::confirm_delete_connection(
+            "view_box", "core_bus",
+        ));
+        let conn_text = render_to_string(&mut app);
+        assert!(conn_text.contains("Delete Connection"));
+        assert!(conn_text.contains("Delete connection 'view_box -> core_bus'?"));
+        assert!(conn_text.contains("[Enter/y] Confirm Delete  [Esc/n] Cancel"));
     }
 }

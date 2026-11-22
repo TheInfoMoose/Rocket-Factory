@@ -118,12 +118,32 @@ impl ThemeSwitcherForm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmDeleteTarget {
+    Component {
+        id: String,
+        name: String,
+        affected_connections: usize,
+    },
+    Connection {
+        from: String,
+        to: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmDeleteForm {
+    pub target: ConfirmDeleteTarget,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     NewComponent(NewComponentForm),
     EditComponent(EditComponentForm),
     EditConnection(EditConnectionForm),
     Help,
     ThemeSwitcher(ThemeSwitcherForm),
+    ConfirmDelete(ConfirmDeleteForm),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +171,13 @@ pub enum ModalAction {
     },
     SelectTheme {
         name: String,
+    },
+    DeleteComponent {
+        id: String,
+    },
+    DeleteConnection {
+        from: String,
+        to: String,
     },
 }
 
@@ -221,6 +248,31 @@ impl ModalState {
         })
     }
 
+    pub fn confirm_delete_component(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        affected_connections: usize,
+    ) -> Self {
+        Self::ConfirmDelete(ConfirmDeleteForm {
+            target: ConfirmDeleteTarget::Component {
+                id: id.into(),
+                name: name.into(),
+                affected_connections,
+            },
+            error: None,
+        })
+    }
+
+    pub fn confirm_delete_connection(from: impl Into<String>, to: impl Into<String>) -> Self {
+        Self::ConfirmDelete(ConfirmDeleteForm {
+            target: ConfirmDeleteTarget::Connection {
+                from: from.into(),
+                to: to.into(),
+            },
+            error: None,
+        })
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             Self::NewComponent(_) => "New Component",
@@ -228,6 +280,10 @@ impl ModalState {
             Self::EditConnection(_) => "Edit Connection",
             Self::Help => "Keyboard Help",
             Self::ThemeSwitcher(_) => "Switch Theme",
+            Self::ConfirmDelete(form) => match form.target {
+                ConfirmDeleteTarget::Component { .. } => "Delete Component",
+                ConfirmDeleteTarget::Connection { .. } => "Delete Connection",
+            },
         }
     }
 
@@ -242,6 +298,7 @@ impl ModalState {
             Self::EditConnection(form) => handle_edit_connection_key(form, key),
             Self::Help => handle_help_key(key),
             Self::ThemeSwitcher(form) => handle_theme_switcher_key(form, key),
+            Self::ConfirmDelete(form) => handle_confirm_delete_key(form, key),
         }
     }
 }
@@ -464,6 +521,25 @@ fn handle_theme_switcher_key(form: &mut ThemeSwitcherForm, key: KeyEvent) -> Mod
     }
 }
 
+fn handle_confirm_delete_key(form: &mut ConfirmDeleteForm, key: KeyEvent) -> ModalAction {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y' | 'Y') => {
+            form.error = None;
+            match &form.target {
+                ConfirmDeleteTarget::Component { id, .. } => {
+                    ModalAction::DeleteComponent { id: id.clone() }
+                }
+                ConfirmDeleteTarget::Connection { from, to } => ModalAction::DeleteConnection {
+                    from: from.clone(),
+                    to: to.clone(),
+                },
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('n' | 'N') => ModalAction::Cancel,
+        _ => ModalAction::None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,5 +757,82 @@ mod tests {
             empty_modal.handle_key(key(KeyCode::Enter)),
             ModalAction::Cancel
         );
+    }
+
+    #[test]
+    fn confirm_delete_component_emits_delete_cancel_and_none() {
+        let mut modal = ModalState::confirm_delete_component("stream_core", "Stream Core", 2);
+        assert_eq!(modal.title(), "Delete Component");
+
+        if let ModalState::ConfirmDelete(ref mut form) = modal {
+            form.error = Some("previous error".to_string());
+        }
+
+        // Unrelated keys emit None
+        assert_eq!(modal.handle_key(key(KeyCode::Char('x'))), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+
+        // Enter / y / Y clear error and emit DeleteComponent
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Enter)),
+            ModalAction::DeleteComponent {
+                id: "stream_core".to_string(),
+            }
+        );
+        let ModalState::ConfirmDelete(ref form) = modal else {
+            panic!("expected ConfirmDelete");
+        };
+        assert!(form.error.is_none());
+
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('y'))),
+            ModalAction::DeleteComponent {
+                id: "stream_core".to_string(),
+            }
+        );
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('Y'))),
+            ModalAction::DeleteComponent {
+                id: "stream_core".to_string(),
+            }
+        );
+
+        // n / N / Esc emit Cancel
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('n'))),
+            ModalAction::Cancel
+        );
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('N'))),
+            ModalAction::Cancel
+        );
+        assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+    }
+
+    #[test]
+    fn confirm_delete_connection_emits_delete_cancel_and_none() {
+        let mut modal = ModalState::confirm_delete_connection("view_box", "data_stream");
+        assert_eq!(modal.title(), "Delete Connection");
+
+        assert_eq!(modal.handle_key(key(KeyCode::Char('z'))), ModalAction::None);
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Enter)),
+            ModalAction::DeleteConnection {
+                from: "view_box".to_string(),
+                to: "data_stream".to_string(),
+            }
+        );
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('y'))),
+            ModalAction::DeleteConnection {
+                from: "view_box".to_string(),
+                to: "data_stream".to_string(),
+            }
+        );
+        assert_eq!(
+            modal.handle_key(key(KeyCode::Char('n'))),
+            ModalAction::Cancel
+        );
+        assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
     }
 }

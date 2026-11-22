@@ -566,3 +566,119 @@ fn e2e_help_overlay_80x24_shows_close_footer_hint() {
         "expected help overlay footer hint to be visible at 80x24, got:\n{snapshot}"
     );
 }
+
+#[test]
+fn e2e_tui_delete_connection_and_component_persists_to_disk() {
+    use rocket_factory::audit::{audit_project, FindingKind};
+
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "delete-e2e",
+        "Delete component and connection E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let alpha = scaffold_component(
+        "alpha_core",
+        "Alpha Core",
+        ComponentKind::ServiceCore,
+        GridPos { col: 0, row: 0 },
+    );
+    let beta = scaffold_component(
+        "beta_stream",
+        "Beta Stream",
+        ComponentKind::DataStream,
+        GridPos { col: 1, row: 0 },
+    );
+    let gamma = scaffold_component(
+        "gamma_view",
+        "Gamma View",
+        ComponentKind::UiView,
+        GridPos { col: 2, row: 0 },
+    );
+    storage::save_component(dir.path(), &alpha).expect("save alpha_core");
+    storage::save_component(dir.path(), &beta).expect("save beta_stream");
+    storage::save_component(dir.path(), &gamma).expect("save gamma_view");
+
+    let mut project = storage::load_project(dir.path()).expect("load project");
+    project.config.connections = vec![
+        Connection {
+            from: "alpha_core".to_string(),
+            to: "beta_stream".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        },
+        Connection {
+            from: "beta_stream".to_string(),
+            to: "gamma_view".to_string(),
+            kind: EdgeKind::DataFlow,
+            label: Some("events".to_string()),
+        },
+        Connection {
+            from: "gamma_view".to_string(),
+            to: "alpha_core".to_string(),
+            kind: EdgeKind::Renders,
+            label: None,
+        },
+    ];
+    storage::save_project_config(dir.path(), &project.config).expect("save project config");
+
+    let loaded_init = storage::load_project(dir.path()).expect("reload project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), loaded_init, theme);
+
+    // 1. Press 'D' + 'y' on alpha_core to delete outgoing connection alpha_core -> beta_stream
+    app.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
+    let confirm_conn_snap = buffer_to_string(&render_app(&mut app, 120, 35));
+    assert!(confirm_conn_snap.contains("Delete Connection"));
+    assert!(confirm_conn_snap.contains("alpha_core -> beta_stream"));
+    app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+
+    let after_conn_delete = storage::load_project(dir.path()).expect("reload after conn delete");
+    assert_eq!(after_conn_delete.config.connections.len(), 2);
+    assert!(!after_conn_delete
+        .config
+        .connections
+        .iter()
+        .any(|c| c.from == "alpha_core" && c.to == "beta_stream"));
+    assert!(!audit_project(&after_conn_delete)
+        .iter()
+        .any(|f| f.kind == FindingKind::DanglingConnection));
+
+    // 2. Press 'd' + 'n' on alpha_core to cancel component deletion
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    let confirm_comp_snap = buffer_to_string(&render_app(&mut app, 120, 35));
+    assert!(confirm_comp_snap.contains("Delete Component"));
+    assert!(confirm_comp_snap.contains("Alpha Core"));
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+
+    let after_cancel = storage::load_project(dir.path()).expect("reload after cancel");
+    assert!(after_cancel.component("alpha_core").is_some());
+    assert_eq!(after_cancel.components.len(), 3);
+    assert_eq!(after_cancel.config.connections.len(), 2);
+    assert!(!audit_project(&after_cancel)
+        .iter()
+        .any(|f| f.kind == FindingKind::DanglingConnection));
+
+    // 3. Select beta_stream (has incident edge beta_stream -> gamma_view) and press 'd' + 'y'
+    let beta_idx = app
+        .project
+        .components
+        .iter()
+        .position(|c| c.id == "beta_stream")
+        .expect("beta_stream index");
+    app.selected_index = beta_idx;
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+
+    let after_comp_delete = storage::load_project(dir.path()).expect("reload after comp delete");
+    assert!(after_comp_delete.component("beta_stream").is_none());
+    assert_eq!(after_comp_delete.components.len(), 2);
+    assert_eq!(after_comp_delete.config.connections.len(), 1);
+    assert_eq!(after_comp_delete.config.connections[0].from, "gamma_view");
+    assert_eq!(after_comp_delete.config.connections[0].to, "alpha_core");
+    assert!(!audit_project(&after_comp_delete)
+        .iter()
+        .any(|f| f.kind == FindingKind::DanglingConnection));
+}
