@@ -1050,6 +1050,7 @@ mod tests {
             id: id.to_string(),
             name: id.to_string(),
             kind: ComponentKind::Custom,
+            parent_id: None,
             description: String::new(),
             relative_path: None,
             position: GridPos::default(),
@@ -1318,7 +1319,7 @@ mod tests {
         assert_eq!(app.mode, InputMode::Modal);
         assert!(app.modal.is_some());
 
-        // Type ID, tab to Name, type Name, tab to Archetype, cycle right to DataStream, submit
+        // Type ID, tab to Name, type Name, tab to Archetype, cycle right to Interface, submit
         type_keys(&mut app, "telemetry_bus");
         app.handle_key(key(KeyCode::Tab));
         type_keys(&mut app, "Telemetry Bus");
@@ -1333,9 +1334,10 @@ mod tests {
         let selected = app.selected_component().expect("new component selected");
         assert_eq!(selected.id, "telemetry_bus");
         assert_eq!(selected.name, "Telemetry Bus");
-        assert_eq!(selected.kind, ComponentKind::DataStream);
+        assert_eq!(selected.kind, ComponentKind::Interface);
+        assert_eq!(selected.parent_id, None);
         assert_eq!(selected.position, GridPos { col: 1, row: 0 });
-        assert!(!selected.features.is_empty());
+        assert!(selected.features.is_empty());
 
         let reloaded = load_project(dir.path()).expect("reload project");
         assert!(reloaded.component("telemetry_bus").is_some());

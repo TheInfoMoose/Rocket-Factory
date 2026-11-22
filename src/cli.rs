@@ -223,7 +223,7 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
 mod tests {
     use super::*;
     use crate::archetype::scaffold_component;
-    use crate::model::{Component, ComponentKind, GridPos};
+    use crate::model::{Component, ComponentKind, FeatureItem, GridPos};
 
     #[test]
     fn cli_init_and_export_roadmap() {
@@ -241,7 +241,13 @@ mod tests {
         .expect("init workspace");
         assert_eq!(init_out.exit_code, 0);
 
-        let hud = scaffold_component("hud", "HUD", ComponentKind::UiView, GridPos::default());
+        let mut hud = scaffold_component("hud", "HUD", ComponentKind::UiView, GridPos::default());
+        hud.features.push(FeatureItem {
+            id: "hud_f1".to_string(),
+            title: "Render status header".to_string(),
+            pushed: false,
+            external_id: None,
+        });
         storage::save_component(dir.path(), &hud).expect("save hud component");
 
         let out = execute_command(
@@ -277,6 +283,7 @@ mod tests {
             id: "view_box".to_string(),
             name: "View Box".to_string(),
             kind: ComponentKind::UiView,
+            parent_id: None,
             description: String::new(),
             relative_path: None,
             position: GridPos::default(),
@@ -314,7 +321,12 @@ mod tests {
         .expect("init workspace");
 
         let mut comp = scaffold_component("hud", "HUD", ComponentKind::UiView, GridPos::default());
-        comp.features.truncate(1);
+        comp.features.push(FeatureItem {
+            id: "hud_f1".to_string(),
+            title: "Render status header".to_string(),
+            pushed: false,
+            external_id: None,
+        });
         storage::save_component(dir.path(), &comp).expect("save hud component");
 
         let mut project = storage::load_project(dir.path()).expect("load project");

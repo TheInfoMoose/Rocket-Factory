@@ -9,6 +9,7 @@ pub const EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::DataFlow,
     EdgeKind::Renders,
     EdgeKind::Invokes,
+    EdgeKind::Contains,
     EdgeKind::Custom,
 ];
 
@@ -18,6 +19,7 @@ pub fn edge_kind_label(kind: EdgeKind) -> &'static str {
         EdgeKind::DataFlow => "data_flow",
         EdgeKind::Renders => "renders",
         EdgeKind::Invokes => "invokes",
+        EdgeKind::Contains => "contains",
         EdgeKind::Custom => "custom",
     }
 }
@@ -577,7 +579,7 @@ mod tests {
         };
         assert!(form.error.is_some());
 
-        // Fix ID to valid value, cycle archetype to DataStream, and submit
+        // Fix ID to valid value, cycle archetype to Interface, and submit
         assert_eq!(modal.handle_key(key(KeyCode::BackTab)), ModalAction::None);
         for _ in 0..5 {
             assert_eq!(modal.handle_key(key(KeyCode::Backspace)), ModalAction::None);
@@ -593,7 +595,7 @@ mod tests {
             ModalAction::CreateComponent {
                 id: "telemetry_bus".to_string(),
                 name: "Telemetry".to_string(),
-                kind: ComponentKind::DataStream,
+                kind: ComponentKind::Interface,
             }
         );
     }
@@ -604,6 +606,7 @@ mod tests {
             id: "ui_view".to_string(),
             name: "UI View".to_string(),
             kind: ComponentKind::UiView,
+            parent_id: None,
             description: "Primary screen".to_string(),
             relative_path: Some("src/tui/ui.rs".to_string()),
             position: GridPos { col: 0, row: 0 },

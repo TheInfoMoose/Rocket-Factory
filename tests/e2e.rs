@@ -9,7 +9,9 @@ use ratatui::Terminal;
 use rocket_factory::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};
 use rocket_factory::archetype::scaffold_component;
 use rocket_factory::cli::{execute_command, Command, ExportKind};
-use rocket_factory::model::{ComponentKind, Connection, EdgeKind, GridPos, TaskStatus};
+use rocket_factory::model::{
+    ComponentKind, Connection, EdgeKind, FeatureItem, GridPos, TaskStatus,
+};
 use rocket_factory::storage;
 use rocket_factory::theme::{default_theme, DEFAULT_CRT_AMBER_RON};
 use rocket_factory::tui::app::App;
@@ -94,7 +96,12 @@ fn e2e_cli_lifecycle_and_mock_adapter_roundtrip() {
         ComponentKind::UiView,
         GridPos { col: 0, row: 0 },
     );
-    view_box.features.truncate(1);
+    view_box.features.push(FeatureItem {
+        id: "view_box_f1".to_string(),
+        title: "Define layout and container bounds".to_string(),
+        pushed: false,
+        external_id: None,
+    });
     view_box.relative_path = Some("src/view_box.rs".to_string());
     storage::save_component(dir.path(), &view_box).expect("save view_box");
 
@@ -248,7 +255,12 @@ fn e2e_tui_live_sync_and_complete_green_border_snapshot() {
         ComponentKind::UiView,
         GridPos { col: 0, row: 0 },
     );
-    view_box.features.truncate(1);
+    view_box.features.push(FeatureItem {
+        id: "view_box_f1".to_string(),
+        title: "Define layout and container bounds".to_string(),
+        pushed: false,
+        external_id: None,
+    });
     storage::save_component(dir.path(), &view_box).expect("save view_box");
 
     let mut data_stream = scaffold_component(
@@ -257,7 +269,12 @@ fn e2e_tui_live_sync_and_complete_green_border_snapshot() {
         ComponentKind::DataStream,
         GridPos { col: 1, row: 0 },
     );
-    data_stream.features.truncate(1);
+    data_stream.features.push(FeatureItem {
+        id: "data_stream_f1".to_string(),
+        title: "Define payload schema and framing".to_string(),
+        pushed: false,
+        external_id: None,
+    });
     storage::save_component(dir.path(), &data_stream).expect("save data_stream");
 
     let mut project = storage::load_project(dir.path()).expect("load project");
@@ -436,7 +453,12 @@ fn e2e_multi_adapter_feature_push_cli_and_tui() {
         ComponentKind::ServiceCore,
         GridPos { col: 0, row: 0 },
     );
-    cli_comp.features.truncate(1);
+    cli_comp.features.push(FeatureItem {
+        id: "cli_svc_f1".to_string(),
+        title: "Define domain API and error contracts".to_string(),
+        pushed: false,
+        external_id: None,
+    });
     storage::save_component(dir.path(), &cli_comp).expect("save cli_svc");
 
     let mut tui_comp = scaffold_component(
@@ -445,7 +467,12 @@ fn e2e_multi_adapter_feature_push_cli_and_tui() {
         ComponentKind::UiView,
         GridPos { col: 1, row: 0 },
     );
-    tui_comp.features.truncate(1);
+    tui_comp.features.push(FeatureItem {
+        id: "tui_view_f1".to_string(),
+        title: "Define layout and container bounds".to_string(),
+        pushed: false,
+        external_id: None,
+    });
     storage::save_component(dir.path(), &tui_comp).expect("save tui_view");
 
     let mut project = storage::load_project(dir.path()).expect("load project");

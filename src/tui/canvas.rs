@@ -409,6 +409,7 @@ fn edge_kind_tag(kind: EdgeKind) -> &'static str {
         EdgeKind::DataFlow => "data",
         EdgeKind::Renders => "ui",
         EdgeKind::Invokes => "call",
+        EdgeKind::Contains => "sub",
         EdgeKind::Custom => "link",
     }
 }
@@ -659,6 +660,7 @@ mod tests {
             id: "alpha".to_string(),
             name: "Alpha".to_string(),
             kind: ComponentKind::UiView,
+            parent_id: None,
             description: "Source node".to_string(),
             relative_path: Some("src/alpha.rs".to_string()),
             position: from_pos,
@@ -675,6 +677,7 @@ mod tests {
             id: "beta".to_string(),
             name: "Beta".to_string(),
             kind: ComponentKind::ServiceCore,
+            parent_id: None,
             description: "Target node".to_string(),
             relative_path: Some("src/beta.rs".to_string()),
             position: to_pos,

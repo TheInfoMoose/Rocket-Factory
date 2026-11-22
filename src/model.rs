@@ -9,12 +9,17 @@ pub struct GridPos {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentKind {
+    #[default]
+    Concept,
+    Interface,
+    Logic,
+    Data,
+    Integration,
     UiView,
     DataStream,
     ServiceCore,
     CliTool,
     Storage,
-    #[default]
     Custom,
 }
 
@@ -26,6 +31,7 @@ pub enum EdgeKind {
     DataFlow,
     Renders,
     Invokes,
+    Contains,
     Custom,
 }
 
@@ -76,6 +82,8 @@ pub struct Component {
     pub id: String,
     pub name: String,
     pub kind: ComponentKind,
+    #[serde(default)]
+    pub parent_id: Option<String>,
     pub description: String,
     pub relative_path: Option<String>,
     pub position: GridPos,
@@ -125,6 +133,13 @@ impl Project {
     pub fn component_mut(&mut self, id: &str) -> Option<&mut Component> {
         self.components.iter_mut().find(|c| c.id == id)
     }
+
+    pub fn sub_components(&self, parent_id: &str) -> Vec<&Component> {
+        self.components
+            .iter()
+            .filter(|c| c.parent_id.as_deref() == Some(parent_id))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +166,7 @@ mod tests {
             id: "ui_view".to_string(),
             name: "UI View".to_string(),
             kind: ComponentKind::UiView,
+            parent_id: None,
             description: "Primary viewport".to_string(),
             relative_path: Some("src/ui.rs".to_string()),
             position: GridPos { col: 1, row: 2 },
@@ -188,6 +204,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             kind: ComponentKind::Custom,
+            parent_id: None,
             description: String::new(),
             relative_path: None,
             position: GridPos::default(),
@@ -217,5 +234,112 @@ mod tests {
 
         assert!(project.component("ui_view").is_some());
         assert!(project.component("missing").is_none());
+    }
+
+    #[test]
+    fn component_parent_id_toml_roundtrip_and_sub_components() {
+        let mut child = Component {
+            id: "child_a".to_string(),
+            name: "Child A".to_string(),
+            kind: ComponentKind::Concept,
+            parent_id: Some("parent_a".to_string()),
+            description: String::new(),
+            relative_path: None,
+            position: GridPos { col: 0, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let toml_str = toml::to_string_pretty(&child).expect("serialize child component");
+        assert!(toml_str.contains("parent_id = \"parent_a\""));
+        assert!(toml_str.contains("kind = \"concept\""));
+        let parsed: Component = toml::from_str(&toml_str).expect("deserialize child component");
+        assert_eq!(parsed, child);
+
+        let conn = Connection {
+            from: "parent_a".to_string(),
+            to: "child_a".to_string(),
+            kind: EdgeKind::Contains,
+            label: None,
+        };
+        let conn_toml = toml::to_string_pretty(&conn).expect("serialize contains edge");
+        assert!(conn_toml.contains("kind = \"contains\""));
+        let parsed_conn: Connection =
+            toml::from_str(&conn_toml).expect("deserialize contains edge");
+        assert_eq!(parsed_conn, conn);
+
+        let parent = Component {
+            id: "parent_a".to_string(),
+            name: "Parent A".to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: None,
+            description: String::new(),
+            relative_path: None,
+            position: GridPos::default(),
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+        child.parent_id = Some("parent_a".to_string());
+        let project = Project {
+            config: ProjectConfig {
+                name: "Hierarchy".to_string(),
+                description: String::new(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig::default(),
+                connections: vec![conn],
+            },
+            components: vec![parent, child],
+        };
+
+        let subs = project.sub_components("parent_a");
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].id, "child_a");
+        assert!(project.sub_components("child_a").is_empty());
+    }
+
+    #[test]
+    fn legacy_component_toml_without_parent_id_deserializes() {
+        for (kind_str, expected_kind) in [
+            ("ui_view", ComponentKind::UiView),
+            ("data_stream", ComponentKind::DataStream),
+            ("service_core", ComponentKind::ServiceCore),
+            ("cli_tool", ComponentKind::CliTool),
+            ("storage", ComponentKind::Storage),
+            ("custom", ComponentKind::Custom),
+        ] {
+            let legacy_toml = format!(
+                r#"
+id = "legacy_node"
+name = "Legacy Node"
+kind = "{kind_str}"
+description = "Legacy fixture"
+tags = []
+tech_stack = []
+files = []
+flags = []
+features = []
+external_tasks = []
+
+[position]
+col = 0
+row = 0
+"#
+            );
+            let parsed: Component =
+                toml::from_str(&legacy_toml).expect("deserialize legacy component");
+            assert_eq!(parsed.kind, expected_kind);
+            assert_eq!(parsed.parent_id, None);
+        }
     }
 }

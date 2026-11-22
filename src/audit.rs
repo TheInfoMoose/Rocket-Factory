@@ -147,6 +147,7 @@ mod tests {
             id: id.to_string(),
             name: id.to_string(),
             kind: ComponentKind::Custom,
+            parent_id: None,
             description: String::new(),
             relative_path: None,
             position: GridPos::default(),

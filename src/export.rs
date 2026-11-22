@@ -28,6 +28,11 @@ pub struct ComponentManifestExport {
 
 pub fn map_component_type(kind: ComponentKind) -> &'static str {
     match kind {
+        ComponentKind::Concept => "concept",
+        ComponentKind::Interface => "interface",
+        ComponentKind::Logic => "logic",
+        ComponentKind::Data => "data",
+        ComponentKind::Integration => "integration",
         ComponentKind::UiView => "ui_crate",
         ComponentKind::DataStream => "rust_crate",
         ComponentKind::ServiceCore => "rust_crate",
@@ -122,6 +127,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             kind,
+            parent_id: None,
             description: format!("{name} description"),
             relative_path: Some(format!("crates/{id}")),
             position: GridPos::default(),

@@ -12,77 +12,63 @@ pub struct ArchetypeSpec {
 
 pub const ARCHETYPES: &[ArchetypeSpec] = &[
     ArchetypeSpec {
-        kind: ComponentKind::UiView,
-        label: "UI View",
-        summary: "Interactive presentation layer with bounded layout regions and input handling.",
-        default_tags: &["ui", "view"],
-        starter_features: &[
-            "Define layout and container bounds",
-            "Wire state bindings and input handling",
-        ],
-        markdown_template: "## Layout & Regions\n\nDescribe the container hierarchy, proportions, and widgets.\n\n## State & Input\n\n- Bound state fields\n- Keybindings and focus transitions\n",
+        kind: ComponentKind::Concept,
+        label: "Concept",
+        summary: "",
+        default_tags: &[],
+        starter_features: &[],
+        markdown_template: "## Notes\n\n",
     },
     ArchetypeSpec {
-        kind: ComponentKind::DataStream,
-        label: "Data Stream",
-        summary: "Structured ingestion, framing, and streaming data pipeline component.",
-        default_tags: &["data", "stream"],
-        starter_features: &[
-            "Define payload schema and framing",
-            "Implement producer/consumer pipeline",
-        ],
-        markdown_template: "## Schema & Framing\n\nSpecify message formats, boundaries, and serialization rules.\n\n## Pipeline Flow\n\n- Upstream producers\n- Backpressure and error handling\n",
+        kind: ComponentKind::Interface,
+        label: "Interface",
+        summary: "User-facing view, CLI, or API surface.",
+        default_tags: &["interface"],
+        starter_features: &[],
+        markdown_template: "## Interface\n\nDescribe views, commands, or endpoints.\n",
     },
     ArchetypeSpec {
-        kind: ComponentKind::ServiceCore,
-        label: "Service Core",
-        summary: "Core domain logic, state transitions, and internal API contracts.",
-        default_tags: &["core", "service"],
-        starter_features: &[
-            "Define domain API and error contracts",
-            "Implement core business logic",
-        ],
-        markdown_template: "## Domain Contracts\n\nDocument public types, invariants, and error conditions.\n\n## Responsibilities\n\n- Core operations\n- Collaborating components\n",
+        kind: ComponentKind::Logic,
+        label: "Logic",
+        summary: "Core domain rules, workflows, and state transitions.",
+        default_tags: &["logic"],
+        starter_features: &[],
+        markdown_template: "## Logic\n\nDescribe domain behavior, invariants, and rules.\n",
     },
     ArchetypeSpec {
-        kind: ComponentKind::CliTool,
-        label: "CLI Tool",
-        summary: "Command-line interface with argument parsing, subcommands, and formatted output.",
-        default_tags: &["cli"],
-        starter_features: &[
-            "Define argument parser and subcommands",
-            "Implement exit codes and output formatting",
-        ],
-        markdown_template: "## Commands & Flags\n\nList supported subcommands, arguments, and environment variables.\n\n## Output & Exit Codes\n\n- Human-readable and machine-readable modes\n- Error reporting and exit status conventions\n",
+        kind: ComponentKind::Data,
+        label: "Data",
+        summary: "Schemas, streams, caches, or durable storage.",
+        default_tags: &["data"],
+        starter_features: &[],
+        markdown_template: "## Data\n\nDescribe schemas, streams, or persistence format.\n",
     },
     ArchetypeSpec {
-        kind: ComponentKind::Storage,
-        label: "Storage",
-        summary: "Durable persistence layer with schema management and atomic read/write guarantees.",
-        default_tags: &["storage", "persistence"],
-        starter_features: &[
-            "Define persistence schema and migrations",
-            "Implement atomic read/write layer",
-        ],
-        markdown_template: "## Persistence Schema\n\nDocument on-disk formats, directory layout, and versioning.\n\n## Durability & Safety\n\n- Atomic write strategy\n- Validation and recovery behavior\n",
+        kind: ComponentKind::Integration,
+        label: "Integration",
+        summary: "External service connector, adapter, or protocol bridge.",
+        default_tags: &["integration"],
+        starter_features: &[],
+        markdown_template:
+            "## Integration\n\nDescribe external boundaries, protocols, and failure modes.\n",
     },
     ArchetypeSpec {
         kind: ComponentKind::Custom,
         label: "Custom",
-        summary: "General-purpose component blueprint for specialized project responsibilities.",
-        default_tags: &["custom"],
-        starter_features: &["Define component responsibilities"],
-        markdown_template: "## Overview\n\nDescribe the purpose, boundaries, and interfaces of this component.\n",
+        summary: "General-purpose component blueprint.",
+        default_tags: &[],
+        starter_features: &[],
+        markdown_template: "## Overview\n\nDescribe purpose and boundaries.\n",
     },
 ];
 
 pub fn archetype_for(kind: ComponentKind) -> &'static ArchetypeSpec {
     match kind {
-        ComponentKind::UiView => &ARCHETYPES[0],
-        ComponentKind::DataStream => &ARCHETYPES[1],
-        ComponentKind::ServiceCore => &ARCHETYPES[2],
-        ComponentKind::CliTool => &ARCHETYPES[3],
-        ComponentKind::Storage => &ARCHETYPES[4],
+        ComponentKind::Concept => &ARCHETYPES[0],
+        ComponentKind::Interface | ComponentKind::UiView | ComponentKind::CliTool => &ARCHETYPES[1],
+        ComponentKind::Logic | ComponentKind::ServiceCore => &ARCHETYPES[2],
+        ComponentKind::Data | ComponentKind::DataStream | ComponentKind::Storage => &ARCHETYPES[3],
+        ComponentKind::Integration => &ARCHETYPES[4],
         ComponentKind::Custom => &ARCHETYPES[5],
     }
 }
@@ -110,6 +96,7 @@ pub fn scaffold_component(
         id: id.to_string(),
         name: name.to_string(),
         kind,
+        parent_id: None,
         description: spec.summary.to_string(),
         relative_path: None,
         position,
@@ -127,38 +114,89 @@ pub fn scaffold_component(
     }
 }
 
+pub fn scaffold_sub_component(
+    id: &str,
+    name: &str,
+    kind: ComponentKind,
+    position: GridPos,
+    parent_id: &str,
+) -> Component {
+    let mut comp = scaffold_component(id, name, kind, position);
+    comp.parent_id = Some(parent_id.to_string());
+    comp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn archetype_covers_all_kinds() {
+    fn archetype_covers_all_broad_and_legacy_kinds() {
         for kind in [
-            ComponentKind::UiView,
-            ComponentKind::DataStream,
-            ComponentKind::ServiceCore,
-            ComponentKind::CliTool,
-            ComponentKind::Storage,
+            ComponentKind::Concept,
+            ComponentKind::Interface,
+            ComponentKind::Logic,
+            ComponentKind::Data,
+            ComponentKind::Integration,
             ComponentKind::Custom,
         ] {
             let spec = archetype_for(kind);
             assert_eq!(spec.kind, kind);
-            assert!(!spec.starter_features.is_empty());
+            assert!(spec.starter_features.is_empty());
         }
+
+        assert_eq!(
+            archetype_for(ComponentKind::UiView).kind,
+            ComponentKind::Interface
+        );
+        assert_eq!(
+            archetype_for(ComponentKind::CliTool).kind,
+            ComponentKind::Interface
+        );
+        assert_eq!(
+            archetype_for(ComponentKind::ServiceCore).kind,
+            ComponentKind::Logic
+        );
+        assert_eq!(
+            archetype_for(ComponentKind::DataStream).kind,
+            ComponentKind::Data
+        );
+        assert_eq!(
+            archetype_for(ComponentKind::Storage).kind,
+            ComponentKind::Data
+        );
     }
 
     #[test]
-    fn scaffold_ui_view_populates_features_and_markdown() {
+    fn scaffold_concept_is_minimal_and_blank() {
         let comp = scaffold_component(
-            "main_view",
-            "Main View",
-            ComponentKind::UiView,
+            "draft_idea",
+            "Draft Idea",
+            ComponentKind::Concept,
             GridPos { col: 2, row: 1 },
         );
-        assert_eq!(comp.id, "main_view");
-        assert_eq!(comp.features.len(), 2);
-        assert_eq!(comp.features[0].id, "main_view_f1");
-        assert!(comp.markdown_body.starts_with("# Main View\n\n"));
-        assert!(comp.tags.contains(&"ui".to_string()));
+        assert_eq!(comp.id, "draft_idea");
+        assert_eq!(comp.kind, ComponentKind::Concept);
+        assert_eq!(comp.parent_id, None);
+        assert!(comp.description.is_empty());
+        assert!(comp.tags.is_empty());
+        assert!(comp.features.is_empty());
+        assert_eq!(comp.markdown_body, "# Draft Idea\n\n## Notes\n\n");
+    }
+
+    #[test]
+    fn scaffold_sub_component_sets_parent_id() {
+        let comp = scaffold_sub_component(
+            "child_logic",
+            "Child Logic",
+            ComponentKind::Logic,
+            GridPos { col: 1, row: 0 },
+            "parent_core",
+        );
+        assert_eq!(comp.id, "child_logic");
+        assert_eq!(comp.kind, ComponentKind::Logic);
+        assert_eq!(comp.parent_id.as_deref(), Some("parent_core"));
+        assert!(comp.tags.contains(&"logic".to_string()));
+        assert!(comp.features.is_empty());
     }
 }
