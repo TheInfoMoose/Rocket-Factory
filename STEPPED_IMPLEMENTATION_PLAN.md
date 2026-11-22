@@ -24,11 +24,7 @@
 
 ### Up Next
 
-| # | Step | Command | Scope | Target Files | Waits on |
-| :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 9A** | `/goal` | tui | `src/tui/app.rs` | — |
-| 2 | **STEP 9B** | `/goal` | packaging | `Cargo.toml`, `LICENSE` | — |
-| 3 | **STEP 9C** | `/goal` | ci | `.github/workflows/ci.yml` | STEP 9B |
+_None — Phase 9 complete._
 
 ### Completed
 
@@ -71,6 +67,9 @@
 | **STEP 8C** | Withdrawn (→ 8E) | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
 | **STEP 8E** | Done (`001c983`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs`, `tests/e2e.rs` |
 | **STEP 8D** | Done (`9c40fd6`) | `/goal` | docs | `README.md` |
+| **STEP 9A** | Done (`890fc2b`) | `/goal` | tui | `src/tui/app.rs` |
+| **STEP 9B** | Done (`4a3affe`) | `/goal` | packaging | `Cargo.toml`, `LICENSE` |
+| **STEP 9C** | Done (`8a8b7d4`) | `/goal` | ci | `.github/workflows/ci.yml` |
 
 ### Future phases
 
