@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::archetype::scaffold_component;
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
-use crate::model::{CardStatus, Component, Connection, EdgeKind, GridPos, Project};
+use crate::model::{CardStatus, Component, Connection, EdgeKind, FeatureItem, GridPos, Project};
 use crate::storage::{save_component, save_project_config, ROCKET_DIR};
 use crate::theme::Theme;
 use crate::tui::canvas::CanvasViewport;
+use crate::tui::modal::{ModalAction, ModalState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Direction {
@@ -52,6 +54,7 @@ pub struct App {
     pub audit_findings: Vec<AuditFinding>,
     pub viewport: CanvasViewport,
     pub connect_source_id: Option<String>,
+    pub modal: Option<ModalState>,
 }
 
 impl App {
@@ -71,6 +74,7 @@ impl App {
             audit_findings,
             viewport: CanvasViewport::default(),
             connect_source_id: None,
+            modal: None,
         }
     }
 
@@ -344,9 +348,173 @@ impl App {
         self.status_message = msg;
     }
 
+    fn first_unoccupied_grid_pos(&self) -> GridPos {
+        for row in 0..self.project.config.grid.rows {
+            for col in 0..self.project.config.grid.cols {
+                let candidate = GridPos { col, row };
+                if !self
+                    .project
+                    .components
+                    .iter()
+                    .any(|comp| comp.position == candidate)
+                {
+                    return candidate;
+                }
+            }
+        }
+        GridPos::default()
+    }
+
+    fn apply_modal_action(&mut self, mut modal: ModalState, action: ModalAction) {
+        match action {
+            ModalAction::None => {
+                self.modal = Some(modal);
+            }
+            ModalAction::Cancel => {
+                self.mode = InputMode::Navigate;
+                self.status_message = "Mode: Navigate".to_string();
+            }
+            ModalAction::CreateComponent { id, name, kind } => {
+                if self.project.component(&id).is_some() {
+                    let err = format!("component id '{id}' already exists");
+                    if let ModalState::NewComponent(ref mut form) = modal {
+                        form.error = Some(err.clone());
+                    }
+                    self.status_message = err;
+                    self.modal = Some(modal);
+                    return;
+                }
+
+                let pos = self.first_unoccupied_grid_pos();
+                let comp = scaffold_component(&id, &name, kind, pos);
+
+                if self.root.join(ROCKET_DIR).exists() {
+                    if let Err(err) = save_component(&self.root, &comp) {
+                        let msg = format!("Failed to save {name}: {err}");
+                        if let ModalState::NewComponent(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        return;
+                    }
+                }
+
+                self.project.components.push(comp);
+                let new_comp_idx = self.project.components.len() - 1;
+                if let Some(vis_idx) = self
+                    .visible_component_indices()
+                    .iter()
+                    .position(|&idx| idx == new_comp_idx)
+                {
+                    self.selected_index = vis_idx;
+                    self.detail_scroll = 0;
+                }
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
+                self.status_message = format!("Created component {name} ({id})");
+            }
+            ModalAction::UpdateComponent {
+                component_id,
+                name,
+                description,
+                relative_path,
+                tags,
+                add_feature,
+            } => {
+                let Some(comp) = self.project.component_mut(&component_id) else {
+                    self.mode = InputMode::Navigate;
+                    self.status_message = format!("Component '{component_id}' not found");
+                    return;
+                };
+
+                comp.name = name.clone();
+                comp.description = description;
+                comp.relative_path = relative_path;
+                comp.tags = tags;
+
+                if let Some(title) = add_feature {
+                    let mut next_num = comp.features.len() + 1;
+                    let mut feat_id = format!("{component_id}_f{next_num}");
+                    while comp.features.iter().any(|f| f.id == feat_id) {
+                        next_num += 1;
+                        feat_id = format!("{component_id}_f{next_num}");
+                    }
+                    comp.features.push(FeatureItem {
+                        id: feat_id,
+                        title,
+                        pushed: false,
+                        external_id: None,
+                    });
+                }
+
+                let save_result = if self.root.join(ROCKET_DIR).exists() {
+                    save_component(&self.root, comp)
+                } else {
+                    Ok(())
+                };
+
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
+                match save_result {
+                    Ok(()) => {
+                        self.status_message = format!("Updated component {name}");
+                    }
+                    Err(err) => {
+                        self.status_message = format!("Failed to save {name}: {err}");
+                    }
+                }
+            }
+            ModalAction::UpdateConnection {
+                from,
+                to,
+                kind,
+                label,
+            } => {
+                let Some(conn) = self
+                    .project
+                    .config
+                    .connections
+                    .iter_mut()
+                    .find(|c| c.from == from && c.to == to)
+                else {
+                    self.mode = InputMode::Navigate;
+                    self.status_message = format!("Connection {from} -> {to} not found");
+                    return;
+                };
+
+                conn.kind = kind;
+                conn.label = label;
+
+                let save_result = if self.root.join(ROCKET_DIR).exists() {
+                    save_project_config(&self.root, &self.project.config)
+                } else {
+                    Ok(())
+                };
+
+                self.refresh_audit();
+                self.mode = InputMode::Navigate;
+                match save_result {
+                    Ok(()) => {
+                        self.status_message = format!("Updated connection {from} -> {to}");
+                    }
+                    Err(err) => {
+                        self.status_message = format!("Failed to save connections: {err}");
+                    }
+                }
+            }
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
+            return;
+        }
+
+        if let Some(mut modal) = self.modal.take() {
+            let action = modal.handle_key(key);
+            self.apply_modal_action(modal, action);
             return;
         }
 
@@ -362,6 +530,52 @@ impl App {
             KeyCode::Tab => self.cycle_focus_next(),
             KeyCode::BackTab => self.cycle_focus_prev(),
             KeyCode::Char('f') => self.toggle_gaps_filter(),
+            KeyCode::Char('n') => {
+                self.connect_source_id = None;
+                self.modal = Some(ModalState::new_component());
+                self.mode = InputMode::Modal;
+                self.status_message = "New Component".to_string();
+            }
+            KeyCode::Char('e') => {
+                if let Some(comp) = self.selected_component() {
+                    let name = comp.name.clone();
+                    self.modal = Some(ModalState::edit_component(comp));
+                    self.connect_source_id = None;
+                    self.mode = InputMode::Modal;
+                    self.status_message = format!("Editing {name}");
+                } else {
+                    self.status_message = "No component selected to edit".to_string();
+                }
+            }
+            KeyCode::Char('E') => {
+                if let Some(comp) = self.selected_component() {
+                    let comp_id = comp.id.clone();
+                    let comp_name = comp.name.clone();
+                    if let Some(conn) = self
+                        .project
+                        .config
+                        .connections
+                        .iter()
+                        .find(|c| c.from == comp_id)
+                    {
+                        self.modal = Some(ModalState::edit_connection(
+                            &conn.from,
+                            &conn.to,
+                            conn.kind,
+                            conn.label.as_deref(),
+                        ));
+                        self.connect_source_id = None;
+                        self.mode = InputMode::Modal;
+                        self.status_message =
+                            format!("Editing connection {} -> {}", conn.from, conn.to);
+                    } else {
+                        self.status_message =
+                            format!("No outgoing connection from {comp_name} to edit");
+                    }
+                } else {
+                    self.status_message = "No component selected".to_string();
+                }
+            }
             KeyCode::Char('m') => {
                 if self.mode == InputMode::MoveCard {
                     self.mode = InputMode::Navigate;
@@ -648,5 +862,158 @@ mod tests {
         assert!(app.project.config.connections.is_empty());
         let reloaded_after = load_project(dir.path()).expect("reload project");
         assert!(reloaded_after.config.connections.is_empty());
+    }
+
+    fn type_keys(app: &mut App, text: &str) {
+        for ch in text.chars() {
+            app.handle_key(key(KeyCode::Char(ch)));
+        }
+    }
+
+    #[test]
+    fn app_new_component_modal_scaffolds_persists_selects_and_rejects_duplicate() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir.path(), "Modal Test", "New component modal test")
+            .expect("init workspace");
+
+        let mut existing = make_component("alpha");
+        existing.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &existing).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Open New Component modal with 'n'
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+
+        // Type ID, tab to Name, type Name, tab to Archetype, cycle right to DataStream, submit
+        type_keys(&mut app, "telemetry_bus");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Telemetry Bus");
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Enter));
+
+        // Modal closes back to Navigate, component is added, scaffolded, selected, and persisted
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.components.len(), 2);
+        let selected = app.selected_component().expect("new component selected");
+        assert_eq!(selected.id, "telemetry_bus");
+        assert_eq!(selected.name, "Telemetry Bus");
+        assert_eq!(selected.kind, ComponentKind::DataStream);
+        assert_eq!(selected.position, GridPos { col: 1, row: 0 });
+        assert!(!selected.features.is_empty());
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert!(reloaded.component("telemetry_bus").is_some());
+
+        // Duplicate ID is rejected cleanly and keeps modal open with error
+        app.handle_key(key(KeyCode::Char('n')));
+        type_keys(&mut app, "telemetry_bus");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Duplicate");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        assert_eq!(app.project.components.len(), 2);
+        if let Some(ModalState::NewComponent(ref form)) = app.modal {
+            assert!(form
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("already exists"));
+        } else {
+            panic!("expected NewComponent modal to remain open");
+        }
+
+        // Esc cancels back to Navigate
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn app_edit_component_and_connection_modals_update_and_persist() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir.path(), "Edit Modal Test", "Edit component and edge")
+            .expect("init workspace");
+
+        let mut a = make_component("alpha");
+        a.position = GridPos { col: 0, row: 0 };
+        let mut b = make_component("beta");
+        b.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &a).expect("save alpha");
+        save_component(dir.path(), &b).expect("save beta");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // 'E' with no outgoing connection sets a helpful status message
+        app.handle_key(key(KeyCode::Char('E')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert!(app.status_message.contains("No outgoing connection"));
+
+        // Edit selected component ('alpha') with 'e' and add a feature
+        app.handle_key(key(KeyCode::Char('e')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Tab)); // description
+        type_keys(&mut app, "Core alpha service");
+        app.handle_key(key(KeyCode::Tab)); // path
+        type_keys(&mut app, "src/alpha.rs");
+        app.handle_key(key(KeyCode::Tab)); // tags
+        type_keys(&mut app, "core, api");
+        app.handle_key(key(KeyCode::Tab)); // add feature
+        type_keys(&mut app, "Expose health endpoint");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        let alpha = app.project.component("alpha").expect("alpha exists");
+        assert_eq!(alpha.description, "Core alpha service");
+        assert_eq!(alpha.relative_path.as_deref(), Some("src/alpha.rs"));
+        assert_eq!(alpha.tags, vec!["core", "api"]);
+        assert_eq!(alpha.features.len(), 1);
+        assert_eq!(alpha.features[0].title, "Expose health endpoint");
+
+        // Add an outgoing connection and edit it with 'E'
+        app.project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+        app.handle_key(key(KeyCode::Char('E')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Right)); // DependsOn -> DataFlow
+        app.handle_key(key(KeyCode::Tab)); // label
+        type_keys(&mut app, "events");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::DataFlow);
+        assert_eq!(
+            app.project.config.connections[0].label.as_deref(),
+            Some("events")
+        );
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(reloaded.component("alpha").unwrap().features.len(), 1);
+        assert_eq!(reloaded.config.connections[0].kind, EdgeKind::DataFlow);
+        assert_eq!(
+            reloaded.config.connections[0].label.as_deref(),
+            Some("events")
+        );
     }
 }

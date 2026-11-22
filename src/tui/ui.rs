@@ -1,11 +1,13 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::audit::{compute_card_status, task_progress};
+use crate::theme::Theme;
 use crate::tui::app::{App, FocusColumn, ListFilter};
+use crate::tui::modal::{edge_kind_label, ModalState};
 use crate::tui::style;
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -33,6 +35,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_detail_panel(frame, cols[2], app);
 
     render_footer(frame, chunks[2], app);
+
+    if let Some(modal) = &app.modal {
+        render_modal(frame, area, modal, &app.theme);
+    }
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -251,10 +257,152 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     let footer = Paragraph::new(
-        " [Tab] Focus  [j/k ↑/↓] Navigate/Scroll  [f] Gaps Filter  [m] Move  [c] Connect  [q] Quit",
+        " [Tab] Focus  [j/k ↑/↓] Navigate  [n] New  [e] Edit  [E] Edge  [f] Gaps  [m] Move  [c] Connect  [q] Quit",
     )
     .style(style::muted_style(&app.theme));
     frame.render_widget(footer, area);
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    let x = area.x.saturating_add(area.width.saturating_sub(w) / 2);
+    let y = area.y.saturating_add(area.height.saturating_sub(h) / 2);
+    Rect::new(x, y, w, h)
+}
+
+fn modal_field_line(label: &str, value: &str, active: bool, theme: &Theme) -> Line<'static> {
+    let prefix = if active { "> " } else { "  " };
+    let field_style = if active {
+        style::selected_row_style(theme)
+    } else {
+        style::base_style(theme)
+    };
+    Line::from(Span::styled(
+        format!("{prefix}{label}: {value}"),
+        field_style,
+    ))
+}
+
+fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalState, theme: &Theme) {
+    let base = style::base_style(theme);
+    let muted = style::muted_style(theme);
+    let error_style = Style::default()
+        .fg(style::to_color(theme.palette.alert_error))
+        .add_modifier(Modifier::BOLD);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let error_text = match modal {
+        ModalState::NewComponent(form) => {
+            lines.push(modal_field_line(
+                "ID",
+                &form.id,
+                form.active_field == 0,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Name",
+                &form.name,
+                form.active_field == 1,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Archetype",
+                &format!("< {} >", form.selected_archetype().label),
+                form.active_field == 2,
+                theme,
+            ));
+            form.error.as_deref()
+        }
+        ModalState::EditComponent(form) => {
+            lines.push(Line::from(Span::styled(
+                format!("  ID: {}", form.component_id),
+                muted,
+            )));
+            lines.push(modal_field_line(
+                "Name",
+                &form.name,
+                form.active_field == 0,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Description",
+                &form.description,
+                form.active_field == 1,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Path",
+                &form.relative_path,
+                form.active_field == 2,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Tags",
+                &form.tags,
+                form.active_field == 3,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Add Feature",
+                &form.new_feature,
+                form.active_field == 4,
+                theme,
+            ));
+            form.error.as_deref()
+        }
+        ModalState::EditConnection(form) => {
+            lines.push(Line::from(Span::styled(
+                format!("  Edge: {} -> {}", form.from, form.to),
+                muted,
+            )));
+            lines.push(modal_field_line(
+                "Kind",
+                &format!("< {} >", edge_kind_label(form.selected_kind())),
+                form.active_field == 0,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Label",
+                &form.label,
+                form.active_field == 1,
+                theme,
+            ));
+            form.error.as_deref()
+        }
+    };
+
+    if let Some(err) = error_text {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  Error: {err}"),
+            error_style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel",
+        muted,
+    )));
+
+    let popup_width = (area.width * 60 / 100).clamp(54, 76);
+    let popup_height = (lines.len() as u16).saturating_add(2);
+    let popup_area = centered_rect(popup_width, popup_height, area);
+
+    let block = Block::default()
+        .title(format!(" {} ", modal.title()))
+        .borders(Borders::ALL)
+        .border_style(style::panel_border_style(theme, true))
+        .style(base);
+
+    let content = Paragraph::new(lines)
+        .style(base)
+        .wrap(Wrap { trim: false })
+        .block(block);
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(content, popup_area);
 }
 
 #[cfg(test)]
@@ -382,5 +530,27 @@ mod tests {
         assert!(text.contains("Tasks 0/0"));
         assert!(text.contains("Tasks 1/1"));
         assert!(text.contains('▶'));
+    }
+
+    #[test]
+    fn render_modal_overlay_displays_title_fields_error_and_hints() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = make_test_app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        // Trigger validation error on empty submission
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let text = render_to_string(&app);
+
+        assert!(text.contains("New Component"));
+        assert!(text.contains("ID:"));
+        assert!(text.contains("Name:"));
+        assert!(text.contains("Archetype:"));
+        assert!(text.contains("Error:"));
+        assert!(text.contains("Tab"));
+        assert!(text.contains("←/→"));
+        assert!(text.contains("Enter"));
+        assert!(text.contains("Esc"));
     }
 }
