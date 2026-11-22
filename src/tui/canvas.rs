@@ -19,10 +19,84 @@ pub const GUTTER_Y: u16 = 2;
 pub const CELL_STRIDE_X: u16 = CARD_WIDTH + GUTTER_X;
 pub const CELL_STRIDE_Y: u16 = CARD_HEIGHT + GUTTER_Y;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardMetrics {
+    pub card_width: u16,
+    pub card_height: u16,
+    pub gutter_x: u16,
+    pub gutter_y: u16,
+}
+
+impl CardMetrics {
+    pub fn stride_x(self) -> u16 {
+        self.card_width.saturating_add(self.gutter_x)
+    }
+
+    pub fn stride_y(self) -> u16 {
+        self.card_height.saturating_add(self.gutter_y)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ZoomLevel {
+    #[default]
+    Compact,
+    Normal,
+    Expanded,
+}
+
+impl ZoomLevel {
+    pub fn zoom_in(self) -> Self {
+        match self {
+            Self::Compact => Self::Normal,
+            Self::Normal | Self::Expanded => Self::Expanded,
+        }
+    }
+
+    pub fn zoom_out(self) -> Self {
+        match self {
+            Self::Expanded => Self::Normal,
+            Self::Normal | Self::Compact => Self::Compact,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Normal => "Normal",
+            Self::Expanded => "Expanded",
+        }
+    }
+
+    pub fn metrics(self) -> CardMetrics {
+        match self {
+            Self::Compact => CardMetrics {
+                card_width: 14,
+                card_height: 4,
+                gutter_x: 2,
+                gutter_y: 1,
+            },
+            Self::Normal => CardMetrics {
+                card_width: CARD_WIDTH,
+                card_height: CARD_HEIGHT,
+                gutter_x: GUTTER_X,
+                gutter_y: GUTTER_Y,
+            },
+            Self::Expanded => CardMetrics {
+                card_width: 30,
+                card_height: 7,
+                gutter_x: 4,
+                gutter_y: 2,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CanvasViewport {
     pub scroll_col: u16,
     pub scroll_row: u16,
+    pub zoom: ZoomLevel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,40 +112,72 @@ pub fn card_rect(inner: Rect, viewport: CanvasViewport, pos: GridPos) -> Option<
         return None;
     }
 
+    let metrics = viewport.zoom.metrics();
     let rel_col = pos.col - viewport.scroll_col;
     let rel_row = pos.row - viewport.scroll_row;
 
     let x = inner
         .x
         .saturating_add(1)
-        .saturating_add(rel_col.saturating_mul(CELL_STRIDE_X));
+        .saturating_add(rel_col.saturating_mul(metrics.stride_x()));
     let y = inner
         .y
         .saturating_add(1)
-        .saturating_add(rel_row.saturating_mul(CELL_STRIDE_Y));
+        .saturating_add(rel_row.saturating_mul(metrics.stride_y()));
 
-    if x.saturating_add(CARD_WIDTH) > inner.x.saturating_add(inner.width)
-        || y.saturating_add(CARD_HEIGHT) > inner.y.saturating_add(inner.height)
+    let max_x = inner.x.saturating_add(inner.width);
+    let max_y = inner.y.saturating_add(inner.height);
+
+    if x.saturating_add(metrics.card_width) <= max_x
+        && y.saturating_add(metrics.card_height) <= max_y
     {
-        return None;
+        return Some(Rect {
+            x,
+            y,
+            width: metrics.card_width,
+            height: metrics.card_height,
+        });
     }
 
-    Some(Rect {
-        x,
-        y,
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
-    })
+    if rel_col == 0 && rel_row == 0 && inner.width >= 4 && inner.height >= 3 {
+        let width = metrics.card_width.min(max_x.saturating_sub(x));
+        let height = metrics.card_height.min(max_y.saturating_sub(y));
+        if width >= 3 && height >= 2 {
+            return Some(Rect {
+                x,
+                y,
+                width,
+                height,
+            });
+        }
+    }
+
+    None
 }
 
-pub fn visible_grid_capacity(inner: Rect) -> (u16, u16) {
-    let cols = (inner.width.saturating_sub(1).saturating_add(GUTTER_X) / CELL_STRIDE_X).max(1);
-    let rows = (inner.height.saturating_sub(1).saturating_add(GUTTER_Y) / CELL_STRIDE_Y).max(1);
+pub fn visible_grid_capacity_for(inner: Rect, zoom: ZoomLevel) -> (u16, u16) {
+    let metrics = zoom.metrics();
+    let cols = (inner
+        .width
+        .saturating_sub(1)
+        .saturating_add(metrics.gutter_x)
+        / metrics.stride_x())
+    .max(1);
+    let rows = (inner
+        .height
+        .saturating_sub(1)
+        .saturating_add(metrics.gutter_y)
+        / metrics.stride_y())
+    .max(1);
     (cols, rows)
 }
 
+pub fn visible_grid_capacity(inner: Rect) -> (u16, u16) {
+    visible_grid_capacity_for(inner, ZoomLevel::Normal)
+}
+
 pub fn ensure_visible(inner: Rect, viewport: &mut CanvasViewport, pos: GridPos) {
-    let (vis_cols, vis_rows) = visible_grid_capacity(inner);
+    let (vis_cols, vis_rows) = visible_grid_capacity_for(inner, viewport.zoom);
 
     if pos.col < viewport.scroll_col {
         viewport.scroll_col = pos.col;
@@ -416,9 +522,12 @@ fn edge_kind_tag(kind: EdgeKind) -> &'static str {
 }
 
 pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasViewport) {
+    let grid = app.effective_grid();
     let title = format!(
-        " Snap Grid ({}x{}) ",
-        app.project.config.grid.cols, app.project.config.grid.rows
+        " Snap Grid ({}x{}) [{}] ",
+        grid.cols,
+        grid.rows,
+        viewport.zoom.label()
     );
     let block = Block::bordered()
         .title(title)
@@ -454,11 +563,14 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             continue;
         };
 
-        let edge_label = conn
-            .label
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .or(Some(edge_kind_tag(conn.kind)));
+        let edge_label = if viewport.zoom == ZoomLevel::Compact {
+            None
+        } else {
+            conn.label
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .or(Some(edge_kind_tag(conn.kind)))
+        };
         let routed = route_orthogonal_edge(from_rect, to_rect, edge_label, inner);
 
         let is_highlighted =
@@ -545,6 +657,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         }
 
         let inner_w = rect.width.saturating_sub(2) as usize;
+        let inner_h = rect.height.saturating_sub(2) as usize;
         let sub_count = app.project.sub_components(&comp.id).len();
         let line1 = if sub_count > 0 {
             let badge = if app.is_expanded(&comp.id) {
@@ -564,25 +677,56 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             truncate_text(&format!("{glyph} {}", comp.name), inner_w)
         };
         let archetype = archetype_for(comp.kind);
-        let line2 = truncate_text(
-            &format!(
-                "Tasks {}/{} [{}]",
-                progress.complete, progress.total, archetype.label
-            ),
-            inner_w,
-        );
-        let line3 = truncate_text(&comp.description, inner_w);
+        let mut lines = match viewport.zoom {
+            ZoomLevel::Compact => vec![
+                Line::from(line1),
+                Line::from(truncate_text(
+                    &format!("Tasks {}/{}", progress.complete, progress.total),
+                    inner_w,
+                )),
+            ],
+            ZoomLevel::Normal => vec![
+                Line::from(line1),
+                Line::from(truncate_text(
+                    &format!(
+                        "Tasks {}/{} [{}]",
+                        progress.complete, progress.total, archetype.label
+                    ),
+                    inner_w,
+                )),
+                Line::from(truncate_text(&comp.description, inner_w)),
+            ],
+            ZoomLevel::Expanded => {
+                let tags_summary = if comp.tags.is_empty() {
+                    "Tags: -".to_string()
+                } else {
+                    format!("Tags: {}", comp.tags.join(", "))
+                };
+                vec![
+                    Line::from(line1),
+                    Line::from(truncate_text(
+                        &format!(
+                            "Tasks {}/{} [{}]",
+                            progress.complete, progress.total, archetype.label
+                        ),
+                        inner_w,
+                    )),
+                    Line::from(truncate_text(&comp.description, inner_w)),
+                    Line::from(truncate_text(&tags_summary, inner_w)),
+                    Line::from(truncate_text(
+                        &format!("Feat: {} | Sub: {}", comp.features.len(), sub_count),
+                        inner_w,
+                    )),
+                ]
+            }
+        };
+        lines.truncate(inner_h);
 
         let card_block = Block::bordered()
             .border_type(border_type)
             .border_style(border_style)
             .style(style::base_style(&app.theme));
-        let paragraph = Paragraph::new(vec![
-            Line::from(line1),
-            Line::from(line2),
-            Line::from(line3),
-        ])
-        .block(card_block);
+        let paragraph = Paragraph::new(lines).block(card_block);
 
         frame.render_widget(paragraph, rect);
     }
@@ -595,7 +739,10 @@ mod tests {
     #[test]
     fn card_rect_projects_grid_positions_and_culls_offscreen() {
         let inner = Rect::new(0, 0, 60, 20);
-        let viewport = CanvasViewport::default();
+        let viewport = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
 
         assert_eq!(
             card_rect(inner, viewport, GridPos { col: 0, row: 0 }),
@@ -730,13 +877,21 @@ mod tests {
         App::new(PathBuf::from("/tmp/example-project"), project, theme)
     }
 
-    fn render_canvas_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    fn render_canvas_buffer_with_zoom(
+        app: &App,
+        width: u16,
+        height: u16,
+        zoom: ZoomLevel,
+    ) -> ratatui::buffer::Buffer {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        let viewport = CanvasViewport::default();
+        let viewport = CanvasViewport {
+            zoom,
+            ..Default::default()
+        };
         terminal
             .draw(|frame| {
                 let area = frame.area();
@@ -744,6 +899,10 @@ mod tests {
             })
             .unwrap();
         terminal.backend().buffer().clone()
+    }
+
+    fn render_canvas_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        render_canvas_buffer_with_zoom(app, width, height, ZoomLevel::Normal)
     }
 
     fn row_text(buf: &ratatui::buffer::Buffer, y: u16) -> String {
@@ -761,8 +920,11 @@ mod tests {
         );
         let buf = render_canvas_buffer(&app, 60, 15);
         let inner = Rect::new(1, 1, 58, 13);
-        let to_rect =
-            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 0 }).unwrap();
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let to_rect = card_rect(inner, normal_vp, GridPos { col: 1, row: 0 }).unwrap();
         let edge_y = to_rect.y + to_rect.height / 2;
 
         assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
@@ -778,8 +940,11 @@ mod tests {
         );
         let buf = render_canvas_buffer(&app, 60, 15);
         let inner = Rect::new(1, 1, 58, 13);
-        let to_rect =
-            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 0 }).unwrap();
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let to_rect = card_rect(inner, normal_vp, GridPos { col: 1, row: 0 }).unwrap();
         let edge_y = to_rect.y + to_rect.height / 2;
 
         assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
@@ -797,8 +962,11 @@ mod tests {
         );
         let buf = render_canvas_buffer(&app, 90, 15);
         let inner = Rect::new(1, 1, 88, 13);
-        let to_rect =
-            card_rect(inner, CanvasViewport::default(), GridPos { col: 2, row: 0 }).unwrap();
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let to_rect = card_rect(inner, normal_vp, GridPos { col: 2, row: 0 }).unwrap();
         let edge_y = to_rect.y + to_rect.height / 2;
 
         assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
@@ -836,10 +1004,12 @@ mod tests {
         );
         let buf = render_canvas_buffer(&app, 70, 20);
         let inner = Rect::new(1, 1, 68, 18);
-        let from_rect =
-            card_rect(inner, CanvasViewport::default(), GridPos { col: 0, row: 0 }).unwrap();
-        let to_rect =
-            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 1 }).unwrap();
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let from_rect = card_rect(inner, normal_vp, GridPos { col: 0, row: 0 }).unwrap();
+        let to_rect = card_rect(inner, normal_vp, GridPos { col: 1, row: 1 }).unwrap();
         let expected = route_orthogonal_edge(from_rect, to_rect, Some("events"), inner);
 
         for &(x, y, ch) in &expected.segments {
@@ -896,5 +1066,76 @@ mod tests {
         assert!(expanded_text.contains("[-1]"));
         assert!(!expanded_text.contains("[+1]"));
         assert!(expanded_text.contains("Alpha Child"));
+    }
+
+    #[test]
+    fn zoom_level_transitions_and_compact_4x4_capacity() {
+        use crate::model::FeatureItem;
+
+        assert_eq!(ZoomLevel::default(), ZoomLevel::Compact);
+        assert_eq!(ZoomLevel::Compact.zoom_in(), ZoomLevel::Normal);
+        assert_eq!(ZoomLevel::Normal.zoom_in(), ZoomLevel::Expanded);
+        assert_eq!(ZoomLevel::Expanded.zoom_in(), ZoomLevel::Expanded);
+        assert_eq!(ZoomLevel::Expanded.zoom_out(), ZoomLevel::Normal);
+        assert_eq!(ZoomLevel::Normal.zoom_out(), ZoomLevel::Compact);
+        assert_eq!(ZoomLevel::Compact.zoom_out(), ZoomLevel::Compact);
+
+        let compact_inner = Rect::new(0, 0, 63, 20);
+        let (cols, rows) = visible_grid_capacity_for(compact_inner, ZoomLevel::Compact);
+        assert!(cols >= 4 && rows >= 4, "expected >=4x4, got {cols}x{rows}");
+        assert!(card_rect(
+            compact_inner,
+            CanvasViewport::default(),
+            GridPos { col: 3, row: 3 }
+        )
+        .is_some());
+
+        // Compact suppresses edge text labels while preserving arrowheads.
+        let mut app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 0 },
+            Some("dep"),
+        );
+        let compact_buf = render_canvas_buffer_with_zoom(&app, 65, 22, ZoomLevel::Compact);
+        let compact_text: String = (0..compact_buf.area.height)
+            .map(|y| row_text(&compact_buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(compact_text.contains("[Compact]"));
+        assert!(compact_text.contains('▶'));
+        assert!(!compact_text.contains("dep"));
+
+        // Expanded renders extra metadata lines (tags and features/sub-components summary).
+        app.project.components[0].tags = vec!["ui".to_string(), "core".to_string()];
+        app.project.components[0].features = vec![FeatureItem {
+            id: "feat_1".to_string(),
+            title: "Render canvas".to_string(),
+            pushed: false,
+            external_id: None,
+        }];
+        let expanded_buf = render_canvas_buffer_with_zoom(&app, 80, 14, ZoomLevel::Expanded);
+        let expanded_text: String = (0..expanded_buf.area.height)
+            .map(|y| row_text(&expanded_buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(expanded_text.contains("[Expanded]"));
+        assert!(expanded_text.contains("Tags: ui, core"));
+        assert!(expanded_text.contains("Feat: 1 | Sub: 0"));
+
+        // Narrow-canvas fallback clamps the top-left visible card instead of drawing zero cards.
+        let narrow_inner = Rect::new(0, 0, 20, 6);
+        let expanded_vp = CanvasViewport {
+            zoom: ZoomLevel::Expanded,
+            ..Default::default()
+        };
+        let fallback_rect =
+            card_rect(narrow_inner, expanded_vp, GridPos { col: 0, row: 0 }).unwrap();
+        assert_eq!(fallback_rect, Rect::new(1, 1, 19, 5));
+        let narrow_buf = render_canvas_buffer_with_zoom(&app, 22, 8, ZoomLevel::Expanded);
+        let narrow_text: String = (0..narrow_buf.area.height)
+            .map(|y| row_text(&narrow_buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(narrow_text.contains("Alpha"));
     }
 }

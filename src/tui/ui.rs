@@ -15,6 +15,22 @@ use crate::tui::modal::{
 };
 use crate::tui::style;
 
+pub fn column_layout(area: Rect) -> [Rect; 3] {
+    let left_w = ((u32::from(area.width) * 19 / 100) as u16)
+        .clamp(14, 22)
+        .min(area.width / 3);
+    let right_w = ((u32::from(area.width) * 25 / 100) as u16)
+        .clamp(18, 30)
+        .min(area.width / 3);
+    let cols = Layout::horizontal([
+        Constraint::Length(left_w),
+        Constraint::Min(0),
+        Constraint::Length(right_w),
+    ])
+    .split(area);
+    [cols[0], cols[1], cols[2]]
+}
+
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     frame.render_widget(Block::default().style(style::base_style(&app.theme)), area);
@@ -28,15 +44,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_header(frame, chunks[0], app);
 
-    let cols = Layout::horizontal([
-        Constraint::Percentage(24),
-        Constraint::Percentage(48),
-        Constraint::Percentage(28),
-    ])
-    .split(chunks[1]);
+    let cols = column_layout(chunks[1]);
+
+    let canvas_inner = Block::default().borders(Borders::ALL).inner(cols[1]);
+    let (vis_cols, vis_rows) =
+        crate::tui::canvas::visible_grid_capacity_for(canvas_inner, app.viewport.zoom);
+    app.last_canvas_capacity = Some((vis_cols, vis_rows));
 
     if let Some(selected_pos) = app.selected_component().map(|selected| selected.position) {
-        let canvas_inner = Block::default().borders(Borders::ALL).inner(cols[1]);
         crate::tui::canvas::ensure_visible(canvas_inner, &mut app.viewport, selected_pos);
     }
 
@@ -949,6 +964,7 @@ mod tests {
     #[test]
     fn render_component_list_shows_expand_collapse_indicators_and_nested_indentation() {
         let mut app = make_test_app();
+        app.viewport.zoom = crate::tui::canvas::ZoomLevel::Normal;
         app.project.components.push(Component {
             id: "bus_worker".to_string(),
             name: "bus_worker".to_string(),
@@ -1041,5 +1057,70 @@ mod tests {
         assert!(child_detail.contains("Parent: core_bus"));
         assert!(child_detail.contains("Sub-components:"));
         assert!(child_detail.contains("(none)"));
+    }
+
+    #[test]
+    fn column_layout_widens_canvas_and_renders_4x4_compact_grid() {
+        use crate::tui::canvas::ZoomLevel;
+
+        let cols = column_layout(Rect::new(0, 0, 140, 40));
+        assert!(
+            cols[1].width * 100 >= 140 * 60,
+            "expected middle column >=60% on 140-col terminal, got {}",
+            cols[1].width
+        );
+
+        let mut app = make_test_app();
+        app.project.config.grid = GridConfig { cols: 2, rows: 2 };
+        app.project.components.clear();
+        for row in 0..4u16 {
+            for col in 0..4u16 {
+                let idx = row * 4 + col;
+                app.project.components.push(Component {
+                    id: format!("n{idx:02}"),
+                    name: format!("N{idx:02}"),
+                    kind: ComponentKind::Logic,
+                    parent_id: None,
+                    description: "Grid card".to_string(),
+                    relative_path: Some(format!("src/n{idx:02}.rs")),
+                    position: GridPos { col, row },
+                    tags: Vec::new(),
+                    tech_stack: Vec::new(),
+                    files: Vec::new(),
+                    flags: Vec::new(),
+                    features: Vec::new(),
+                    external_tasks: Vec::new(),
+                    markdown_body: String::new(),
+                });
+            }
+        }
+
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+        // Saved project grid config must not be mutated during render.
+        assert_eq!(app.project.config.grid, GridConfig { cols: 2, rows: 2 });
+        let (vis_cols, vis_rows) = app
+            .last_canvas_capacity
+            .expect("render updates last_canvas_capacity");
+        assert!(vis_cols >= 4 && vis_rows >= 4);
+
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(text.contains("[Compact]"));
+        for idx in 0..16u16 {
+            assert!(
+                text.contains(&format!("N{idx:02}")),
+                "expected card N{idx:02} in 4x4 compact canvas"
+            );
+        }
     }
 }

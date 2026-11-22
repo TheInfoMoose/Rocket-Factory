@@ -11,7 +11,8 @@ use crate::archetype::{scaffold_component, scaffold_sub_component};
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
 use crate::error::{RfError, RfResult};
 use crate::model::{
-    CardStatus, Component, ComponentKind, Connection, EdgeKind, FeatureItem, GridPos, Project,
+    CardStatus, Component, ComponentKind, Connection, EdgeKind, FeatureItem, GridConfig, GridPos,
+    Project,
 };
 use crate::storage::{
     save_component, save_project_config, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
@@ -70,6 +71,7 @@ pub struct App {
     pub should_quit: bool,
     pub audit_findings: Vec<AuditFinding>,
     pub viewport: CanvasViewport,
+    pub last_canvas_capacity: Option<(u16, u16)>,
     pub connect_source_id: Option<String>,
     pub modal: Option<ModalState>,
     pub pending_editor_component: Option<String>,
@@ -95,6 +97,7 @@ impl App {
             should_quit: false,
             audit_findings,
             viewport: CanvasViewport::default(),
+            last_canvas_capacity: None,
             connect_source_id: None,
             modal: None,
             pending_editor_component: None,
@@ -105,6 +108,24 @@ impl App {
 
     pub fn refresh_audit(&mut self) {
         self.audit_findings = audit_project(&self.project);
+    }
+
+    pub fn effective_grid(&self) -> GridConfig {
+        let (vis_cols, vis_rows) = self.last_canvas_capacity.unwrap_or((0, 0));
+        GridConfig {
+            cols: self.project.config.grid.cols.max(vis_cols),
+            rows: self.project.config.grid.rows.max(vis_rows),
+        }
+    }
+
+    pub fn zoom_in(&mut self) {
+        self.viewport.zoom = self.viewport.zoom.zoom_in();
+        self.status_message = format!("Zoom: {}", self.viewport.zoom.label());
+    }
+
+    pub fn zoom_out(&mut self) {
+        self.viewport.zoom = self.viewport.zoom.zoom_out();
+        self.status_message = format!("Zoom: {}", self.viewport.zoom.label());
     }
 
     pub fn reload_component_markdown(&mut self, component_id: &str) -> RfResult<()> {
@@ -488,8 +509,9 @@ impl App {
             return;
         };
 
-        let max_col = self.project.config.grid.cols.saturating_sub(1);
-        let max_row = self.project.config.grid.rows.saturating_sub(1);
+        let grid = self.effective_grid();
+        let max_col = grid.cols.saturating_sub(1);
+        let max_row = grid.rows.saturating_sub(1);
         let current_pos = comp.position;
 
         let target_pos = match dir {
@@ -534,14 +556,35 @@ impl App {
         let mut candidate = self.project.components[comp_idx].clone();
         candidate.position = target_pos;
 
+        let mut candidate_config = self.project.config.clone();
+        let mut expanded = false;
+        if target_pos.col >= candidate_config.grid.cols {
+            candidate_config.grid.cols = target_pos.col.saturating_add(1);
+            expanded = true;
+        }
+        if target_pos.row >= candidate_config.grid.rows {
+            candidate_config.grid.rows = target_pos.row.saturating_add(1);
+            expanded = true;
+        }
+
         if self.root.join(ROCKET_DIR).exists() {
             if let Err(err) = save_component(&self.root, &candidate) {
                 self.refresh_audit();
                 self.status_message = format!("Failed to save {comp_name}: {err}");
                 return;
             }
+            if expanded {
+                if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                    self.refresh_audit();
+                    self.status_message = format!("Failed to save grid config: {err}");
+                    return;
+                }
+            }
         }
 
+        if expanded {
+            self.project.config = candidate_config;
+        }
         self.project.components[comp_idx] = candidate;
         self.refresh_audit();
         self.status_message = format!(
@@ -630,16 +673,42 @@ impl App {
     }
 
     fn first_unoccupied_grid_pos(&self) -> Option<GridPos> {
-        for row in 0..self.project.config.grid.rows {
-            for col in 0..self.project.config.grid.cols {
-                let candidate = GridPos { col, row };
-                if !self
-                    .project
-                    .components
-                    .iter()
-                    .any(|comp| comp.position == candidate)
-                {
-                    return Some(candidate);
+        let grid = self.effective_grid();
+        if grid.cols == 0 || grid.rows == 0 {
+            return None;
+        }
+        let span = self
+            .last_canvas_capacity
+            .map_or(grid.cols, |(c, _)| c.min(grid.cols))
+            .max(1);
+        let center_col = span.saturating_sub(1) / 2;
+        let max_offset = center_col.max(grid.cols.saturating_sub(1).saturating_sub(center_col));
+
+        for row in 0..grid.rows {
+            for offset in 0..=max_offset {
+                let mut candidates = [None, None];
+                if offset == 0 {
+                    candidates[0] = Some(center_col);
+                } else {
+                    if let Some(right) = center_col.checked_add(offset) {
+                        if right < grid.cols {
+                            candidates[0] = Some(right);
+                        }
+                    }
+                    if let Some(left) = center_col.checked_sub(offset) {
+                        candidates[1] = Some(left);
+                    }
+                }
+                for col in candidates.into_iter().flatten() {
+                    let candidate = GridPos { col, row };
+                    if !self
+                        .project
+                        .components
+                        .iter()
+                        .any(|comp| comp.position == candidate)
+                    {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -912,9 +981,10 @@ impl App {
                     (comp, expanded.then_some(candidate_config))
                 } else {
                     let Some(pos) = self.first_unoccupied_grid_pos() else {
+                        let grid = self.effective_grid();
                         let err = format!(
                             "grid ({}x{}) is full; no free cell available",
-                            self.project.config.grid.cols, self.project.config.grid.rows
+                            grid.cols, grid.rows
                         );
                         if let ModalState::NewComponent(ref mut form) = modal {
                             form.error = Some(err.clone());
@@ -923,7 +993,20 @@ impl App {
                         self.modal = Some(modal);
                         return;
                     };
-                    (scaffold_component(&id, &name, kind, pos), None)
+                    let mut candidate_config = self.project.config.clone();
+                    let mut expanded = false;
+                    if pos.col >= candidate_config.grid.cols {
+                        candidate_config.grid.cols = pos.col.saturating_add(1);
+                        expanded = true;
+                    }
+                    if pos.row >= candidate_config.grid.rows {
+                        candidate_config.grid.rows = pos.row.saturating_add(1);
+                        expanded = true;
+                    }
+                    (
+                        scaffold_component(&id, &name, kind, pos),
+                        expanded.then_some(candidate_config),
+                    )
                 };
 
                 if self.root.join(ROCKET_DIR).exists() {
@@ -1376,6 +1459,8 @@ impl App {
             }
             KeyCode::Tab => self.cycle_focus_next(),
             KeyCode::BackTab => self.cycle_focus_prev(),
+            KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_in(),
+            KeyCode::Char('-') => self.zoom_out(),
             KeyCode::Char('f') => self.toggle_gaps_filter(),
             KeyCode::Char('n') => {
                 self.connect_source_id = None;
@@ -1874,7 +1959,7 @@ mod tests {
         assert_eq!(selected.name, "Telemetry Bus");
         assert_eq!(selected.kind, ComponentKind::Interface);
         assert_eq!(selected.parent_id, None);
-        assert_eq!(selected.position, GridPos { col: 1, row: 0 });
+        assert_eq!(selected.position, GridPos { col: 3, row: 0 });
         assert!(selected.features.is_empty());
 
         let reloaded = load_project(dir.path()).expect("reload project");
@@ -3127,5 +3212,86 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         app.handle_key(key(KeyCode::Enter));
         assert_eq!(app.mode, InputMode::Navigate);
         assert_eq!(app.status_message, "Connected: alpha depends on beta");
+    }
+
+    #[test]
+    fn zoom_keys_cycle_between_compact_normal_and_expanded() {
+        use crate::tui::canvas::ZoomLevel;
+
+        let mut app = make_app(vec![make_component("alpha")]);
+        assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+
+        app.handle_key(key(KeyCode::Char('+')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Normal);
+        assert_eq!(app.status_message, "Zoom: Normal");
+
+        app.handle_key(key(KeyCode::Char('=')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Expanded);
+        assert_eq!(app.status_message, "Zoom: Expanded");
+
+        // Clamps at Expanded
+        app.handle_key(key(KeyCode::Char('+')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Expanded);
+        assert_eq!(app.status_message, "Zoom: Expanded");
+
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Normal);
+        assert_eq!(app.status_message, "Zoom: Normal");
+
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+        assert_eq!(app.status_message, "Zoom: Compact");
+
+        // Clamps at Compact
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+        assert_eq!(app.status_message, "Zoom: Compact");
+    }
+
+    #[test]
+    fn first_unoccupied_grid_pos_starts_top_center() {
+        use crate::storage::{init_workspace, load_project, save_component, save_project_config};
+
+        let empty_app = make_app(Vec::new());
+        let first_pos = empty_app
+            .first_unoccupied_grid_pos()
+            .expect("empty grid has free cell");
+        assert_eq!(first_pos.row, 0);
+        assert_eq!(first_pos.col, 3);
+        assert_ne!(first_pos, GridPos { col: 0, row: 0 });
+
+        // Full 1x1 grid returns None when effective capacity does not expand it.
+        let mut full_app = make_app(vec![make_component("only")]);
+        full_app.project.config.grid = GridConfig { cols: 1, rows: 1 };
+        assert_eq!(full_app.first_unoccupied_grid_pos(), None);
+
+        // Creating a top-level component in a floored cell outside saved grid persists grid expansion.
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Grid Floor", "Persist expanded grid").expect("init workspace");
+        let mut cfg = load_project(dir.path()).expect("load project").config;
+        cfg.grid = GridConfig { cols: 1, rows: 1 };
+        save_project_config(dir.path(), &cfg).expect("save 1x1 grid");
+        let mut existing = make_component("alpha");
+        existing.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &existing).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        app.last_canvas_capacity = Some((4, 4));
+
+        app.handle_key(key(KeyCode::Char('n')));
+        type_keys(&mut app, "beta");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Beta");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        let beta = app.project.component("beta").expect("beta created");
+        assert_eq!(beta.position, GridPos { col: 1, row: 0 });
+        assert_eq!(app.project.config.grid, GridConfig { cols: 2, rows: 1 });
+
+        let reloaded = load_project(dir.path()).expect("reload after creation");
+        assert_eq!(reloaded.config.grid, GridConfig { cols: 2, rows: 1 });
     }
 }
