@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0053"
 type = "task"
 title = "tui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T17:40:07Z"
-updated_at = "2026-11-22T18:33:45Z"
+updated_at = "2026-11-22T19:07:49Z"
 source_ref = "STEP 11C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 8
 iteration_count = 1
+last_timer_session = "TASK-0053@2026-11-22T18:59:47Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "b13bd79"
+summary = "STEP 11C: Expand/Collapse, Proximity Placement, Collision Shifting, Sub-Component Ingestion & Connect Prompt Clarity (phased check PASS)"
