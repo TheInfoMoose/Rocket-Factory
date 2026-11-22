@@ -18,20 +18,13 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 6):** Resolve all Phase 5 review findings (`BUG-0002`–`BUG-0004`, `TASK-0027`–`TASK-0028`), wire live TUI adapter sync (`r`/`S` pull, `p` push, startup pull, optional auto-poll), add `?` help and `t` RON theme switcher overlays, and verify end-to-end with CLI + mock-adapter + `TestBackend` integration tests (`tests/e2e.rs`).
+**Phase goal (Phase 7):** Resolve all Phase 6 review findings (`BUG-0005`–`BUG-0007`, `TASK-0035`) — propagate caller-supplied `theme_dirs` in `run_tui`, align modal save-failure UX for component/connection edits, eliminate 80-column Help modal wrapping/clipping, and fix multi-adapter feature push short-circuiting across CLI and TUI.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
 ### Up Next
 
-| # | Step | Command | Scope | Target Files | Waits on |
-| :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 6A** | `/goal` | editor | `src/tui/terminal.rs` | — |
-| 2 | **STEP 6B** | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` | — |
-| 3 | **STEP 6C** | `/goal` | sync | `src/tui/app.rs`, `src/tui/terminal.rs`, `src/main.rs` | STEP 6A, STEP 6B |
-| 4 | **STEP 6D** | `/goal` | theme | `src/theme.rs` | — |
-| 5 | **STEP 6E** | `/goal` | overlay | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs` | STEP 6B, STEP 6D |
-| 6 | **STEP 6F** | `/goal` | tests | `tests/e2e.rs` | STEP 6C, STEP 6E |
+_None — Phase 7 complete._
 
 ### Completed
 
@@ -60,10 +53,19 @@
 | **STEP 5A** | Done (`3e71980`) | `/goal` | modal | `src/tui/modal.rs`, `src/tui/mod.rs` |
 | **STEP 5B** | Done (`b488452`) | `/goal` | modal | `src/tui/app.rs`, `src/tui/ui.rs` |
 | **STEP 5C** | Done (`2b3dd73`) | `/goal` | editor | `src/tui/app.rs`, `src/tui/terminal.rs` |
+| **STEP 6A** | Done (`38f38eb`) | `/goal` | editor | `src/tui/terminal.rs` |
+| **STEP 6B** | Done (`f1915a3`) | `/goal` | tui | `src/tui/app.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` |
+| **STEP 6C** | Done (`b4676eb`) | `/goal` | sync | `src/tui/app.rs`, `src/tui/terminal.rs`, `src/main.rs` |
+| **STEP 6D** | Done (`9bd03c9`) | `/goal` | theme | `src/theme.rs` |
+| **STEP 6E** | Done (`362de34`) | `/goal` | overlay | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/ui.rs` |
+| **STEP 6F** | Done (`85d32c9`) | `/goal` | tests | `tests/e2e.rs` |
+| **STEP 7A** | Done (`c27efb0`) | `/goal` | tui | `src/tui/terminal.rs`, `src/tui/app.rs` |
+| **STEP 7B** | Done (`3ea3c39`) | `/goal` | ui | `src/tui/ui.rs` |
+| **STEP 7C** | Done (`3a3422b`) | `/goal` | sync | `src/cli.rs`, `src/tui/app.rs`, `tests/e2e.rs` |
 
 ### Future phases
 
-_None planned — Phase 6 completes the initial Rocket Factory milestone._
+_None planned — Phase 7 closes out all Phase 6 review findings and hardens Rocket Factory for release._
 
 ### Open Questions
 
@@ -1740,6 +1742,161 @@ Contract & Behavior:
 
 Tests:
   - All integration tests in `tests/e2e.rs` must pass under `cargo test --workspace` with zero clippy warnings.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/ tests/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 7 Step Blocks
+
+### STEP 7A: Propagate `theme_dirs` in `run_tui` and Preserve Modal State on Edit Save Failure (`BUG-0005`, `BUG-0006`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 7A: Propagate caller-supplied theme_dirs into App inside run_tui and keep EditComponent/EditConnection modals open with form.error on disk-save failure (BUG-0005, BUG-0006).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/tui/terminal.rs:180-206 (run_tui)
+  - src/tui/app.rs:615-745 (apply_modal_action: UpdateComponent, UpdateConnection, SelectTheme)
+  - src/tui/modal.rs:15-95 (EditComponentForm, EditConnectionForm error fields)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn run_tui\b' src/tui/terminal.rs && grep -qE 'pub theme_dirs:' src/tui/app.rs
+
+[MUTATION_SPEC]
+Goal:
+  Close BUG-0005 (`run_tui` ignoring caller-provided `theme_dirs` for the `t` theme switcher) and BUG-0006 (`UpdateComponent` and `UpdateConnection` discarding user edits by closing the modal on disk-save failure).
+
+Contract & Behavior:
+  - `src/tui/terminal.rs` (`BUG-0005`):
+    - Extract a testable helper `fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RfResult<App>` that loads the project via `crate::storage::load_project(root)?`, resolves the initial theme via `crate::theme::resolve_theme(&project.config.theme, theme_dirs)?`, constructs `App::new(root.to_path_buf(), project, theme)`, and sets `app.theme_dirs = theme_dirs.to_vec()`.
+    - Wire `run_tui` to call `let mut app = build_tui_app(root, theme_dirs)?;` (no unwired scaffolding).
+  - `src/tui/app.rs` (`BUG-0006`):
+    - In `apply_modal_action`, for `ModalAction::UpdateComponent`:
+      - On `Err(err)` from `save_component`: format `msg = format!("Failed to save {name}: {err}")`, set `form.error = Some(msg.clone())` on `ModalState::EditComponent(ref mut form)`, set `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project` unchanged, and `return`.
+    - In `apply_modal_action`, for `ModalAction::UpdateConnection`:
+      - On `Err(err)` from `save_project_config`: format `msg = format!("Failed to save connections: {err}")`, set `form.error = Some(msg.clone())` on `ModalState::EditConnection(ref mut form)`, set `self.status_message = msg`, re-attach `self.modal = Some(modal)`, keep `self.mode = InputMode::Modal`, leave `self.project.config` unchanged, and `return`.
+
+Tests:
+  - In `src/tui/terminal.rs`:
+    - Unit test `build_tui_app` with a custom theme directory containing a valid `.ron` file (e.g. `cobalt_custom.ron`), asserting `app.theme_dirs == custom_dirs` and `crate::theme::list_available_themes(&app.theme_dirs)` contains `"cobalt_custom"`.
+  - In `src/tui/app.rs`:
+    - Update/add save-failure rollback tests for `UpdateComponent` and `UpdateConnection` asserting that on disk-save error: `self.project` is unchanged, `app.mode == InputMode::Modal`, `app.modal.is_some()`, and `form.error.is_some()`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 7B: Dynamic Modal Width for Unclipped 80-Column Keyboard Help (`BUG-0007`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 7B: Size render_modal popup width from rendered line widths so Keyboard Help renders without wrapping or footer clipping on 80-column terminals (BUG-0007).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/ui.rs:385-505 (ModalState::Help lines and render_modal sizing)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+grep -qE 'ModalState::Help =>' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal:
+  Close BUG-0007 so `ModalState::Help` (and all other modals) render cleanly on standard 80x24 terminals without horizontal line wrapping pushing the footer hint below the modal border.
+
+Contract & Behavior:
+  - In `src/tui/ui.rs` `render_modal`:
+    - Compute `content_width` from the longest rendered line in `lines` (`lines.iter().map(Line::width).max().unwrap_or(0)`) plus border/padding allowance (`4` cols), converted safely via `u16::try_from(...).unwrap_or(u16::MAX)`.
+    - Compute the target `popup_width` as `((u32::from(area.width) * 60 / 100) as u16).max(content_width).clamp(54, 76)` capped by `area.width.saturating_sub(2)` (when `area.width > 2`, else `area.width`), preserving overflow safety on wide terminals (`width > 1092`).
+    - Ensure every line in `ModalState::Help` fits within `72` display columns (and `<= 70` cols) so at `80x24` no line wraps and the bottom footer hint `[Esc/?/Enter/q] Close` remains fully visible inside the modal border.
+
+Tests:
+  - In `src/tui/ui.rs`:
+    - Add a `TestBackend::new(80, 24)` test rendering `ModalState::Help` and asserting `"Keyboard Help"`, `"New component / Edit component / Edit edge"`, and `"[Esc/?/Enter/q] Close"` all appear intact in the buffer.
+    - Keep existing `render_modal_handles_wide_terminal_without_overflow` (`1200x35`) passing.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 7C: Fix Multi-Adapter Feature Push Across CLI and TUI + E2E Verification (`TASK-0035`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 7C: Fix multi-adapter feature push short-circuiting in src/cli.rs and src/tui/app.rs and add E2E integration coverage in tests/e2e.rs (TASK-0035).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/cli.rs
+  - src/tui/app.rs
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/cli.rs:153-195 (Command::Push loop)
+  - src/tui/app.rs:195-258 (sync_push_selected)
+  - src/adapter.rs:135-225 (run_push_component, run_push_feature)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No references to the string "nebulous" (case-insensitive) anywhere in src/ or tests/.
+  - No `.unwrap()` or `.expect()` in non-test code.
+  - Test fixtures must use reserved placeholder data only (`example.com`, `192.0.2.0/24`, `testuser`).
+
+[PRE_GATE]
+grep -qE 'pub fn sync_push_selected\b' src/tui/app.rs && grep -qE 'Command::Push' src/cli.rs
+
+[MUTATION_SPEC]
+Goal:
+  Close TASK-0035 so configuring multiple active adapters pushes every unpushed feature to all active adapters (instead of short-circuiting after the first adapter flips `feature.pushed = true`), and verify both multi-adapter push and 80-column help rendering end-to-end.
+
+Contract & Behavior:
+  - `src/cli.rs` (`Command::Push`):
+    - For each target component, snapshot the indices of features where `!feature.pushed` before iterating across `active_adapters` (or push per-component across all `active_adapters` before marking `feature.pushed = true`).
+    - For each unpushed feature index, invoke `adapter::run_push_feature` on every active adapter that has `push_feature_cmd.is_some()`, incrementing `features_pushed` for each successful push and recording the first non-`None` `external_id` returned.
+    - Only after all active adapters with `push_feature_cmd` succeed for a component's unpushed features, mark those features `pushed = true` (with their recorded `external_id`) and persist via `storage::save_component`.
+  - `src/tui/app.rs` (`sync_push_selected`):
+    - Apply the exact same multi-adapter feature-push semantics on the candidate `Project` clone: collect unpushed feature indices for `comp_id` up front, run `run_push_feature` across every active adapter with `push_feature_cmd.is_some()`, mark pushed + first non-`None` `external_id` once pushed, persist via `save_component(&self.root, comp)?`, and commit `self.project = candidate` only after disk save succeeds (preserving BUG-0004 rollback).
+  - `tests/e2e.rs`:
+    - Add an end-to-end test configuring two mock `sh` adapters (`tracker_a`, `tracker_b`) that each log pushed feature payloads to separate temp files, run both CLI `Command::Push` and TUI `sync_push_selected` (on separate components), and assert both adapters received the unpushed features, `features_pushed == 2`, and `external_id` / `pushed = true` persisted to disk.
+    - Add an 80x24 `TestBackend` snapshot assertion for `ModalState::Help` verifying the footer hint `[Esc/?/Enter/q] Close` is visible.
+
+Tests:
+  - Unit tests in `src/cli.rs` and `src/tui/app.rs` verifying 2 active mock `sh` adapters both receive unpushed features.
+  - Integration tests in `tests/e2e.rs` passing under `cargo test --workspace`.
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && ! grep -rqi 'nebulous' src/ tests/

@@ -2,11 +2,11 @@
 id = "BUG-0008"
 type = "bug"
 title = "EditorState::jump_to_match uses stale find_replace.matches across edits and buffer switches"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:17:02Z"
-updated_at = "2026-11-22T04:17:02Z"
+updated_at = "2026-11-22T04:48:59Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "528eaff"
+summary = "Invalid / cross-project duplicate: belongs to ScripTUI (EditorState::jump_to_match), accidentally filed into Rocket-Factory during commit 528eaff. Closed as not applicable."

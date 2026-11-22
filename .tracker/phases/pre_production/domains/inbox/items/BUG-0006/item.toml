@@ -2,11 +2,11 @@
 id = "BUG-0006"
 type = "bug"
 title = "Modal save-failure UX inconsistency in UpdateComponent and UpdateConnection"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:16:14Z"
-updated_at = "2026-11-22T04:16:14Z"
+updated_at = "2026-11-22T04:48:55Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "c27efb0"
+summary = "Resolved in STEP 7A: updated UpdateComponent and UpdateConnection save-failure paths in src/tui/app.rs to set form.error, re-attach modal, and keep InputMode::Modal without mutating project state."

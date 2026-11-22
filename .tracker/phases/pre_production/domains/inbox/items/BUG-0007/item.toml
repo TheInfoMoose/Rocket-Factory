@@ -2,11 +2,11 @@
 id = "BUG-0007"
 type = "bug"
 title = "Keyboard Help modal clips long lines on 80-column terminals"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:16:15Z"
-updated_at = "2026-11-22T04:16:15Z"
+updated_at = "2026-11-22T04:48:56Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "3ea3c39"
+summary = "Resolved in STEP 7B: sized render_modal popup width from longest rendered Line::width (+4) clamped to 54..=76 and capped at area.width - 2 so Keyboard Help renders unclipped at 80x24."

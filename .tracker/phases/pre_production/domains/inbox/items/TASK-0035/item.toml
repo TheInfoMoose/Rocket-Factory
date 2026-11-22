@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0035"
 type = "task"
 title = "Multi-adapter push short-circuits feature pushing after the first adapter"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:16:16Z"
-updated_at = "2026-11-22T04:16:16Z"
+updated_at = "2026-11-22T04:48:58Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "3a3422b"
+summary = "Resolved in STEP 7C: updated Command::Push (src/cli.rs) and sync_push_selected (src/tui/app.rs) to snapshot unpushed feature indices and push across all active feature adapters before marking pushed = true, verified with unit and E2E tests."
