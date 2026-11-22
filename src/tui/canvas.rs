@@ -277,10 +277,10 @@ pub fn route_orthogonal_edge(
         .collect();
 
     let (label_pos, label) = match label {
-        Some(text) if !text.is_empty() && !segments.is_empty() => {
-            let mid = segments[segments.len() / 2];
-            (Some((mid.0, mid.1)), Some(text.to_string()))
-        }
+        Some(text) if !text.is_empty() && !segments.is_empty() => (
+            compute_label_pos(&segments, text, bounds),
+            Some(text.to_string()),
+        ),
         _ => (None, None),
     };
 
@@ -288,6 +288,61 @@ pub fn route_orthogonal_edge(
         segments,
         label_pos,
         label,
+    }
+}
+
+fn compute_label_pos(
+    segments: &[(u16, u16, char)],
+    text: &str,
+    bounds: Rect,
+) -> Option<(u16, u16)> {
+    if text.is_empty() || segments.is_empty() {
+        return None;
+    }
+
+    let mid_idx = segments.len() / 2;
+    let (mx, my, mch) = segments[mid_idx];
+    let is_horizontal_seg = matches!(mch, '─' | '▶' | '◀');
+
+    if is_horizontal_seg {
+        let mut run_min_x = mx;
+        let mut run_max_x = mx;
+        let mut i = mid_idx;
+        while i > 0 && segments[i - 1].1 == my {
+            i -= 1;
+            run_min_x = run_min_x.min(segments[i].0);
+            run_max_x = run_max_x.max(segments[i].0);
+        }
+        let mut j = mid_idx;
+        while j + 1 < segments.len() && segments[j + 1].1 == my {
+            j += 1;
+            run_min_x = run_min_x.min(segments[j].0);
+            run_max_x = run_max_x.max(segments[j].0);
+        }
+
+        let run_len = usize::from(run_max_x.saturating_sub(run_min_x)) + 1;
+        let text_len = text.chars().count();
+        let offset = u16::try_from(run_len.saturating_sub(text_len) / 2).unwrap_or(u16::MAX);
+        let lx = run_min_x.saturating_add(offset);
+
+        let max_y = bounds.y.saturating_add(bounds.height);
+        let ly = if my > bounds.y {
+            my - 1
+        } else if my.saturating_add(1) < max_y {
+            my + 1
+        } else {
+            my
+        };
+
+        Some((lx, ly))
+    } else {
+        let max_x = bounds.x.saturating_add(bounds.width);
+        let lx = if mx.saturating_add(1) < max_x {
+            mx + 1
+        } else {
+            mx
+        };
+        Some((lx, my))
     }
 }
 
@@ -341,6 +396,9 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
 
     let selected_id = app.selected_component().map(|c| c.id.as_str());
 
+    let mut routed_edges: Vec<(RoutedEdge, Style)> = Vec::new();
+    let mut arrow_cells: Vec<(u16, u16)> = Vec::new();
+
     for conn in &app.project.config.connections {
         let (Some(&from_rect), Some(&to_rect)) = (
             card_rects.get(conn.from.as_str()),
@@ -366,6 +424,10 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             style::muted_style(&app.theme)
         };
 
+        if let Some(&(ax, ay, _)) = routed.segments.last() {
+            arrow_cells.push((ax, ay));
+        }
+
         let buf = frame.buffer_mut();
         for &(x, y, ch) in &routed.segments {
             if let Some(cell) = buf.cell_mut((x, y)) {
@@ -375,13 +437,46 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             }
         }
 
+        routed_edges.push((routed, edge_style));
+    }
+
+    let is_blocked = |x: u16, y: u16| -> bool {
+        !in_bounds(x, y, inner)
+            || arrow_cells.contains(&(x, y))
+            || visible_cards.iter().any(|&(_, rect)| in_bounds(x, y, rect))
+    };
+
+    let buf = frame.buffer_mut();
+    let max_x = inner.x.saturating_add(inner.width);
+    for (routed, edge_style) in &routed_edges {
         if let (Some((lx, ly)), Some(text)) = (routed.label_pos, routed.label.as_deref()) {
-            let max_x = inner.x.saturating_add(inner.width);
-            let max_y = inner.y.saturating_add(inner.height);
-            if lx >= inner.x && lx < max_x && ly >= inner.y && ly < max_y {
-                let avail = max_x.saturating_sub(lx) as usize;
-                let clipped = truncate_text(text, avail);
-                buf.set_string(lx, ly, clipped, edge_style);
+            if is_blocked(lx, ly) {
+                continue;
+            }
+            let mut avail = 0usize;
+            for x in lx..max_x {
+                if is_blocked(x, ly) {
+                    break;
+                }
+                avail += 1;
+            }
+            if avail == 0 {
+                continue;
+            }
+            let clipped = truncate_text(text, avail);
+            for (offset, ch) in clipped.chars().enumerate() {
+                let Ok(dx) = u16::try_from(offset) else {
+                    break;
+                };
+                let x = lx.saturating_add(dx);
+                if is_blocked(x, ly) {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut((x, ly)) {
+                    let mut ch_buf = [0u8; 4];
+                    cell.set_symbol(ch.encode_utf8(&mut ch_buf))
+                        .set_style(*edge_style);
+                }
             }
         }
     }
@@ -508,5 +603,141 @@ mod tests {
         );
 
         assert_eq!(edge.segments.last().map(|&(_, _, ch)| ch), Some('▼'));
+    }
+
+    fn make_canvas_test_app(from_pos: GridPos, to_pos: GridPos, label: Option<&str>) -> App {
+        use std::path::PathBuf;
+
+        use crate::model::{
+            Component, ComponentKind, Connection, GridConfig, Project, ProjectConfig,
+        };
+        use crate::theme::default_theme;
+
+        let alpha = Component {
+            id: "alpha".to_string(),
+            name: "Alpha".to_string(),
+            kind: ComponentKind::UiView,
+            description: "Source node".to_string(),
+            relative_path: Some("src/alpha.rs".to_string()),
+            position: from_pos,
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let beta = Component {
+            id: "beta".to_string(),
+            name: "Beta".to_string(),
+            kind: ComponentKind::ServiceCore,
+            description: "Target node".to_string(),
+            relative_path: Some("src/beta.rs".to_string()),
+            position: to_pos,
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let project = Project {
+            config: ProjectConfig {
+                name: "Canvas Test".to_string(),
+                description: "Edge label test".to_string(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig::default(),
+                connections: vec![Connection {
+                    from: "alpha".to_string(),
+                    to: "beta".to_string(),
+                    kind: EdgeKind::DataFlow,
+                    label: label.map(str::to_string),
+                }],
+            },
+            components: vec![alpha, beta],
+        };
+
+        let theme = default_theme().unwrap();
+        App::new(PathBuf::from("/tmp/example-project"), project, theme)
+    }
+
+    fn render_canvas_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let viewport = CanvasViewport::default();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render_canvas(frame, area, app, viewport);
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buf: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn render_canvas_preserves_arrowhead_and_renders_short_horizontal_label() {
+        let app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 0 },
+            Some("dep"),
+        );
+        let buf = render_canvas_buffer(&app, 60, 15);
+        let inner = Rect::new(1, 1, 58, 13);
+        let to_rect =
+            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 0 }).unwrap();
+        let edge_y = to_rect.y + to_rect.height / 2;
+
+        assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
+        assert!(row_text(&buf, edge_y - 1).contains("dep"));
+    }
+
+    #[test]
+    fn render_canvas_clips_long_horizontal_label_without_corrupting_arrowhead_or_card_border() {
+        let app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 0 },
+            Some("events_stream"),
+        );
+        let buf = render_canvas_buffer(&app, 60, 15);
+        let inner = Rect::new(1, 1, 58, 13);
+        let to_rect =
+            card_rect(inner, CanvasViewport::default(), GridPos { col: 1, row: 0 }).unwrap();
+        let edge_y = to_rect.y + to_rect.height / 2;
+
+        assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
+        assert!(row_text(&buf, edge_y - 1).contains("eve…"));
+        assert_eq!(buf[(to_rect.x, edge_y - 1)].symbol(), "│");
+        assert_eq!(buf[(to_rect.x, edge_y)].symbol(), "│");
+    }
+
+    #[test]
+    fn render_canvas_renders_full_label_when_cards_have_horizontal_spacing() {
+        let app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 2, row: 0 },
+            Some("events"),
+        );
+        let buf = render_canvas_buffer(&app, 90, 15);
+        let inner = Rect::new(1, 1, 88, 13);
+        let to_rect =
+            card_rect(inner, CanvasViewport::default(), GridPos { col: 2, row: 0 }).unwrap();
+        let edge_y = to_rect.y + to_rect.height / 2;
+
+        assert_eq!(buf[(to_rect.x - 1, edge_y)].symbol(), "▶");
+        assert!(row_text(&buf, edge_y - 1).contains("events"));
     }
 }
