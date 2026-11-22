@@ -27,7 +27,17 @@ fn main() -> ExitCode {
         }
         None => {
             let theme_dirs = rocket_factory::tui::default_theme_dirs(&cli.path);
-            match rocket_factory::tui::run_tui(&cli.path, &theme_dirs) {
+            let poll_interval = std::env::var("RF_POLL_INTERVAL_SECS")
+                .ok()
+                .and_then(|raw| raw.trim().parse::<u64>().ok())
+                .filter(|&secs| secs > 0)
+                .map(std::time::Duration::from_secs);
+            match rocket_factory::tui::run_tui(
+                &cli.path,
+                &theme_dirs,
+                &adapters_path,
+                poll_interval,
+            ) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
                     eprintln!("error: {err}");

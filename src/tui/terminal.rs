@@ -1,7 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::execute;
@@ -13,7 +13,7 @@ use ratatui::Terminal;
 
 use crate::error::{RfError, RfResult};
 use crate::storage::{save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR};
-use crate::tui::app::App;
+use crate::tui::app::{App, SyncRequest};
 use crate::tui::ui;
 
 pub type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
@@ -165,20 +165,53 @@ where
     }
 }
 
-pub fn run_tui(root: &Path, theme_dirs: &[PathBuf]) -> RfResult<()> {
+fn process_pending_sync(app: &mut App, adapters_path: &Path) {
+    let Some(request) = app.pending_sync.take() else {
+        return;
+    };
+
+    let result = match request {
+        SyncRequest::Pull => app.sync_pull(adapters_path),
+        SyncRequest::PushSelected => app.sync_push_selected(adapters_path),
+    };
+
+    if let Err(err) = result {
+        app.status_message = format!("Adapter sync failed: {err}");
+    }
+}
+
+pub fn run_tui(
+    root: &Path,
+    theme_dirs: &[PathBuf],
+    adapters_path: &Path,
+    poll_interval: Option<Duration>,
+) -> RfResult<()> {
     let project = crate::storage::load_project(root)?;
     let theme = crate::theme::resolve_theme(&project.config.theme, theme_dirs)?;
     let mut app = App::new(root.to_path_buf(), project, theme);
 
+    if !app.project.config.active_adapters.is_empty() {
+        if let Err(err) = app.sync_pull(adapters_path) {
+            app.status_message = format!("Initial adapter sync failed: {err}");
+        }
+    }
+
     install_panic_hook();
     let mut terminal = enter_terminal()?;
-    let loop_result = run_event_loop(&mut terminal, &mut app);
+    let loop_result = run_event_loop(&mut terminal, &mut app, adapters_path, poll_interval);
     let restore_result = restore_terminal(&mut terminal);
 
     loop_result.and(restore_result)
 }
 
-fn run_event_loop(terminal: &mut TuiTerminal, app: &mut App) -> RfResult<()> {
+fn run_event_loop(
+    terminal: &mut TuiTerminal,
+    app: &mut App,
+    adapters_path: &Path,
+    poll_interval: Option<Duration>,
+) -> RfResult<()> {
+    let mut last_poll = Instant::now();
+
     loop {
         terminal
             .draw(|f| ui::render(f, app))
@@ -193,12 +226,25 @@ fn run_event_loop(terminal: &mut TuiTerminal, app: &mut App) -> RfResult<()> {
                 if key.kind == KeyEventKind::Press {
                     app.handle_key(key);
                     process_pending_editor_with(app, |path| suspend_for_editor(terminal, path));
+                    process_pending_sync(app, adapters_path);
                 }
             }
         }
 
         if app.should_quit {
             break;
+        }
+
+        if let Some(interval) = poll_interval {
+            if !app.project.config.active_adapters.is_empty()
+                && app.modal.is_none()
+                && last_poll.elapsed() >= interval
+            {
+                if let Err(err) = app.sync_pull(adapters_path) {
+                    app.status_message = format!("Auto-sync failed: {err}");
+                }
+                last_poll = Instant::now();
+            }
         }
     }
     Ok(())
@@ -376,5 +422,51 @@ mod tests {
         assert!(app.pending_editor_component.is_none());
         assert!(app.status_message.contains("Editor error for auth_svc"));
         assert!(app.status_message.contains("simulated editor failure"));
+    }
+
+    #[test]
+    fn process_pending_sync_executes_pull_and_surfaces_errors() {
+        let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let ok_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"tasks\":[{\"external_id\":\"TASK-9\",\"title\":\"Done\",\"status\":\"complete\"}]}]}"']
+"#;
+        std::fs::write(&adapters_path, ok_toml).expect("write adapters.toml");
+
+        app.pending_sync = Some(SyncRequest::Pull);
+        process_pending_sync(&mut app, &adapters_path);
+
+        assert!(app.pending_sync.is_none());
+        let comp = app.project.component("auth_svc").expect("component exists");
+        assert_eq!(comp.external_tasks.len(), 1);
+        assert_eq!(comp.external_tasks[0].external_id, "TASK-9");
+        assert!(app.status_message.contains("1 component(s) updated"));
+
+        // Now configure a failing adapter command and verify errors surface cleanly
+        let fail_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", "echo simulated adapter failure >&2; exit 1"]
+"#;
+        std::fs::write(&adapters_path, fail_toml).expect("write failing adapters.toml");
+
+        app.pending_sync = Some(SyncRequest::Pull);
+        process_pending_sync(&mut app, &adapters_path);
+
+        assert!(app.pending_sync.is_none());
+        assert!(app.status_message.contains("Adapter sync failed"));
+        assert!(app.status_message.contains("simulated adapter failure"));
     }
 }

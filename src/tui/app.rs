@@ -1,7 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::adapter::{
+    load_adapters_file, reconcile_status, resolve_active_adapters, run_pull_status,
+    run_push_component, run_push_feature,
+};
 use crate::archetype::scaffold_component;
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
 use crate::error::{RfError, RfResult};
@@ -42,6 +46,12 @@ pub enum ListFilter {
     GapsOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncRequest {
+    Pull,
+    PushSelected,
+}
+
 #[derive(Debug, Clone)]
 pub struct App {
     pub root: PathBuf,
@@ -59,6 +69,7 @@ pub struct App {
     pub connect_source_id: Option<String>,
     pub modal: Option<ModalState>,
     pub pending_editor_component: Option<String>,
+    pub pending_sync: Option<SyncRequest>,
 }
 
 impl App {
@@ -80,6 +91,7 @@ impl App {
             connect_source_id: None,
             modal: None,
             pending_editor_component: None,
+            pending_sync: None,
         }
     }
 
@@ -120,6 +132,126 @@ impl App {
         self.refresh_audit();
         self.status_message = format!("Reloaded Markdown for {comp_name}");
         Ok(())
+    }
+
+    pub fn sync_pull(&mut self, adapters_path: &Path) -> RfResult<String> {
+        if self.project.config.active_adapters.is_empty() {
+            let msg = "No active adapters configured".to_string();
+            self.status_message = msg.clone();
+            return Ok(msg);
+        }
+
+        let adapters_file = load_adapters_file(adapters_path)?;
+        let active_adapters =
+            resolve_active_adapters(&adapters_file, &self.project.config.active_adapters)?;
+
+        let mut candidate = self.project.clone();
+        let mut components_updated = 0usize;
+        let mut tasks_synced = 0usize;
+        let mut features_linked = 0usize;
+        let mut updated_ids: Vec<String> = Vec::new();
+
+        for active in &active_adapters {
+            if active.pull_status_cmd.is_some() {
+                let resp = run_pull_status(active, &self.root, &candidate)?;
+                let summary = reconcile_status(&mut candidate, &resp);
+                components_updated += summary.components_updated;
+                tasks_synced += summary.tasks_synced;
+                features_linked += summary.features_linked;
+
+                for entry in &resp.components {
+                    if candidate.component(&entry.component_id).is_some()
+                        && !updated_ids.contains(&entry.component_id)
+                    {
+                        updated_ids.push(entry.component_id.clone());
+                    }
+                }
+            }
+        }
+
+        if self.root.join(ROCKET_DIR).exists() {
+            for comp_id in &updated_ids {
+                if let Some(comp) = candidate.component(comp_id) {
+                    save_component(&self.root, comp)?;
+                }
+            }
+        }
+
+        self.project = candidate;
+        self.refresh_audit();
+        self.clamp_selection();
+
+        let summary_msg = format!(
+            "Synced {} adapter(s): {components_updated} component(s) updated, {tasks_synced} task(s) synced, {features_linked} feature(s) linked",
+            active_adapters.len()
+        );
+        self.status_message = summary_msg.clone();
+        Ok(summary_msg)
+    }
+
+    pub fn sync_push_selected(&mut self, adapters_path: &Path) -> RfResult<String> {
+        let Some(comp_id) = self.selected_component().map(|c| c.id.clone()) else {
+            let msg = "No component selected to push".to_string();
+            self.status_message = msg.clone();
+            return Ok(msg);
+        };
+
+        if self.project.config.active_adapters.is_empty() {
+            let msg = "No active adapters configured".to_string();
+            self.status_message = msg.clone();
+            return Ok(msg);
+        }
+
+        validate_component_id(&comp_id)?;
+
+        let adapters_file = load_adapters_file(adapters_path)?;
+        let active_adapters =
+            resolve_active_adapters(&adapters_file, &self.project.config.active_adapters)?;
+
+        let mut candidate = self.project.clone();
+        let mut components_pushed = 0usize;
+        let mut features_pushed = 0usize;
+        let mut modified = false;
+
+        for active in &active_adapters {
+            if active.push_component_cmd.is_some() {
+                run_push_component(active, &self.root, &candidate, &comp_id)?;
+                components_pushed += 1;
+            }
+
+            if active.push_feature_cmd.is_some() {
+                if let Some(comp) = candidate.component_mut(&comp_id) {
+                    for feature in &mut comp.features {
+                        if !feature.pushed {
+                            let resp = run_push_feature(active, &self.root, &comp_id, feature)?;
+                            feature.pushed = true;
+                            if let Some(ext_id) = resp.external_id {
+                                feature.external_id = Some(ext_id);
+                            }
+                            modified = true;
+                            features_pushed += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if modified && self.root.join(ROCKET_DIR).exists() {
+            if let Some(comp) = candidate.component(&comp_id) {
+                save_component(&self.root, comp)?;
+            }
+        }
+
+        self.project = candidate;
+        self.refresh_audit();
+        self.clamp_selection();
+
+        let summary_msg = format!(
+            "Pushed {comp_id}: {components_pushed} component(s), {features_pushed} feature(s) across {} adapter(s)",
+            active_adapters.len()
+        );
+        self.status_message = summary_msg.clone();
+        Ok(summary_msg)
     }
 
     pub fn gap_count(&self) -> usize {
@@ -678,6 +810,23 @@ impl App {
                     self.status_message = format!("Opening {name} in $EDITOR...");
                 } else {
                     self.status_message = "No component selected to open in $EDITOR".to_string();
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('S') => {
+                self.connect_source_id = None;
+                self.mode = InputMode::Navigate;
+                self.pending_sync = Some(SyncRequest::Pull);
+                self.status_message = "Syncing status from active adapters...".to_string();
+            }
+            KeyCode::Char('p') => {
+                self.connect_source_id = None;
+                self.mode = InputMode::Navigate;
+                if let Some(comp) = self.selected_component() {
+                    let name = comp.name.clone();
+                    self.pending_sync = Some(SyncRequest::PushSelected);
+                    self.status_message = format!("Pushing {name} to active adapters...");
+                } else {
+                    self.status_message = "No component selected to push".to_string();
                 }
             }
             KeyCode::Enter if self.mode == InputMode::Connect => {
@@ -1273,5 +1422,151 @@ mod tests {
         assert_eq!(app.mode, InputMode::Navigate);
         assert!(app.connect_source_id.is_none());
         assert_eq!(app.pending_editor_component.as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn app_sync_keys_queue_expected_requests() {
+        let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.mode, InputMode::Connect);
+
+        app.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.connect_source_id.is_none());
+        assert_eq!(app.pending_sync, Some(SyncRequest::Pull));
+        assert!(app.status_message.contains("Syncing"));
+
+        app.pending_sync = None;
+        app.handle_key(key(KeyCode::Char('S')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.pending_sync, Some(SyncRequest::Pull));
+
+        app.pending_sync = None;
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.pending_sync, Some(SyncRequest::PushSelected));
+        assert!(app.status_message.contains("Pushing"));
+
+        let mut empty_app = make_app(Vec::new());
+        empty_app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(empty_app.pending_sync, None);
+        assert_eq!(empty_app.status_message, "No component selected to push");
+    }
+
+    #[test]
+    fn sync_pull_updates_external_tasks_flips_status_and_persists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut project = crate::storage::init_workspace(dir.path(), "Sync Pull", "Live pull test")
+            .expect("init workspace");
+        project.config.active_adapters = vec!["mock_tracker".to_string()];
+        crate::storage::save_project_config(dir.path(), &project.config)
+            .expect("save project config");
+
+        let mut comp = make_component("auth_svc");
+        comp.features.push(FeatureItem {
+            id: "auth_svc_f1".to_string(),
+            title: "Login endpoint".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        save_component(dir.path(), &comp).expect("save initial component");
+        project.components.push(comp);
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"tasks\":[{\"external_id\":\"TASK-101\",\"title\":\"Login endpoint\",\"status\":\"complete\"}]}]}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        assert_eq!(
+            compute_card_status(app.project.component("auth_svc").expect("comp")),
+            CardStatus::Planned
+        );
+
+        let summary = app.sync_pull(&adapters_path).expect("sync_pull succeeds");
+        assert!(summary.contains("1 component(s) updated"));
+        assert!(summary.contains("1 task(s) synced"));
+        assert!(summary.contains("1 feature(s) linked"));
+        assert_eq!(app.status_message, summary);
+
+        let updated = app.project.component("auth_svc").expect("updated comp");
+        assert_eq!(updated.external_tasks.len(), 1);
+        assert_eq!(updated.external_tasks[0].external_id, "TASK-101");
+        assert_eq!(updated.external_tasks[0].status, TaskStatus::Complete);
+        assert_eq!(compute_card_status(updated), CardStatus::Complete);
+        assert!(updated.features[0].pushed);
+        assert_eq!(updated.features[0].external_id.as_deref(), Some("TASK-101"));
+
+        let reloaded = crate::storage::load_project(dir.path()).expect("reload project");
+        let disk_comp = reloaded.component("auth_svc").expect("disk comp");
+        assert_eq!(disk_comp.external_tasks.len(), 1);
+        assert_eq!(disk_comp.external_tasks[0].external_id, "TASK-101");
+        assert_eq!(compute_card_status(disk_comp), CardStatus::Complete);
+    }
+
+    #[test]
+    fn sync_push_selected_marks_features_pushed_and_persists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut project = crate::storage::init_workspace(dir.path(), "Sync Push", "Live push test")
+            .expect("init workspace");
+        project.config.active_adapters = vec!["mock_tracker".to_string()];
+        crate::storage::save_project_config(dir.path(), &project.config)
+            .expect("save project config");
+
+        let mut comp = make_component("billing_api");
+        comp.features.push(FeatureItem {
+            id: "billing_api_f1".to_string(),
+            title: "Invoice webhook".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        save_component(dir.path(), &comp).expect("save initial component");
+        project.components.push(comp);
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.push_component_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"external_id\":\"COMP-1\"}"']
+
+[adapters.push_feature_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        let summary = app
+            .sync_push_selected(&adapters_path)
+            .expect("sync_push_selected succeeds");
+        assert!(summary.contains("1 component(s)"));
+        assert!(summary.contains("1 feature(s)"));
+        assert_eq!(app.status_message, summary);
+
+        let updated = app.project.component("billing_api").expect("updated comp");
+        assert!(updated.features[0].pushed);
+        assert_eq!(updated.features[0].external_id.as_deref(), Some("FEAT-42"));
+
+        let reloaded = crate::storage::load_project(dir.path()).expect("reload project");
+        let disk_comp = reloaded.component("billing_api").expect("disk comp");
+        assert!(disk_comp.features[0].pushed);
+        assert_eq!(
+            disk_comp.features[0].external_id.as_deref(),
+            Some("FEAT-42")
+        );
     }
 }
