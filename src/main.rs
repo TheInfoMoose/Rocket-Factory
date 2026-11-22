@@ -26,10 +26,14 @@ fn main() -> ExitCode {
             }
         }
         None => {
-            println!(
-                "Rocket Factory TUI — launching in Phase 3 (use `rf --help` for CLI commands)"
-            );
-            ExitCode::SUCCESS
+            let theme_dirs = rocket_factory::tui::default_theme_dirs(&cli.path);
+            match rocket_factory::tui::run_tui(&cli.path, &theme_dirs) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    ExitCode::FAILURE
+                }
+            }
         }
     }
 }
