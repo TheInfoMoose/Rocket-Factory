@@ -7,7 +7,9 @@ use ratatui::Frame;
 use crate::audit::{compute_card_status, task_progress};
 use crate::theme::Theme;
 use crate::tui::app::{App, FocusColumn, ListFilter};
-use crate::tui::modal::{edge_kind_label, ConfirmDeleteTarget, ModalState};
+use crate::tui::modal::{
+    edge_kind_label, edge_relationship_preview, ConfirmDeleteTarget, ModalState,
+};
 use crate::tui::style;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -308,6 +310,9 @@ fn render_modal(
     let mut lines: Vec<Line> = Vec::new();
     let error_text = match modal {
         ModalState::NewComponent(form) => {
+            if let Some(pid) = &form.parent_id {
+                lines.push(Line::from(Span::styled(format!("  Parent: {pid}"), muted)));
+            }
             lines.push(modal_field_line(
                 "ID",
                 &form.id,
@@ -340,34 +345,49 @@ fn render_modal(
                 theme,
             ));
             lines.push(modal_field_line(
+                "Archetype",
+                &format!("< {} >", form.selected_archetype().label),
+                form.active_field == 1,
+                theme,
+            ));
+            lines.push(modal_field_line(
                 "Description",
                 &form.description,
-                form.active_field == 1,
+                form.active_field == 2,
                 theme,
             ));
             lines.push(modal_field_line(
                 "Path",
                 &form.relative_path,
-                form.active_field == 2,
+                form.active_field == 3,
                 theme,
             ));
             lines.push(modal_field_line(
                 "Tags",
                 &form.tags,
-                form.active_field == 3,
+                form.active_field == 4,
                 theme,
             ));
             lines.push(modal_field_line(
                 "Add Feature",
                 &form.new_feature,
-                form.active_field == 4,
+                form.active_field == 5,
+                theme,
+            ));
+            lines.push(modal_field_line(
+                "Add Sub-component",
+                &form.new_sub_component,
+                form.active_field == 6,
                 theme,
             ));
             form.error.as_deref()
         }
         ModalState::EditConnection(form) => {
             lines.push(Line::from(Span::styled(
-                format!("  Edge: {} -> {}", form.from, form.to),
+                format!(
+                    "  Edge: {}",
+                    edge_relationship_preview(&form.from, &form.to, form.selected_kind())
+                ),
                 muted,
             )));
             lines.push(modal_field_line(
@@ -818,5 +838,37 @@ mod tests {
         assert!(conn_text.contains("Delete Connection"));
         assert!(conn_text.contains("Delete connection 'view_box -> core_bus'?"));
         assert!(conn_text.contains("[Enter/y] Confirm Delete  [Esc/n] Cancel"));
+    }
+
+    #[test]
+    fn render_edit_component_sub_component_and_edge_preview_modals() {
+        use crate::model::EdgeKind;
+
+        let mut app = make_test_app();
+
+        // New Sub-Component modal renders parent header
+        app.modal = Some(ModalState::new_sub_component("core_bus"));
+        let sub_text = render_to_string(&mut app);
+        assert!(sub_text.contains("New Sub-Component"));
+        assert!(sub_text.contains("Parent: core_bus"));
+
+        // Edit Component modal renders Archetype and Add Sub-component fields
+        let comp = app.project.components[0].clone();
+        app.modal = Some(ModalState::edit_component(&comp));
+        let edit_text = render_to_string(&mut app);
+        assert!(edit_text.contains("Edit Component"));
+        assert!(edit_text.contains("Archetype: < Interface >"));
+        assert!(edit_text.contains("Add Sub-component:"));
+
+        // Edit Connection modal renders human-readable relationship preview
+        app.modal = Some(ModalState::edit_connection(
+            "view_box",
+            "core_bus",
+            EdgeKind::DependsOn,
+            None,
+        ));
+        let edge_text = render_to_string(&mut app);
+        assert!(edge_text.contains("Edit Connection"));
+        assert!(edge_text.contains("Edge: view_box depends on core_bus"));
     }
 }

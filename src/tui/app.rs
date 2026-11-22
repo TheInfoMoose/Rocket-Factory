@@ -551,7 +551,12 @@ impl App {
                 self.mode = InputMode::Navigate;
                 self.status_message = "Mode: Navigate".to_string();
             }
-            ModalAction::CreateComponent { id, name, kind } => {
+            ModalAction::CreateComponent {
+                id,
+                name,
+                kind,
+                parent_id: _,
+            } => {
                 if self.project.component(&id).is_some() {
                     let err = format!("component id '{id}' already exists");
                     if let ModalState::NewComponent(ref mut form) = modal {
@@ -605,10 +610,12 @@ impl App {
             ModalAction::UpdateComponent {
                 component_id,
                 name,
+                kind,
                 description,
                 relative_path,
                 tags,
                 add_feature,
+                add_sub_component: _,
             } => {
                 let Some(comp_idx) = self
                     .project
@@ -623,6 +630,7 @@ impl App {
 
                 let mut candidate = self.project.components[comp_idx].clone();
                 candidate.name = name.clone();
+                candidate.kind = kind;
                 candidate.description = description;
                 candidate.relative_path = relative_path;
                 candidate.tags = tags;
@@ -1396,6 +1404,7 @@ mod tests {
         // Edit selected component ('alpha') with 'e' and add a feature
         app.handle_key(key(KeyCode::Char('e')));
         assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Tab)); // archetype
         app.handle_key(key(KeyCode::Tab)); // description
         type_keys(&mut app, "Core alpha service");
         app.handle_key(key(KeyCode::Tab)); // path
@@ -1537,6 +1546,7 @@ mod tests {
 
         // 2. UpdateComponent rolls back fields and features on save failure
         app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Tab)); // archetype
         app.handle_key(key(KeyCode::Tab)); // description
         type_keys(&mut app, " mutated");
         app.handle_key(key(KeyCode::Tab)); // path

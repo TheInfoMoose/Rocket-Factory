@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::archetype::{ArchetypeSpec, ARCHETYPES};
+use crate::archetype::{archetype_for, ArchetypeSpec, ARCHETYPES};
 use crate::model::{Component, ComponentKind, EdgeKind};
 use crate::storage::validate_component_id;
 
@@ -24,11 +24,23 @@ pub fn edge_kind_label(kind: EdgeKind) -> &'static str {
     }
 }
 
+pub fn edge_relationship_preview(from: &str, to: &str, kind: EdgeKind) -> String {
+    match kind {
+        EdgeKind::DependsOn => format!("{from} depends on {to}"),
+        EdgeKind::DataFlow => format!("{from} sends data to {to}"),
+        EdgeKind::Renders => format!("{from} renders {to}"),
+        EdgeKind::Invokes => format!("{from} invokes {to}"),
+        EdgeKind::Contains => format!("{from} contains {to} (sub-component)"),
+        EdgeKind::Custom => format!("{from} -> {to}"),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewComponentForm {
     pub id: String,
     pub name: String,
     pub archetype_index: usize,
+    pub parent_id: Option<String>,
     pub active_field: usize,
     pub error: Option<String>,
 }
@@ -55,24 +67,33 @@ impl NewComponentForm {
 pub struct EditComponentForm {
     pub component_id: String,
     pub name: String,
+    pub archetype_index: usize,
     pub description: String,
     pub relative_path: String,
     pub tags: String,
     pub new_feature: String,
+    pub new_sub_component: String,
     pub active_field: usize,
     pub error: Option<String>,
 }
 
 impl EditComponentForm {
-    pub const FIELD_COUNT: usize = 5;
+    pub const FIELD_COUNT: usize = 7;
+
+    pub fn selected_archetype(&self) -> &'static ArchetypeSpec {
+        ARCHETYPES
+            .get(self.archetype_index)
+            .unwrap_or(&ARCHETYPES[0])
+    }
 
     fn active_text_mut(&mut self) -> Option<&mut String> {
         match self.active_field {
             0 => Some(&mut self.name),
-            1 => Some(&mut self.description),
-            2 => Some(&mut self.relative_path),
-            3 => Some(&mut self.tags),
-            4 => Some(&mut self.new_feature),
+            2 => Some(&mut self.description),
+            3 => Some(&mut self.relative_path),
+            4 => Some(&mut self.tags),
+            5 => Some(&mut self.new_feature),
+            6 => Some(&mut self.new_sub_component),
             _ => None,
         }
     }
@@ -156,14 +177,17 @@ pub enum ModalAction {
         id: String,
         name: String,
         kind: ComponentKind,
+        parent_id: Option<String>,
     },
     UpdateComponent {
         component_id: String,
         name: String,
+        kind: ComponentKind,
         description: String,
         relative_path: Option<String>,
         tags: Vec<String>,
         add_feature: Option<String>,
+        add_sub_component: Option<String>,
     },
     UpdateConnection {
         from: String,
@@ -207,19 +231,38 @@ impl ModalState {
             id: String::new(),
             name: String::new(),
             archetype_index: 0,
+            parent_id: None,
+            active_field: 0,
+            error: None,
+        })
+    }
+
+    pub fn new_sub_component(parent_id: impl Into<String>) -> Self {
+        Self::NewComponent(NewComponentForm {
+            id: String::new(),
+            name: String::new(),
+            archetype_index: 0,
+            parent_id: Some(parent_id.into()),
             active_field: 0,
             error: None,
         })
     }
 
     pub fn edit_component(comp: &Component) -> Self {
+        let target_kind = archetype_for(comp.kind).kind;
+        let archetype_index = ARCHETYPES
+            .iter()
+            .position(|spec| spec.kind == target_kind)
+            .unwrap_or(0);
         Self::EditComponent(EditComponentForm {
             component_id: comp.id.clone(),
             name: comp.name.clone(),
+            archetype_index,
             description: comp.description.clone(),
             relative_path: comp.relative_path.clone().unwrap_or_default(),
             tags: comp.tags.join(", "),
             new_feature: String::new(),
+            new_sub_component: String::new(),
             active_field: 0,
             error: None,
         })
@@ -277,7 +320,13 @@ impl ModalState {
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::NewComponent(_) => "New Component",
+            Self::NewComponent(form) => {
+                if form.parent_id.is_some() {
+                    "New Sub-Component"
+                } else {
+                    "New Component"
+                }
+            }
             Self::EditComponent(_) => "Edit Component",
             Self::EditConnection(_) => "Edit Connection",
             Self::Help => "Keyboard Help",
@@ -361,6 +410,7 @@ fn handle_new_component_key(form: &mut NewComponentForm, key: KeyEvent) -> Modal
                 id: id.to_string(),
                 name: name.to_string(),
                 kind: form.selected_archetype().kind,
+                parent_id: form.parent_id.clone(),
             }
         }
         _ => {
@@ -383,6 +433,16 @@ fn handle_edit_component_key(form: &mut EditComponentForm, key: KeyEvent) -> Mod
         }
         KeyCode::BackTab | KeyCode::Up => {
             form.active_field = cycle_prev(form.active_field, EditComponentForm::FIELD_COUNT);
+            ModalAction::None
+        }
+        KeyCode::Left if form.active_field == 1 => {
+            form.archetype_index = cycle_prev(form.archetype_index, ARCHETYPES.len());
+            form.error = None;
+            ModalAction::None
+        }
+        KeyCode::Right if form.active_field == 1 => {
+            form.archetype_index = cycle_next(form.archetype_index, ARCHETYPES.len());
+            form.error = None;
             ModalAction::None
         }
         KeyCode::Backspace => {
@@ -418,14 +478,22 @@ fn handle_edit_component_key(form: &mut EditComponentForm, key: KeyEvent) -> Mod
             } else {
                 Some(trimmed_feature.to_string())
             };
+            let trimmed_sub = form.new_sub_component.trim();
+            let add_sub_component = if trimmed_sub.is_empty() {
+                None
+            } else {
+                Some(trimmed_sub.to_string())
+            };
             form.error = None;
             ModalAction::UpdateComponent {
                 component_id: form.component_id.clone(),
                 name: name.to_string(),
+                kind: form.selected_archetype().kind,
                 description,
                 relative_path,
                 tags,
                 add_feature,
+                add_sub_component,
             }
         }
         _ => {
@@ -596,6 +664,31 @@ mod tests {
                 id: "telemetry_bus".to_string(),
                 name: "Telemetry".to_string(),
                 kind: ComponentKind::Interface,
+                parent_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn new_sub_component_sets_title_and_emits_parent_id() {
+        let mut modal = ModalState::new_sub_component("core_bus");
+        assert_eq!(modal.title(), "New Sub-Component");
+
+        type_text(&mut modal, "bus_worker");
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        type_text(&mut modal, "Bus Worker");
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Right)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Right)), ModalAction::None);
+
+        let action = modal.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            action,
+            ModalAction::CreateComponent {
+                id: "bus_worker".to_string(),
+                name: "Bus Worker".to_string(),
+                kind: ComponentKind::Logic,
+                parent_id: Some("core_bus".to_string()),
             }
         );
     }
@@ -622,29 +715,41 @@ mod tests {
         let mut modal = ModalState::edit_component(&comp);
         assert_eq!(modal.title(), "Edit Component");
 
-        // Submit without adding a feature -> add_feature is None
+        // Submit without adding a feature -> add_feature and add_sub_component are None
         let initial_action = modal.handle_key(key(KeyCode::Enter));
         assert_eq!(
             initial_action,
             ModalAction::UpdateComponent {
                 component_id: "ui_view".to_string(),
                 name: "UI View".to_string(),
+                kind: ComponentKind::Interface,
                 description: "Primary screen".to_string(),
                 relative_path: Some("src/tui/ui.rs".to_string()),
                 tags: vec!["ui".to_string(), "view".to_string()],
                 add_feature: None,
+                add_sub_component: None,
             }
         );
 
-        // Move to tags (field 3), append messy comma-separated tags
+        // Move to archetype (field 1), cycle right (Interface -> Logic), then left (Logic -> Interface), then right (Logic)
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Right)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Left)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Right)), ModalAction::None);
+
+        // Move to tags (field 4): Tab past description (2), path (3), to tags (4)
         assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
         assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
         assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
         type_text(&mut modal, ",  modal , , layout ");
 
-        // Move to new_feature (field 4) and type a feature title
+        // Move to new_feature (field 5) and type a feature title
         assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
         type_text(&mut modal, "Render modal overlay");
+
+        // Move to new_sub_component (field 6) and type a sub-component name
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        type_text(&mut modal, "  Modal Renderer  ");
 
         let updated = modal.handle_key(key(KeyCode::Enter));
         assert_eq!(
@@ -652,6 +757,7 @@ mod tests {
             ModalAction::UpdateComponent {
                 component_id: "ui_view".to_string(),
                 name: "UI View".to_string(),
+                kind: ComponentKind::Logic,
                 description: "Primary screen".to_string(),
                 relative_path: Some("src/tui/ui.rs".to_string()),
                 tags: vec![
@@ -661,7 +767,36 @@ mod tests {
                     "layout".to_string(),
                 ],
                 add_feature: Some("Render modal overlay".to_string()),
+                add_sub_component: Some("Modal Renderer".to_string()),
             }
+        );
+    }
+
+    #[test]
+    fn edge_relationship_preview_formats_all_variants() {
+        assert_eq!(
+            edge_relationship_preview("api", "db", EdgeKind::DependsOn),
+            "api depends on db"
+        );
+        assert_eq!(
+            edge_relationship_preview("ingest", "queue", EdgeKind::DataFlow),
+            "ingest sends data to queue"
+        );
+        assert_eq!(
+            edge_relationship_preview("shell", "canvas", EdgeKind::Renders),
+            "shell renders canvas"
+        );
+        assert_eq!(
+            edge_relationship_preview("cli", "runner", EdgeKind::Invokes),
+            "cli invokes runner"
+        );
+        assert_eq!(
+            edge_relationship_preview("core", "worker", EdgeKind::Contains),
+            "core contains worker (sub-component)"
+        );
+        assert_eq!(
+            edge_relationship_preview("alpha", "beta", EdgeKind::Custom),
+            "alpha -> beta"
         );
     }
 
