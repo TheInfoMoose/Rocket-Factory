@@ -2,30 +2,70 @@
 
 Rocket Factory is a Rust terminal user interface (`ratatui`) and CLI tool for planning application architectures using `.rocket/` TOML metadata files, Markdown component specifications, and external command-based adapters.
 
-## Overview & Quickstart
+## Prerequisites
 
-### Build and Install
+- **Rust** (stable toolchain, installed via [rustup](https://rustup.rs/))
+- **Git** (`git` CLI)
 
-```bash
-# Build release binary (target/release/rf)
-cargo build --release
+## Installation
 
-# Install `rf` into Cargo's bin directory
-cargo install --path .
-```
-
-### Initialize a Workspace and Launch the TUI
+### Install directly from Git (recommended)
 
 ```bash
-# Create .rocket/project.toml and .rocket/components/ in the target directory
-rf --path ./my-project init --name "my-project" --description "Service architecture blueprint"
-
-# Or initialize in the current directory (--path defaults to ".")
-rf init --name "my-project" --description "Service architecture blueprint"
-
-# Launch the interactive three-column TUI
-rf --path ./my-project
+cargo install --git https://github.com/TheInfoMoose/Rocket-Factory.git --locked
 ```
+
+### Build and install from a local clone
+
+```bash
+git clone https://github.com/TheInfoMoose/Rocket-Factory.git
+cd Rocket-Factory
+
+# Install `rf` into ~/.cargo/bin
+cargo install --path . --locked
+
+# Or build the release binary without installing (target/release/rf)
+cargo build --release --locked
+```
+
+### Verify installation & PATH
+
+`cargo install` places the `rf` binary in `~/.cargo/bin`. Ensure `$HOME/.cargo/bin` is on your `PATH`, then verify the installation:
+
+```bash
+rf --help
+```
+
+## Quick Start
+
+1. **Initialize a workspace** (creates `./my-project/.rocket/` automatically):
+
+   ```bash
+   rf --path ./my-project init --name "my-project" --description "Service architecture blueprint"
+   ```
+
+   Or initialize inside an existing project directory (`--path` defaults to `.`):
+
+   ```bash
+   rf init --name "my-project"
+   ```
+
+2. **Launch the interactive TUI** (requires an initialized `.rocket/` workspace — run `rf init` first):
+
+   ```bash
+   rf --path ./my-project
+   ```
+
+   Or run `rf` directly inside the workspace directory.
+
+3. **Explore the TUI & verify via CLI**:
+
+   - Press `n` to add a component, `?` for keyboard help, and `q` to quit.
+   - Optionally run a CLI audit on the workspace:
+
+     ```bash
+     rf --path ./my-project audit
+     ```
 
 ## CLI Reference
 
