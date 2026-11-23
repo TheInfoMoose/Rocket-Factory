@@ -144,6 +144,49 @@ fn component_depth(app: &App, comp_id: &str) -> usize {
     depth
 }
 
+fn format_component_list_label(
+    indent: &str,
+    expand_prefix: &str,
+    glyph: &str,
+    name: &str,
+    complete: usize,
+    total: usize,
+    inner_width: usize,
+) -> String {
+    let prefix = format!("{indent}{expand_prefix}{glyph} ");
+    let suffix = format!(" ({complete}/{total})");
+    let prefix_w = Line::from(prefix.as_str()).width();
+    let suffix_w = Line::from(suffix.as_str()).width();
+    let name_w = Line::from(name).width();
+
+    if prefix_w + name_w + suffix_w <= inner_width {
+        return format!("{prefix}{name}{suffix}");
+    }
+
+    let avail_name_w = inner_width.saturating_sub(prefix_w.saturating_add(suffix_w));
+    let truncated_name = if avail_name_w == 0 {
+        String::new()
+    } else if avail_name_w == 1 {
+        "…".to_string()
+    } else {
+        let mut out = String::new();
+        let target = avail_name_w - 1;
+        let mut used = 0usize;
+        for ch in name.chars() {
+            let ch_w = Line::from(ch.to_string()).width();
+            if used + ch_w > target {
+                break;
+            }
+            out.push(ch);
+            used += ch_w;
+        }
+        out.push('…');
+        out
+    };
+
+    format!("{prefix}{truncated_name}{suffix}")
+}
+
 fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
     let title = match app.filter {
         ListFilter::All => " Components ",
@@ -168,6 +211,7 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    let inner_width = usize::from(area.width.saturating_sub(2));
     let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
@@ -191,9 +235,14 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 ""
             };
-            let label = format!(
-                "{indent}{expand_prefix}{glyph} {} ({}/{})",
-                comp.name, progress.complete, progress.total
+            let label = format_component_list_label(
+                &indent,
+                expand_prefix,
+                glyph,
+                &comp.name,
+                progress.complete,
+                progress.total,
+                inner_width,
             );
             let item_style = if row_idx == app.selected_index {
                 style::selected_row_style(&app.theme)
@@ -440,6 +489,47 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
+fn wrapped_line_count(lines: &[Line<'_>], inner_width: u16) -> u16 {
+    let max_w = usize::from(inner_width);
+    if max_w == 0 {
+        return u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    }
+    let mut total: usize = 0;
+    for line in lines {
+        let line_w = line.width();
+        if line_w <= max_w {
+            total = total.saturating_add(1);
+            continue;
+        }
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let mut cur_w = 0usize;
+        let mut rows = 1usize;
+        for segment in text.split_inclusive(char::is_whitespace) {
+            let seg_w = Line::from(segment).width();
+            if cur_w == 0 {
+                if seg_w <= max_w {
+                    cur_w = seg_w;
+                } else {
+                    rows = rows.saturating_add(seg_w.saturating_sub(1) / max_w);
+                    cur_w = ((seg_w - 1) % max_w) + 1;
+                }
+            } else if cur_w + seg_w <= max_w {
+                cur_w += seg_w;
+            } else {
+                rows = rows.saturating_add(1);
+                if seg_w <= max_w {
+                    cur_w = seg_w;
+                } else {
+                    rows = rows.saturating_add(seg_w.saturating_sub(1) / max_w);
+                    cur_w = ((seg_w - 1) % max_w) + 1;
+                }
+            }
+        }
+        total = total.saturating_add(rows);
+    }
+    u16::try_from(total).unwrap_or(u16::MAX)
+}
+
 fn modal_field_line(label: &str, value: &str, active: bool, theme: &Theme) -> Line<'static> {
     let prefix = if active { "> " } else { "  " };
     let field_style = if active {
@@ -567,39 +657,81 @@ fn render_modal(
             form.error.as_deref()
         }
         ModalState::Help => {
-            const LEFT_COL_WIDTH: usize = 34;
-            let left_rows: &[(&str, bool)] = &[
-                (" Navigation", true),
-                (" Tab / Shift+Tab  Cycle focus", false),
-                (" hjkl / Arrows    Move / Scroll", false),
-                (" f                Gaps Only filter", false),
-                (" Space / Enter    Expand/collapse", false),
-                (" Editing & Canvas", true),
-                (" n                New component", false),
-                (" a                Add sub-comp", false),
-                (" e                Edit component", false),
-                (" E                Edit edge", false),
-                (" d                Delete component", false),
-                (" D                Delete edge", false),
-                (" m                Move card mode", false),
-                (" c                Connect cards", false),
-                (" v                Edit Markdown", false),
-            ];
-            let right_rows: &[(&str, bool)] = &[
-                (" Zoom", true),
-                (" + / =  Zoom in", false),
-                (" -      Zoom out", false),
-                (" Sync & Display", true),
-                (" r / S  Pull status from active adapters", false),
-                (" p      Push selected component", false),
-                (" t      Switch RON theme", false),
-                (" General", true),
-                (" ?      Toggle this keyboard help", false),
-                (" Esc    Cancel current mode", false),
-                (" Enter  Confirm connect target", false),
-                (" q      Quit", false),
-                (" Ctrl+C Force quit", false),
-            ];
+            type HelpRows = &'static [(&'static str, bool)];
+            let (left_col_width, left_rows, right_rows): (usize, HelpRows, HelpRows) =
+                if area.width < 80 {
+                    (
+                        28,
+                        &[
+                            (" Navigation", true),
+                            (" Tab/S-Tab  Cycle focus", false),
+                            (" hjkl/Arr   Move / Scroll", false),
+                            (" f          Gaps Only filter", false),
+                            (" Spc/Enter  Expand/collapse", false),
+                            (" Editing & Canvas", true),
+                            (" n          New component", false),
+                            (" a          Add sub-comp", false),
+                            (" e          Edit component", false),
+                            (" E          Edit edge", false),
+                            (" d          Delete component", false),
+                            (" D          Delete edge", false),
+                            (" m          Move card mode", false),
+                            (" c          Connect cards", false),
+                            (" v          Edit Markdown", false),
+                        ],
+                        &[
+                            (" Zoom", true),
+                            (" + / =  Zoom in", false),
+                            (" -      Zoom out", false),
+                            (" Sync & Display", true),
+                            (" r / S  Pull adapter status", false),
+                            (" p      Push selected", false),
+                            (" t      Switch RON theme", false),
+                            (" General", true),
+                            (" ?      Toggle help", false),
+                            (" Esc    Cancel mode", false),
+                            (" Enter  Confirm connect", false),
+                            (" q      Quit", false),
+                            (" Ctrl+C Force quit", false),
+                        ],
+                    )
+                } else {
+                    (
+                        34,
+                        &[
+                            (" Navigation", true),
+                            (" Tab / Shift+Tab  Cycle focus", false),
+                            (" hjkl / Arrows    Move / Scroll", false),
+                            (" f                Gaps Only filter", false),
+                            (" Space / Enter    Expand/collapse", false),
+                            (" Editing & Canvas", true),
+                            (" n                New component", false),
+                            (" a                Add sub-comp", false),
+                            (" e                Edit component", false),
+                            (" E                Edit edge", false),
+                            (" d                Delete component", false),
+                            (" D                Delete edge", false),
+                            (" m                Move card mode", false),
+                            (" c                Connect cards", false),
+                            (" v                Edit Markdown", false),
+                        ],
+                        &[
+                            (" Zoom", true),
+                            (" + / =  Zoom in", false),
+                            (" -      Zoom out", false),
+                            (" Sync & Display", true),
+                            (" r / S  Pull status from active adapters", false),
+                            (" p      Push selected component", false),
+                            (" t      Switch RON theme", false),
+                            (" General", true),
+                            (" ?      Toggle this keyboard help", false),
+                            (" Esc    Cancel current mode", false),
+                            (" Enter  Confirm connect target", false),
+                            (" q      Quit", false),
+                            (" Ctrl+C Force quit", false),
+                        ],
+                    )
+                };
 
             let total_rows = left_rows.len().max(right_rows.len());
             for row_idx in 0..total_rows {
@@ -610,7 +742,7 @@ fn render_modal(
                         let l_style = if l_heading { heading_style } else { base };
                         let r_style = if r_heading { heading_style } else { base };
                         lines.push(Line::from(vec![
-                            Span::styled(format!("{l_text:<LEFT_COL_WIDTH$}"), l_style),
+                            Span::styled(format!("{l_text:<left_col_width$}"), l_style),
                             Span::styled("  ", base),
                             Span::styled(r_text, r_style),
                         ]));
@@ -622,7 +754,7 @@ fn render_modal(
                     (None, Some((r_text, r_heading))) => {
                         let r_style = if r_heading { heading_style } else { base };
                         lines.push(Line::from(vec![
-                            Span::styled(" ".repeat(LEFT_COL_WIDTH + 2), base),
+                            Span::styled(" ".repeat(left_col_width + 2), base),
                             Span::styled(r_text, r_style),
                         ]));
                     }
@@ -720,7 +852,10 @@ fn render_modal(
         .max(content_width)
         .clamp(54, 78)
         .min(max_popup_width);
-    let popup_height = (lines.len() as u16).saturating_add(2);
+    let popup_inner_width = popup_width.saturating_sub(2);
+    let popup_height = wrapped_line_count(&lines, popup_inner_width)
+        .saturating_add(2)
+        .min(area.height);
     let popup_area = centered_rect(popup_width, popup_height, area);
 
     let block = Block::default()
@@ -945,7 +1080,8 @@ mod tests {
         assert!(!base_text.contains("[r/S] Sync"));
 
         // Help modal
-        app.modal = Some(ModalState::help());
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         let help_text = render_to_string(&mut app);
         assert!(help_text.contains("Keyboard Help"));
         assert!(help_text.contains("Tab / Shift+Tab"));
@@ -1019,8 +1155,10 @@ mod tests {
 
     #[test]
     fn render_help_modal_fits_80x24_without_wrapping_or_footer_clipping() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
         let mut app = make_test_app();
-        app.modal = Some(ModalState::help());
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1108,8 +1246,10 @@ mod tests {
 
     #[test]
     fn render_component_list_shows_expand_collapse_indicators_and_nested_indentation() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
         let mut app = make_test_app();
-        app.viewport.zoom = crate::tui::canvas::ZoomLevel::Normal;
+        app.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE));
         app.project.components.push(Component {
             id: "bus_worker".to_string(),
             name: "bus_worker".to_string(),
@@ -1267,5 +1407,99 @@ mod tests {
                 "expected card N{idx:02} in 4x4 compact canvas"
             );
         }
+    }
+
+    #[test]
+    fn render_help_modal_shows_close_hint_at_68_and_79_cols() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        for width in [68u16, 79u16] {
+            let mut app = make_test_app();
+            app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+
+            let backend = TestBackend::new(width, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    text.push_str(buffer[(x, y)].symbol());
+                }
+                text.push('\n');
+            }
+
+            assert!(
+                text.contains("Keyboard Help"),
+                "expected Keyboard Help title at {width}x24"
+            );
+            assert!(
+                text.contains("[Esc/?/Enter/q] Close"),
+                "expected close hint without clipping at {width}x24:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_component_list_preserves_task_count_when_narrow() {
+        let mut app = make_test_app();
+        app.project.components.push(Component {
+            id: "bus_worker".to_string(),
+            name: "bus_worker".to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: Some("core_bus".to_string()),
+            description: "Worker sub-component".to_string(),
+            relative_path: Some("src/bus_worker.rs".to_string()),
+            position: GridPos { col: 1, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+        app.project.components.push(Component {
+            id: "worker_pool".to_string(),
+            name: "worker_pool".to_string(),
+            kind: ComponentKind::Data,
+            parent_id: Some("bus_worker".to_string()),
+            description: "Nested pool".to_string(),
+            relative_path: Some("src/worker_pool.rs".to_string()),
+            position: GridPos { col: 1, row: 2 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        });
+        app.expanded_components.insert("core_bus".to_string());
+        app.expanded_components.insert("bus_worker".to_string());
+
+        let backend = TestBackend::new(120, 35);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let list_rect = column_layout(Rect::new(0, 3, 120, 31))[0];
+        let mut list_rows: Vec<String> = Vec::new();
+        for y in list_rect.y..list_rect.y.saturating_add(list_rect.height) {
+            let mut row = String::new();
+            for x in list_rect.x..list_rect.x.saturating_add(list_rect.width) {
+                row.push_str(buffer[(x, y)].symbol());
+            }
+            list_rows.push(row);
+        }
+
+        let depth2_row = list_rows
+            .iter()
+            .find(|row| row.contains("    └─ "))
+            .expect("expected depth-2 worker_pool row in component list");
+        assert!(
+            depth2_row.contains("(0/0)"),
+            "expected preserved (0/0) task count in narrow list row, got: {depth2_row:?}"
+        );
     }
 }
