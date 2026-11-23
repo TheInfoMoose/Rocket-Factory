@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0067"
 type = "task"
 title = "ui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T02:25:30Z"
-updated_at = "2026-11-23T02:25:30Z"
+updated_at = "2026-11-23T02:30:32Z"
 source_ref = "STEP 14A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0067@2026-11-23T02:28:20Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "c02c609"
+summary = "STEP 14A: Keyboard Help Connect-Direction Clarity & Canvas Scale Verification (`FEAT-0002`, `FEAT-0003`, `FEAT-0004`) (phased check PASS)"
