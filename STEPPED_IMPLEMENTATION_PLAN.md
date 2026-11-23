@@ -90,7 +90,63 @@
 
 ### Future phases
 
-_None planned yet — add future phases via `project-plan` after Phase 14 review._
+**Decisions (2026-11-23):**
+- Rebrand app from **Rocket Factory** (`rf`) to **Rocket Bench** (`rktb`), crate `rocket-bench` (`rocket_bench`), env `RKTB_POLL_INTERVAL_SECS`, error types `RbError`/`RbResult`, user config `~/.config/rocket-bench/`.
+- Keep `.rocket/` project workspace directory (no directory rename or fallback needed).
+- Organize all 63 open items (Rebrand + 62 audit findings) into Phases 15–20.
+
+#### Phase 15: Rebrand to Rocket Bench (`rktb`) & Metadata Reconciliation
+- **Goal:** Rebrand the crate, binary (`rktb`), env var (`RKTB_POLL_INTERVAL_SECS`), error types (`RbError`/`RbResult`), user config dir (`~/.config/rocket-bench/`), UI/CLI/docs/CI references to Rocket Bench/`rktb` (keeping `.rocket/`), exclude `docs/**` from packaging, set MSRV `1.88`, and reconcile post-Phase-14 plan/tracker/Orrery metadata drift (`FEAT-0006`, `TASK-0088`, `TASK-0089`, `TASK-0090`, `TASK-0092`, `TASK-0093`).
+- **Done looks like:** `cargo build --bin rktb`, `cargo test --workspace`, and `cargo package --locked` succeed with `rktb` binary, `docs/**` excluded, MSRV `1.88` set, `.rocket/` preserved, and `STEP 14A`/`14B` metadata reconciled.
+- **Steps:**
+  - **STEP 15A:** Reconcile post-Phase-14 plan, `.orrery/phase.toml`, and `.tracker/` metadata (`TASK-0093`)
+  - **STEP 15B:** Rebrand `Cargo.toml` (`rocket-bench`, `rktb`, MSRV `1.88`, `docs/**` exclude, release profile/lints) and `src/error.rs` (`RbError`, `RbResult`) (`FEAT-0006`, `TASK-0088`, `TASK-0089`, `TASK-0090`)
+  - **STEP 15C:** Rebrand `src/` (`RKTB_POLL_INTERVAL_SECS`, `~/.config/rocket-bench/`, TUI title bar, CLI help/about) (`FEAT-0006`)
+  - **STEP 15D:** Rebrand `tests/`, `README.md`, `LICENSE`, `.github/workflows/ci.yml`, and archive/update `Rocket Factory.md` (`FEAT-0006`, `TASK-0092`)
+
+#### Phase 16: Workflow Scripts & Security Hardening
+- **Goal:** Fix all security vulnerabilities (`SEC-01`–`SEC-06`) and phased-workflow script bugs (`SCR-01`–`SCR-07`) (`BUG-0018`–`BUG-0023`, `BUG-0047`–`BUG-0053`).
+- **Done looks like:** `scripts/phased-step.sh` and `scripts/neon-dispatch` pass static checks with strict gate/TOML handling; adapters require explicit config or opt-in, subprocesses have timeout/bounded pipes, and path/terminal/editor inputs are hardened.
+- **Steps:**
+  - **STEP 16A:** Harden `scripts/phased-step.sh` and `scripts/neon-dispatch` (`BUG-0047`–`BUG-0053`)
+  - **STEP 16B:** Fix `default_adapters_path()` CWD fallback and disable unsafe startup auto-pull (`BUG-0018`)
+  - **STEP 16C:** Harden `run_command_with_stdin` pipe deadlock, timeout, and output bounds (`BUG-0019`)
+  - **STEP 16D:** Harden symlink containment in `storage.rs` and `theme.rs` (`BUG-0020`, `BUG-0023`)
+  - **STEP 16E:** Fix `$EDITOR` quoted-path parsing and sanitize control characters in terminal/modal input (`BUG-0021`, `BUG-0022`)
+
+#### Phase 17: Architecture Refactor, Adapter Sync & Core Durability
+- **Goal:** Split the `src/tui/app.rs` monolith, consolidate CLI/TUI adapter sync, clean up `RbError`/public crate surface, and fix core model/storage/audit/export/adapter/CLI durability bugs (`TASK-0069`–`TASK-0073`, `TASK-0076`, `BUG-0033`–`BUG-0039`, `BUG-0044`–`BUG-0046`).
+- **Done looks like:** `app.rs` is split into focused submodules, CLI and TUI share one atomic sync path, and all core model/storage/audit/export/adapter/CLI bugs are resolved.
+- **Steps:**
+  - **STEP 17A:** Clean up `RbError` variants and narrow over-exposed `pub` crate surface (`TASK-0072`, `TASK-0073`)
+  - **STEP 17B:** Harden `model.rs` serde defaults/`GridConfig` validation, `storage.rs` durability/duplicate-ID checks, and missing `.rocket/` mutation guard (`BUG-0033`, `BUG-0034`, `BUG-0035`, `BUG-0039`)
+  - **STEP 17C:** Fix `audit_project` structural checks, `export.rs` manifest/Markdown escaping, and `cli.rs` exit/env/`--component` bugs (`BUG-0038`, `BUG-0044`, `BUG-0046`)
+  - **STEP 17D:** Consolidate adapter sync orchestration into `src/adapter.rs`, fix multi-adapter/push/UTF-8 bugs, and avoid full `Project` deep clone (`TASK-0070`, `TASK-0076`, `BUG-0036`, `BUG-0037`, `BUG-0045`)
+  - **STEP 17E:** Split `src/tui/app.rs` into focused submodules, deduplicate grid/path helpers, and preserve legacy `ComponentKind` on edit (`TASK-0069`, `TASK-0071`)
+
+#### Phase 18: TUI, Canvas & Responsiveness Fixes
+- **Goal:** Fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`) and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
+- **Done looks like:** Component list and detail panel scroll properly, canvas handles Unicode and overlapping edges cleanly, TUI mutations roll back atomically, and adapter sync runs off the UI thread with dirty-flag redraws.
+- **Steps:**
+  - **STEP 18A:** Fix component list scrolling (`ListState`), `detail_scroll` clamping, and `GapsOnly` selection clamping (`BUG-0024`, `BUG-0027`, `BUG-0040`)
+  - **STEP 18B:** Fix `parent_id` cycle visibility, `confirm_connect`/`Contains` edge handling, `E/D` multi-edge & `InputMode` guards, and `UpdateComponent`/multi-file rollback (`BUG-0026`, `BUG-0028`, `BUG-0029`, `BUG-0041`, `BUG-0042`)
+  - **STEP 18C:** Fix `canvas.rs` Unicode display width, `u16::MAX` proximity loop, overlapping edge/label routing, and touching-card routing (`BUG-0025`, `BUG-0030`, `BUG-0031`, `BUG-0043`)
+  - **STEP 18D:** Fix `run_tui` error propagation, `$EDITOR` restore safety, async adapter `mpsc` channel, dirty-flag event loop, and per-frame TUI render allocations (`BUG-0032`, `TASK-0074`, `TASK-0075`, `TASK-0077`)
+
+#### Phase 19: Comprehensive Test Coverage
+- **Goal:** Close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
+- **Done looks like:** `rktb` binary CLI is tested end-to-end via `CARGO_BIN_EXE_rktb`, `terminal.rs` and `storage.rs` edge/error paths are covered, and E2E tests are cross-platform.
+- **Steps:**
+  - **STEP 19A:** Add `CARGO_BIN_EXE_rktb` CLI subprocess integration tests and decouple Unix-only `sh -c` mocks in `tests/e2e.rs` (`TASK-0078`, `TASK-0082`)
+  - **STEP 19B:** Add `terminal.rs` runtime/event-loop/suspend-restore tests and `storage.rs` error-path/symlink tests (`TASK-0079`, `TASK-0080`)
+  - **STEP 19C:** Close remaining core module unit-test branch gaps (`cli`, `adapter`, `audit`, `export`, `model`, `theme`, `error`, `style`) (`TASK-0081`)
+
+#### Phase 20: CI, Documentation & Release Readiness
+- **Goal:** Harden GitHub Actions CI, add cross-platform matrix and tag-triggered release workflow, complete `README.md` documentation, and audit `.gitignore` / tracked harness metadata (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`).
+- **Done looks like:** CI pins immutable SHAs, runs `--locked` + `cargo doc` + cross-platform checks + release workflow, `README.md` is complete for `rktb`, and `.gitignore`/harness metadata is clean.
+- **Steps:**
+  - **STEP 20A:** Harden `.github/workflows/ci.yml` (pin SHAs, `--locked`, `cargo doc`, `shellcheck`/script checks, cross-platform matrix, tag release workflow) (`TASK-0083`, `TASK-0084`, `TASK-0085`, `TASK-0086`)
+  - **STEP 20B:** Update `.gitignore`, complete `README.md` (license, testing, release, `rktb` docs), and review tracked harness metadata (`TASK-0087`, `TASK-0091`, `TASK-0094`)
 
 _Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
