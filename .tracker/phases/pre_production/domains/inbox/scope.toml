@@ -74,6 +74,55 @@ status = "closed"
 severity = "low"
 created_at = "2026-11-22T04:17:04Z"
 
+[[items.bugs]]
+id = "BUG-0011"
+title = "Keyboard Help clips its Close hint on 68-79 column terminals"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0012"
+title = "Narrower component list clips nested task counts"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0013"
+title = "Zooming out leaves cards scrolled off-screen"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0014"
+title = "Selected card disappears on narrow canvas outside relative row 0"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0015"
+title = "Top-level create and card move half-save when grid config write fails"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0016"
+title = "Sub-component create half-saves when grid config write fails"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.bugs]]
+id = "BUG-0017"
+title = "Right or Down moves an out-of-grid card backwards"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T20:22:04Z"
+
 [[items.features]]
 id = "FEAT-0001"
 title = "Modular Components, Sub-Components & Lightweight Mutable Archetypes"
@@ -521,3 +570,24 @@ title = "tests"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T19:34:07Z"
+
+[[items.tasks]]
+id = "TASK-0060"
+title = "Decide on footer hints lost at 80 and 112-116 columns"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.tasks]]
+id = "TASK-0061"
+title = "Make Phase 12 unit tests use real key and render paths"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"
+
+[[items.tasks]]
+id = "TASK-0062"
+title = "Close Phase 12 E2E gaps in navigation, zoom and grid expansion"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-22T20:22:04Z"

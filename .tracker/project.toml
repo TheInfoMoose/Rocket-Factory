@@ -6,9 +6,9 @@ default_scope = "inbox"
 created_at = "2026-11-21T22:46:51Z"
 
 [counters]
-bug = 10
+bug = 17
 feature = 5
-task = 59
+task = 62
 
 [[phases.registry]]
 id = "pre_production"
