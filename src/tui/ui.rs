@@ -51,6 +51,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         crate::tui::canvas::visible_grid_capacity_for(canvas_inner, app.viewport.zoom);
     app.last_canvas_capacity = Some((vis_cols, vis_rows));
 
+    let occupied_cols = app
+        .project
+        .components
+        .iter()
+        .map(|c| c.position.col.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    let occupied_rows = app
+        .project
+        .components
+        .iter()
+        .map(|c| c.position.row.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    crate::tui::canvas::clamp_viewport_scroll(
+        canvas_inner,
+        &mut app.viewport,
+        occupied_cols,
+        occupied_rows,
+    );
+
     if let Some(selected_pos) = app.selected_component().map(|selected| selected.position) {
         crate::tui::canvas::ensure_visible(canvas_inner, &mut app.viewport, selected_pos);
     }

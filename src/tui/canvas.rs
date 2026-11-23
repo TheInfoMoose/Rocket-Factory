@@ -139,10 +139,26 @@ pub fn card_rect(inner: Rect, viewport: CanvasViewport, pos: GridPos) -> Option<
         });
     }
 
-    if rel_col == 0 && rel_row == 0 && inner.width >= 4 && inner.height >= 3 {
-        let width = metrics.card_width.min(max_x.saturating_sub(x));
-        let height = metrics.card_height.min(max_y.saturating_sub(y));
-        if width >= 3 && height >= 2 {
+    if inner.width >= 4 && inner.height >= 3 {
+        let width = if rel_col == 0 {
+            let clamped = metrics.card_width.min(max_x.saturating_sub(x));
+            (clamped >= 3).then_some(clamped)
+        } else if x.saturating_add(metrics.card_width) <= max_x {
+            Some(metrics.card_width)
+        } else {
+            None
+        };
+
+        let height = if rel_row == 0 {
+            let clamped = metrics.card_height.min(max_y.saturating_sub(y));
+            (clamped >= 2).then_some(clamped)
+        } else if y.saturating_add(metrics.card_height) <= max_y {
+            Some(metrics.card_height)
+        } else {
+            None
+        };
+
+        if let (Some(width), Some(height)) = (width, height) {
             return Some(Rect {
                 x,
                 y,
@@ -153,6 +169,19 @@ pub fn card_rect(inner: Rect, viewport: CanvasViewport, pos: GridPos) -> Option<
     }
 
     None
+}
+
+pub fn clamp_viewport_scroll(
+    inner: Rect,
+    viewport: &mut CanvasViewport,
+    occupied_cols: u16,
+    occupied_rows: u16,
+) {
+    let (vis_cols, vis_rows) = visible_grid_capacity_for(inner, viewport.zoom);
+    let max_scroll_col = occupied_cols.saturating_sub(vis_cols);
+    let max_scroll_row = occupied_rows.saturating_sub(vis_rows);
+    viewport.scroll_col = viewport.scroll_col.min(max_scroll_col);
+    viewport.scroll_row = viewport.scroll_row.min(max_scroll_row);
 }
 
 pub fn visible_grid_capacity_for(inner: Rect, zoom: ZoomLevel) -> (u16, u16) {
@@ -1137,5 +1166,201 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(narrow_text.contains("Alpha"));
+    }
+
+    fn rect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+        (area.y..area.y.saturating_add(area.height))
+            .map(|y| {
+                (area.x..area.x.saturating_add(area.width))
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn card_rect_narrow_canvas_draws_selected_row_one() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::{Constraint, Layout};
+        use ratatui::widgets::Borders;
+        use ratatui::Terminal;
+
+        let mut app =
+            make_canvas_test_app(GridPos { col: 0, row: 0 }, GridPos { col: 0, row: 1 }, None);
+        app.selected_index = 1;
+        app.viewport = CanvasViewport {
+            scroll_col: 0,
+            scroll_row: 0,
+            zoom: ZoomLevel::Expanded,
+        };
+
+        let term_area = Rect::new(0, 0, 60, 24);
+        let chunks = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(term_area);
+        let cols = crate::tui::ui::column_layout(chunks[1]);
+        let canvas_inner = Block::default().borders(Borders::ALL).inner(cols[1]);
+
+        let rect = card_rect(canvas_inner, app.viewport, GridPos { col: 0, row: 1 });
+        assert!(
+            rect.is_some(),
+            "expected card_rect to return Some for (0, 1) on narrow Expanded canvas"
+        );
+
+        let backend = TestBackend::new(term_area.width, term_area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| crate::tui::ui::render(frame, &mut app))
+            .unwrap();
+
+        let canvas_text = rect_text(terminal.backend().buffer(), cols[1]);
+        assert!(
+            canvas_text.contains("Beta"),
+            "expected selected row-1 card 'Beta' in narrow canvas:\n{canvas_text}"
+        );
+    }
+
+    #[test]
+    fn zoom_out_pulls_scroll_back_to_show_all_fitting_cards() {
+        use std::path::PathBuf;
+
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::{Constraint, Layout};
+        use ratatui::Terminal;
+
+        use crate::model::{Component, ComponentKind, GridConfig, Project, ProjectConfig};
+        use crate::theme::default_theme;
+
+        let names = ["Alpha", "Beta", "Gamma", "Delta"];
+        let components = names
+            .iter()
+            .enumerate()
+            .map(|(col, name)| Component {
+                id: name.to_lowercase(),
+                name: (*name).to_string(),
+                kind: ComponentKind::Logic,
+                parent_id: None,
+                description: format!("{name} service"),
+                relative_path: Some(format!("src/{}.rs", name.to_lowercase())),
+                position: GridPos {
+                    col: col as u16,
+                    row: 0,
+                },
+                tags: Vec::new(),
+                tech_stack: Vec::new(),
+                files: Vec::new(),
+                flags: Vec::new(),
+                features: Vec::new(),
+                external_tasks: Vec::new(),
+                markdown_body: String::new(),
+            })
+            .collect();
+
+        let project = Project {
+            config: ProjectConfig {
+                name: "Zoom Scroll Test".to_string(),
+                description: "Scroll pullback test".to_string(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig::default(),
+                connections: Vec::new(),
+            },
+            components,
+        };
+
+        let theme = default_theme().unwrap();
+        let mut app = App::new(PathBuf::from("/tmp/example-project"), project, theme);
+        app.selected_index = 3;
+
+        let term_area = Rect::new(0, 0, 140, 40);
+        let chunks = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(term_area);
+        let cols = crate::tui::ui::column_layout(chunks[1]);
+
+        let backend = TestBackend::new(term_area.width, term_area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let key = |code: KeyCode| KeyEvent::new(code, KeyModifiers::NONE);
+
+        // Zoom in twice (Compact -> Normal -> Expanded) and render so scroll_col pans right.
+        app.handle_key(key(KeyCode::Char('+')));
+        app.handle_key(key(KeyCode::Char('+')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Expanded);
+        terminal
+            .draw(|frame| crate::tui::ui::render(frame, &mut app))
+            .unwrap();
+        assert!(
+            app.viewport.scroll_col > 0,
+            "expected scroll_col > 0 at Expanded zoom with col 3 selected"
+        );
+
+        // Zoom out twice (Expanded -> Normal -> Compact) and render; scroll_col must pull back to 0.
+        app.handle_key(key(KeyCode::Char('-')));
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+        terminal
+            .draw(|frame| crate::tui::ui::render(frame, &mut app))
+            .unwrap();
+
+        assert_eq!(app.viewport.scroll_col, 0);
+        let canvas_text = rect_text(terminal.backend().buffer(), cols[1]);
+        for name in names {
+            assert!(
+                canvas_text.contains(name),
+                "expected card '{name}' in canvas buffer after zooming out:\n{canvas_text}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_canvas_compact_renders_l_bend_edge() {
+        let app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 1 },
+            Some("events"),
+        );
+        let buf = render_canvas_buffer_with_zoom(&app, 60, 20, ZoomLevel::Compact);
+        let inner = Rect::new(1, 1, 58, 18);
+        let compact_vp = CanvasViewport {
+            zoom: ZoomLevel::Compact,
+            ..Default::default()
+        };
+        let from_rect = card_rect(inner, compact_vp, GridPos { col: 0, row: 0 }).unwrap();
+        let to_rect = card_rect(inner, compact_vp, GridPos { col: 1, row: 1 }).unwrap();
+        let expected = route_orthogonal_edge(from_rect, to_rect, Some("events"), inner);
+
+        let has_corner = expected
+            .segments
+            .iter()
+            .any(|&(_, _, ch)| matches!(ch, '┐' | '└' | '┌' | '┘'));
+        assert!(
+            has_corner,
+            "expected at least one L-bend box-drawing corner in routed Compact edge"
+        );
+
+        let last_ch = expected.segments.last().map(|&(_, _, ch)| ch);
+        assert!(
+            matches!(last_ch, Some('▶' | '▼')),
+            "expected arrowhead '▶' or '▼', got {last_ch:?}"
+        );
+
+        for &(x, y, ch) in &expected.segments {
+            let mut ch_buf = [0u8; 4];
+            let expected_sym = ch.encode_utf8(&mut ch_buf);
+            assert_eq!(
+                buf[(x, y)].symbol(),
+                expected_sym,
+                "Compact L-bend segment at ({x}, {y}) missing or overwritten"
+            );
+        }
     }
 }
