@@ -630,6 +630,6 @@ created_at = "2026-11-23T02:25:30Z"
 [[items.tasks]]
 id = "TASK-0068"
 title = "tests"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T02:25:30Z"
