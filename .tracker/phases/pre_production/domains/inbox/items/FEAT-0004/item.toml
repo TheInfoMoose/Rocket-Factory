@@ -2,11 +2,11 @@
 id = "FEAT-0004"
 type = "feature"
 title = "Clear Connect Component Direction (<A> depends on <target>)"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T17:37:55Z"
-updated_at = "2026-11-22T17:37:55Z"
+updated_at = "2026-11-23T02:42:51Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "6ff0b24"
+summary = "Verified in Phase 14 review (STEP 14A/14B): Connect direction clarity in Help modal, connect header prompt, Edit Connection preview, and README."
