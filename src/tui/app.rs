@@ -15,7 +15,8 @@ use crate::model::{
     Project,
 };
 use crate::storage::{
-    save_component, save_project_config, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
+    delete_component, save_component, save_project_config, validate_component_id, COMPONENTS_DIR,
+    ROCKET_DIR,
 };
 use crate::theme::Theme;
 use crate::tui::canvas::CanvasViewport;
@@ -520,7 +521,10 @@ impl App {
                 row: current_pos.row,
             },
             Direction::Right => GridPos {
-                col: current_pos.col.saturating_add(1).min(max_col),
+                col: current_pos
+                    .col
+                    .saturating_add(1)
+                    .min(max_col.max(current_pos.col)),
                 row: current_pos.row,
             },
             Direction::Up => GridPos {
@@ -529,7 +533,10 @@ impl App {
             },
             Direction::Down => GridPos {
                 col: current_pos.col,
-                row: current_pos.row.saturating_add(1).min(max_row),
+                row: current_pos
+                    .row
+                    .saturating_add(1)
+                    .min(max_row.max(current_pos.row)),
             },
         };
 
@@ -553,7 +560,8 @@ impl App {
         }
 
         let comp_name = self.project.components[comp_idx].name.clone();
-        let mut candidate = self.project.components[comp_idx].clone();
+        let previous = self.project.components[comp_idx].clone();
+        let mut candidate = previous.clone();
         candidate.position = target_pos;
 
         let mut candidate_config = self.project.config.clone();
@@ -575,8 +583,14 @@ impl App {
             }
             if expanded {
                 if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                    let msg = match save_component(&self.root, &previous) {
+                        Ok(()) => format!("Failed to save grid config: {err}"),
+                        Err(rb_err) => {
+                            format!("Failed to save grid config: {err} (rollback failed: {rb_err})")
+                        }
+                    };
                     self.refresh_audit();
-                    self.status_message = format!("Failed to save grid config: {err}");
+                    self.status_message = msg;
                     return;
                 }
             }
@@ -1021,7 +1035,14 @@ impl App {
                     }
                     if let Some(ref cfg) = grid_expanded_config {
                         if let Err(err) = save_project_config(&self.root, cfg) {
-                            let msg = format!("Failed to save grid config: {err}");
+                            let msg = match delete_component(&self.root, &comp.id) {
+                                Ok(()) => format!("Failed to save grid config: {err}"),
+                                Err(rb_err) => {
+                                    format!(
+                                        "Failed to save grid config: {err} (rollback failed: {rb_err})"
+                                    )
+                                }
+                            };
                             if let ModalState::NewComponent(ref mut form) = modal {
                                 form.error = Some(msg.clone());
                             }
@@ -1936,6 +1957,7 @@ mod tests {
         let project = load_project(dir.path()).expect("load project");
         let theme = default_theme().expect("default theme");
         let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        render_app(&mut app, 140, 40);
 
         // Open New Component modal with 'n'
         app.handle_key(key(KeyCode::Char('n')));
@@ -1959,7 +1981,7 @@ mod tests {
         assert_eq!(selected.name, "Telemetry Bus");
         assert_eq!(selected.kind, ComponentKind::Interface);
         assert_eq!(selected.parent_id, None);
-        assert_eq!(selected.position, GridPos { col: 3, row: 0 });
+        assert_eq!(selected.position, GridPos { col: 2, row: 0 });
         assert!(selected.features.is_empty());
 
         let reloaded = load_project(dir.path()).expect("reload project");
@@ -3278,7 +3300,7 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         let project = load_project(dir.path()).expect("reload project");
         let theme = default_theme().expect("default theme");
         let mut app = App::new(dir.path().to_path_buf(), project, theme);
-        app.last_canvas_capacity = Some((4, 4));
+        render_app(&mut app, 140, 40);
 
         app.handle_key(key(KeyCode::Char('n')));
         type_keys(&mut app, "beta");
@@ -3288,10 +3310,208 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
 
         assert_eq!(app.mode, InputMode::Navigate);
         let beta = app.project.component("beta").expect("beta created");
-        assert_eq!(beta.position, GridPos { col: 1, row: 0 });
-        assert_eq!(app.project.config.grid, GridConfig { cols: 2, rows: 1 });
+        assert_eq!(beta.position, GridPos { col: 2, row: 0 });
+        assert_eq!(app.project.config.grid, GridConfig { cols: 3, rows: 1 });
 
         let reloaded = load_project(dir.path()).expect("reload after creation");
-        assert_eq!(reloaded.config.grid, GridConfig { cols: 2, rows: 1 });
+        assert_eq!(reloaded.config.grid, GridConfig { cols: 3, rows: 1 });
+    }
+
+    fn render_app(app: &mut App, width: u16, height: u16) {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("create test terminal");
+        terminal
+            .draw(|frame| crate::tui::ui::render(frame, app))
+            .expect("render frame");
+    }
+
+    fn set_dir_readonly(path: &std::path::Path, readonly: bool) {
+        let mut perms = std::fs::metadata(path)
+            .expect("read metadata")
+            .permissions();
+        perms.set_readonly(readonly);
+        std::fs::set_permissions(path, perms).expect("set permissions");
+    }
+
+    #[test]
+    fn create_top_level_rolls_back_component_when_config_save_fails() {
+        use crate::storage::{init_workspace, load_project, save_component, save_project_config};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Rollback Create", "Rollback top-level create")
+            .expect("init workspace");
+        let mut cfg = load_project(dir.path()).expect("load project").config;
+        cfg.grid = GridConfig { cols: 1, rows: 1 };
+        save_project_config(dir.path(), &cfg).expect("save 1x1 grid");
+        let mut existing = make_component("alpha");
+        existing.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &existing).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        render_app(&mut app, 140, 40);
+
+        let rocket_dir = dir.path().join(ROCKET_DIR);
+        let project_toml = rocket_dir.join(crate::storage::PROJECT_FILE);
+        set_dir_readonly(&project_toml, true);
+        set_dir_readonly(&rocket_dir, true);
+
+        app.handle_key(key(KeyCode::Char('n')));
+        type_keys(&mut app, "beta");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Beta");
+        app.handle_key(key(KeyCode::Enter));
+
+        set_dir_readonly(&rocket_dir, false);
+        set_dir_readonly(&project_toml, false);
+
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::NewComponent(ref form)) = app.modal {
+            assert!(form
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("Failed to save grid config"));
+        } else {
+            panic!("expected NewComponent modal to remain open");
+        }
+        assert!(app.project.component("beta").is_none());
+        assert_eq!(app.project.config.grid, GridConfig { cols: 1, rows: 1 });
+
+        let reloaded = load_project(dir.path()).expect("reload after rollback");
+        assert!(reloaded.component("beta").is_none());
+        assert_eq!(reloaded.config.grid, GridConfig { cols: 1, rows: 1 });
+    }
+
+    #[test]
+    fn create_sub_component_rolls_back_component_when_config_save_fails() {
+        use crate::storage::{init_workspace, load_project, save_component, save_project_config};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Rollback Sub", "Rollback sub-component create")
+            .expect("init workspace");
+        let mut cfg = load_project(dir.path()).expect("load project").config;
+        cfg.grid = GridConfig { cols: 1, rows: 1 };
+        save_project_config(dir.path(), &cfg).expect("save 1x1 grid");
+        let mut existing = make_component("alpha");
+        existing.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &existing).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        let rocket_dir = dir.path().join(ROCKET_DIR);
+        let project_toml = rocket_dir.join(crate::storage::PROJECT_FILE);
+        set_dir_readonly(&project_toml, true);
+        set_dir_readonly(&rocket_dir, true);
+
+        app.handle_key(key(KeyCode::Char('a')));
+        type_keys(&mut app, "alpha_sub");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Alpha Sub");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::NewComponent(ref form)) = app.modal {
+            assert!(form
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("Failed to save grid config"));
+        } else {
+            panic!("expected NewComponent modal to remain open");
+        }
+        assert!(app.project.component("alpha_sub").is_none());
+
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+
+        set_dir_readonly(&rocket_dir, false);
+        set_dir_readonly(&project_toml, false);
+
+        let reloaded = load_project(dir.path()).expect("reload after rollback");
+        assert!(reloaded.component("alpha_sub").is_none());
+        assert_eq!(reloaded.config.grid, GridConfig { cols: 1, rows: 1 });
+    }
+
+    #[test]
+    fn move_card_rolls_back_component_when_config_save_fails() {
+        use crate::storage::{init_workspace, load_project, save_component, save_project_config};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Rollback Move", "Rollback card move").expect("init workspace");
+        let mut cfg = load_project(dir.path()).expect("load project").config;
+        cfg.grid = GridConfig { cols: 1, rows: 1 };
+        save_project_config(dir.path(), &cfg).expect("save 1x1 grid");
+        let mut existing = make_component("alpha");
+        existing.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &existing).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        render_app(&mut app, 140, 40);
+
+        let rocket_dir = dir.path().join(ROCKET_DIR);
+        let project_toml = rocket_dir.join(crate::storage::PROJECT_FILE);
+        set_dir_readonly(&project_toml, true);
+        set_dir_readonly(&rocket_dir, true);
+
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Right));
+
+        set_dir_readonly(&rocket_dir, false);
+        set_dir_readonly(&project_toml, false);
+
+        assert!(app.status_message.contains("Failed to save grid config"));
+        assert_eq!(
+            app.project
+                .component("alpha")
+                .expect("alpha exists")
+                .position,
+            GridPos { col: 0, row: 0 }
+        );
+        assert_eq!(app.project.config.grid, GridConfig { cols: 1, rows: 1 });
+
+        let reloaded = load_project(dir.path()).expect("reload after rollback");
+        assert_eq!(
+            reloaded.component("alpha").expect("alpha on disk").position,
+            GridPos { col: 0, row: 0 }
+        );
+        assert_eq!(reloaded.config.grid, GridConfig { cols: 1, rows: 1 });
+    }
+
+    #[test]
+    fn move_out_of_grid_card_forward_does_not_jump_backwards() {
+        let mut far_right = make_component("alpha");
+        far_right.position = GridPos { col: 20, row: 0 };
+        let mut app = make_app(vec![far_right]);
+        app.project.config.grid = GridConfig { cols: 8, rows: 8 };
+
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Right));
+        assert_eq!(
+            app.project
+                .component("alpha")
+                .expect("alpha exists")
+                .position,
+            GridPos { col: 20, row: 0 }
+        );
+
+        // Also verify Down on an out-of-grid row does not jump backwards.
+        app.project.components[0].position = GridPos { col: 0, row: 20 };
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(
+            app.project
+                .component("alpha")
+                .expect("alpha exists")
+                .position,
+            GridPos { col: 0, row: 20 }
+        );
     }
 }
