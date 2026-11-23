@@ -1,0 +1,19 @@
+schema_version = 2
+
+[item]
+id = "TASK-0075"
+type = "task"
+title = "[PERF-02] Eliminate redundant per-frame allocations and O(N^2) traversals in TUI render"
+status = "open"
+severity = "medium"
+scope_ref = "inbox"
+created_at = "2026-11-23T15:52:44Z"
+updated_at = "2026-11-23T15:52:44Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

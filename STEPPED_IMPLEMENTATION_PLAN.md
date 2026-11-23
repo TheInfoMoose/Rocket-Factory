@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 14):** Close remaining verification and UI gaps for `FEAT-0002`, `FEAT-0003`, `FEAT-0004`, and `FEAT-0005` — clarify Connect dependency direction in the Keyboard Help modal (`src/tui/ui.rs`), verify 60%+ canvas width and `114x26` 4×4 Compact capacity, and add E2E regression coverage for vertical zoom scrolling, Help/Connect/Edit-Edge rendering, and `README.md` release/feature documentation (`tests/e2e.rs`) so all four feature items can be formally closed in Phase 14 review.
+**Phase goal (Phase 15):** Rebrand the crate, binary (`rktb`), env var (`RKTB_POLL_INTERVAL_SECS`), error types (`RbError`/`RbResult`), user config dir (`~/.config/rocket-bench/`), and UI/CLI/docs/CI references to Rocket Bench/`rktb` (keeping `.rocket/`), exclude `docs/**` from packaging, set MSRV `1.88`, add `[profile.release]` and `[lints]`, and reconcile post-Phase-14 metadata (`FEAT-0006`, `TASK-0088`–`TASK-0090`, `TASK-0092`, `TASK-0093`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,8 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 14A** | `/goal` | ui | `src/tui/ui.rs` | — |
-| 2 | **STEP 14B** | `/goal` | tests | `tests/e2e.rs` | STEP 14A |
+| 1 | **STEP 15A** | `/goal` | packaging | `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `tests/e2e.rs` | — |
+| 2 | **STEP 15B** | `/goal` | core | `src/error.rs`, `src/lib.rs`, `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs` | STEP 15A |
+| 3 | **STEP 15C** | `/goal` | ui | `src/cli.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `src/model.rs` | STEP 15B |
+| 4 | **STEP 15D** | `/goal` | docs | `README.md`, `LICENSE`, `.github/workflows/ci.yml` | STEP 15C |
 
 ### Completed
 
@@ -87,6 +89,8 @@
 | **STEP 13B** | Done (`bd57c2f`) | `/goal` | app | `src/tui/app.rs` |
 | **STEP 13C** | Done (`0f0e256`) | `/goal` | ui | `src/tui/ui.rs` |
 | **STEP 13D** | Done (`b3e2dbc`) | `/goal` | tests | `tests/e2e.rs` |
+| **STEP 14A** | Done (`c02c609`) | `/goal` | ui | `src/tui/ui.rs` |
+| **STEP 14B** | Done (`332cc51`) | `/goal` | tests | `tests/e2e.rs` |
 
 ### Future phases
 
@@ -3519,6 +3523,231 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_vertical_scroll_and_minimum_4x4_compact_canvas' tests/e2e.rs && grep -q 'fn e2e_help_modal_connect_direction_and_edit_edge_preview' tests/e2e.rs && grep -q 'fn e2e_readme_documents_release_build_and_tui_features' tests/e2e.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 15 Step Blocks
+
+### STEP 15A: Rebrand Cargo Manifest, Binary, `main.rs`, and `tests/e2e.rs` (`FEAT-0006`, `TASK-0088`, `TASK-0089`, `TASK-0090`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 15A: Rebrand Cargo.toml (rocket-bench, rktb, MSRV 1.88, docs/** exclude, release profile, lints), update Cargo.lock, src/main.rs (RKTB_POLL_INTERVAL_SECS), and tests/e2e.rs crate imports.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - Cargo.lock
+  - src/main.rs
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/lib.rs:1-20 (module exports)
+  - src/cli.rs:1-40 (Cli struct)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Keep `.rocket/` in `package.exclude` unchanged.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: The crate builds as `rocket-bench` (`rocket_bench` lib, `rktb` binary) with MSRV `1.88`, `docs/**` excluded from packaging, release/lint settings configured, and `RKTB_POLL_INTERVAL_SECS` wired in `src/main.rs`.
+
+Contract & Behavior:
+  1. `Cargo.toml`:
+     - Set `[package]`: `name = "rocket-bench"`, `description = "Retro-futuristic TUI development planning workbench"`, `rust-version = "1.88"`.
+     - Add `"docs/**"` to `package.exclude`.
+     - Set `[lib] name = "rocket_bench"` and `[[bin]] name = "rktb"`.
+     - Add `[profile.release]` (`lto = "thin"`, `strip = "symbols"`) and `[lints.rust]` (`unsafe_code = "forbid"`).
+  2. `Cargo.lock`:
+     - Updated by Cargo to reflect `name = "rocket-bench"`.
+  3. `src/main.rs`:
+     - Replace `rocket_factory::` imports/calls with `rocket_bench::`.
+     - Replace `RF_POLL_INTERVAL_SECS` env var lookup with `RKTB_POLL_INTERVAL_SECS`.
+  4. `tests/e2e.rs`:
+     - Replace all `rocket_factory::` imports with `rocket_bench::`.
+
+Must still work:
+  - All existing unit and E2E tests compile and pass with `rocket_bench` and `rktb`.
+
+Drops:
+  - `rf` binary name (replaced by `rktb`).
+  - `rocket-factory` / `rocket_factory` crate name (replaced by `rocket-bench` / `rocket_bench`).
+  - `RF_POLL_INTERVAL_SECS` env var (replaced by `RKTB_POLL_INTERVAL_SECS`).
+
+Tests:
+  - Existing workspace unit and E2E tests: `cargo test --workspace` -> all pass under `rocket_bench` and `rktb`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo build --bin rktb && grep -q 'name = "rocket-bench"' Cargo.toml && grep -q 'rust-version = "1.88"' Cargo.toml && grep -q '"docs/\*\*"' Cargo.toml && grep -q 'RKTB_POLL_INTERVAL_SECS' src/main.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 15B: Rename Error Types `RfError` / `RfResult` to `RbError` / `RbResult` (`FEAT-0006`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 15B: Rename `RfError` and `RfResult` to `RbError` and `RbResult` across `src/error.rs`, `src/lib.rs`, and all internal callers.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/error.rs
+  - src/lib.rs
+  - src/adapter.rs
+  - src/cli.rs
+  - src/export.rs
+  - src/storage.rs
+  - src/theme.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/main.rs:1-60 (binary entry point)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change error message formats or variant fields.
+
+[PRE_GATE]
+grep -q 'name = "rocket_bench"' Cargo.toml
+
+[MUTATION_SPEC]
+Goal: The public and internal error types are named `RbError` and `RbResult` throughout the crate.
+
+Contract & Behavior:
+  1. `src/error.rs`: rename `pub enum RfError` -> `pub enum RbError` and `pub type RfResult<T>` -> `pub type RbResult<T> = std::result::Result<T, RbError>;`, preserving all variants and display strings.
+  2. `src/lib.rs`: update re-export to `pub use error::{RbError, RbResult};`.
+  3. `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs`: update all `RfError` / `RfResult` references and test assertions to `RbError` / `RbResult`.
+
+Must still work:
+  - All error variants, `Display` messages, and error-handling tests behave identically.
+
+Drops:
+  - `RfError` and `RfResult` public symbol names (replaced by `RbError` and `RbResult`).
+
+Tests:
+  - Existing error-path unit tests in `adapter.rs`, `storage.rs`, `theme.rs`, `tui/app.rs`: `cargo test --workspace` -> all pass using `RbError` / `RbResult`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'pub enum RbError' src/error.rs && grep -q 'pub use error::{RbError, RbResult};' src/lib.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 15C: Rebrand CLI, TUI Header, Config Paths, and Model Defaults (`FEAT-0006`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 15C: Rebrand CLI command metadata/adapters path/init message (`src/cli.rs`), theme config dir (`src/tui/terminal.rs`), TUI header (`src/tui/ui.rs`), and model test fixture (`src/model.rs`) to Rocket Bench / `rktb`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/cli.rs
+  - src/tui/terminal.rs
+  - src/tui/ui.rs
+  - src/model.rs
+READ_ONLY_REFS:
+  - src/storage.rs:1-30 (`ROCKET_DIR = ".rocket"`)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Keep `.rocket/` as the project workspace directory and `.rocket/adapters.toml` fallback unchanged.
+
+[PRE_GATE]
+grep -q 'pub enum RbError' src/error.rs
+
+[MUTATION_SPEC]
+Goal: CLI `--help`, `rktb init` output, `~/.config/rocket-bench/` config paths, and the TUI header bar display Rocket Bench / `rktb` while preserving `.rocket/`.
+
+Contract & Behavior:
+  1. `src/cli.rs`:
+     - Set `#[command(name = "rktb", about = "Rocket Bench — retro-futuristic architecture planning TUI & CLI")]`.
+     - `default_adapters_path()` resolves `$HOME/.config/rocket-bench/adapters.toml` when `$HOME` is non-empty (keeping `.rocket/adapters.toml` fallback).
+     - `execute_command` `Command::Init` prints `"Initialized Rocket Bench workspace '{name}' in {}\n"`.
+     - Update affected unit tests in `src/cli.rs`.
+  2. `src/tui/terminal.rs`:
+     - `default_theme_dirs(root)` pushes `$HOME/.config/rocket-bench/themes` after `root.join(".rocket/themes")`.
+     - Update unit test expectations if they assert the user config path.
+  3. `src/tui/ui.rs`:
+     - `render_header` displays `format!(" ROCKET BENCH :: {}", app.project.config.name)`.
+     - Update `render_three_column_layout_displays_header_list_and_details` to assert `"ROCKET BENCH"`.
+  4. `src/model.rs`:
+     - Update `model_toml_roundtrip` test fixture `ProjectConfig.name` to `"Rocket Bench"`.
+
+Must still work:
+  - `.rocket/` workspace initialization, loading, saving, `.rocket/themes`, and `.rocket/adapters.toml` fallback work unchanged.
+
+Drops:
+  - `"rf"` CLI name, `"Rocket Factory"` CLI/init/header strings, and `~/.config/rocket-factory/` default paths (replaced by `"rktb"`, `"Rocket Bench"`, and `~/.config/rocket-bench/`).
+
+Tests:
+  - `render_three_column_layout_displays_header_list_and_details` (`src/tui/ui.rs`): renders test app -> buffer contains `"ROCKET BENCH"`.
+  - `default_theme_dirs` and `default_adapters_path` unit tests -> resolve `.rocket/` first and `~/.config/rocket-bench/` for user config.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'name = "rktb"' src/cli.rs && grep -q 'ROCKET BENCH ::' src/tui/ui.rs && grep -q '.config/rocket-bench/themes' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 15D: Rebrand `README.md`, `LICENSE`, and `.github/workflows/ci.yml` (`FEAT-0006`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 15D: Update `README.md`, `LICENSE`, and `.github/workflows/ci.yml` for Rocket Bench (`rktb`), `RKTB_POLL_INTERVAL_SECS`, and `~/.config/rocket-bench/`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - README.md
+  - LICENSE
+  - .github/workflows/ci.yml
+READ_ONLY_REFS:
+  - tests/e2e.rs:1380-1450 (`e2e_readme_documents_release_build_and_tui_features`)
+  - Cargo.toml:1-45 (package/bin names)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Keep `.rocket/` workspace directory references unchanged.
+
+[PRE_GATE]
+grep -q 'name = "rktb"' src/cli.rs && grep -q 'ROCKET BENCH ::' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal: Documentation, license attribution, and CI smoke tests consistently reflect Rocket Bench (`rktb`).
+
+Contract & Behavior:
+  1. `README.md`:
+     - Update heading to `# Rocket Bench (\`rktb\`)` and prose references from Rocket Factory / `rf` to Rocket Bench / `rktb`.
+     - Update `RF_POLL_INTERVAL_SECS` to `RKTB_POLL_INTERVAL_SECS` and `~/.config/rocket-factory/` paths to `~/.config/rocket-bench/`.
+     - Keep `.rocket/` references and all sections/code blocks checked by `e2e_readme_documents_release_build_and_tui_features` intact.
+  2. `LICENSE`:
+     - Update copyright line to `Copyright (c) 2026 Rocket Bench Contributors`.
+  3. `.github/workflows/ci.yml`:
+     - Update `linux-git-build` job to verify `target/release/rktb`, install into `${RUNNER_TEMP}/rktb-install`, and smoke-test `RKTB_BIN="${RUNNER_TEMP}/rktb-install/bin/rktb"`.
+
+Must still work:
+  - `e2e_readme_documents_release_build_and_tui_features` in `tests/e2e.rs` passes without modification.
+
+Drops:
+  - `Rocket Factory` / `rf` branding in `README.md`, `LICENSE`, and `.github/workflows/ci.yml` (replaced by `Rocket Bench` / `rktb`).
+
+Tests:
+  - `e2e_readme_documents_release_build_and_tui_features` (`tests/e2e.rs`): `cargo test --workspace` -> passes against updated `README.md`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'Rocket Bench (`rktb`)' README.md && grep -q 'Rocket Bench Contributors' LICENSE && grep -q 'target/release/rktb' .github/workflows/ci.yml
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

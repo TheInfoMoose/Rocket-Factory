@@ -123,6 +123,209 @@ status = "closed"
 severity = "low"
 created_at = "2026-11-22T20:22:04Z"
 
+[[items.bugs]]
+id = "BUG-0018"
+title = "[SEC-01] Arbitrary command execution via default_adapters_path fallback and startup auto-pull"
+status = "open"
+severity = "high"
+created_at = "2026-11-23T15:51:04Z"
+
+[[items.bugs]]
+id = "BUG-0019"
+title = "[SEC-02] run_command_with_stdin pipe deadlock, missing timeout, and unbounded buffering"
+status = "open"
+severity = "high"
+created_at = "2026-11-23T15:51:21Z"
+
+[[items.bugs]]
+id = "BUG-0020"
+title = "[SEC-03] Asymmetric symlink validation in storage::load_project and dangling symlink blindness"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:23Z"
+
+[[items.bugs]]
+id = "BUG-0021"
+title = "[SEC-04] parse_editor_command splits quoted $EDITOR paths with spaces"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:51:24Z"
+
+[[items.bugs]]
+id = "BUG-0022"
+title = "[SEC-05] Unsanitized control characters in terminal rendering and modal input"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:51:25Z"
+
+[[items.bugs]]
+id = "BUG-0023"
+title = "[SEC-06] theme.rs unbounded .ron reads and symlinked search_dirs"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:51:26Z"
+
+[[items.bugs]]
+id = "BUG-0024"
+title = "[BUG-01] render_component_list uses stateless List without ListState and never scrolls on overflow"
+status = "open"
+severity = "high"
+created_at = "2026-11-23T15:51:27Z"
+
+[[items.bugs]]
+id = "BUG-0025"
+title = "[BUG-02] find_proximity_grid_pos infinite loop at u16::MAX"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:28Z"
+
+[[items.bugs]]
+id = "BUG-0026"
+title = "[BUG-03] UpdateComponent partial disk write lacks rollback"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:30Z"
+
+[[items.bugs]]
+id = "BUG-0027"
+title = "[BUG-04] UpdateComponent omits clamp_selection() under GapsOnly"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:31Z"
+
+[[items.bugs]]
+id = "BUG-0028"
+title = "[BUG-05] Disconnected parent_id cycle hides components from list and canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:32Z"
+
+[[items.bugs]]
+id = "BUG-0029"
+title = "[BUG-06] confirm_connect ignores EdgeKind and deleting Contains leaves parent_id"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:34Z"
+
+[[items.bugs]]
+id = "BUG-0030"
+title = "[BUG-07] Unicode display width ignored in canvas.rs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:35Z"
+
+[[items.bugs]]
+id = "BUG-0031"
+title = "[BUG-08] Overlapping edges/labels overwrite each other and blocked lx drops labels"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:36Z"
+
+[[items.bugs]]
+id = "BUG-0032"
+title = "[BUG-09] run_tui error masking and suspend_for_editor partial restore failure"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:50Z"
+
+[[items.bugs]]
+id = "BUG-0033"
+title = "[BUG-10] Missing .rocket/ silently turns mutations into in-memory edits"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:52Z"
+
+[[items.bugs]]
+id = "BUG-0034"
+title = "[BUG-11] load_project omits duplicate-ID and filename-stem checks"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:53Z"
+
+[[items.bugs]]
+id = "BUG-0035"
+title = "[BUG-12] atomic_write and two-file save_component durability gaps"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:54Z"
+
+[[items.bugs]]
+id = "BUG-0036"
+title = "[BUG-13] reconcile_status multi-adapter overwrite and unattributed auto-linking"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:55Z"
+
+[[items.bugs]]
+id = "BUG-0037"
+title = "[BUG-14] push_unpushed_features partial-failure retry duplication and dropped IDs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:57Z"
+
+[[items.bugs]]
+id = "BUG-0038"
+title = "[BUG-15] audit_project structural blind spots (cycles, duplicates, self-edges, grid overlaps)"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:58Z"
+
+[[items.bugs]]
+id = "BUG-0039"
+title = "[BUG-16] Missing #[serde(default)] on model structs and unvalidated 0x0 GridConfig"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:51:59Z"
+
+[[items.bugs]]
+id = "BUG-0040"
+title = "[BUG-17] Unclamped detail_scroll and stale offset on selection change"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:00Z"
+
+[[items.bugs]]
+id = "BUG-0041"
+title = "[BUG-18] E/D single-edge limit and inconsistent InputMode guards"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:01Z"
+
+[[items.bugs]]
+id = "BUG-0042"
+title = "[BUG-19] Non-atomic multi-file saves in collision shifting and child detachment"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:02Z"
+
+[[items.bugs]]
+id = "BUG-0043"
+title = "[BUG-20] Touching/overlapping card routing reversal and unchecked u16 + 1"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:03Z"
+
+[[items.bugs]]
+id = "BUG-0044"
+title = "[BUG-21] Export manifest omissions and unescaped Markdown in export.rs"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:05Z"
+
+[[items.bugs]]
+id = "BUG-0045"
+title = "[BUG-22] run_push_component skips MarkdownRoadmap existence check and lossy UTF-8 decoding"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:06Z"
+
+[[items.bugs]]
+id = "BUG-0046"
+title = "[BUG-23] CLI exit code truncation, silent env parse, and ignored --component flag"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:07Z"
+
 [[items.features]]
 id = "FEAT-0001"
 title = "Modular Components, Sub-Components & Lightweight Mutable Archetypes"
@@ -157,6 +360,13 @@ title = "Separate Local Release Build Code Block & Updated Docs in README.md"
 status = "closed"
 severity = "low"
 created_at = "2026-11-22T17:37:56Z"
+
+[[items.features]]
+id = "FEAT-0006"
+title = "[REBRAND] Rebrand Rocket Factory app to Rocket Bench"
+status = "open"
+severity = "high"
+created_at = "2026-11-23T15:53:26Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -633,3 +843,213 @@ title = "tests"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-23T02:25:30Z"
+
+[[items.tasks]]
+id = "TASK-0069"
+title = "[ARCH-01] Split monolithic src/tui/app.rs and deduplicate grid/path logic"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:36Z"
+
+[[items.tasks]]
+id = "TASK-0070"
+title = "[ARCH-02] Consolidate duplicated CLI vs TUI sync orchestration and surface PushResponse"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:37Z"
+
+[[items.tasks]]
+id = "TASK-0071"
+title = "[ARCH-03] Preserve legacy ComponentKind on TUI edit unless explicitly changed"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:39Z"
+
+[[items.tasks]]
+id = "TASK-0072"
+title = "[ARCH-04] Clean up RfError variant overloading in src/error.rs"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:40Z"
+
+[[items.tasks]]
+id = "TASK-0073"
+title = "[ARCH-05] Narrow over-exposed pub crate surface and remove unused exports"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:41Z"
+
+[[items.tasks]]
+id = "TASK-0074"
+title = "[PERF-01] Move synchronous adapter subprocesses off UI thread via mpsc channel"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:43Z"
+
+[[items.tasks]]
+id = "TASK-0075"
+title = "[PERF-02] Eliminate redundant per-frame allocations and O(N^2) traversals in TUI render"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:44Z"
+
+[[items.tasks]]
+id = "TASK-0076"
+title = "[PERF-03] Avoid full Project deep clone and repeated JSON serialization per sync"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:52:46Z"
+
+[[items.tasks]]
+id = "TASK-0077"
+title = "[PERF-04] Replace unconditional 10 Hz idle redraw with dirty flag and event draining"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:52:47Z"
+
+[[items.tasks]]
+id = "TASK-0078"
+title = "[TEST-01] Add CARGO_BIN_EXE binary subprocess integration tests in tests/e2e.rs"
+status = "open"
+severity = "high"
+created_at = "2026-11-23T15:53:04Z"
+
+[[items.tasks]]
+id = "TASK-0079"
+title = "[TEST-02] Add tests for terminal.rs runtime, event loop, and suspend/restore"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:05Z"
+
+[[items.tasks]]
+id = "TASK-0080"
+title = "[TEST-03] Add unit tests for storage.rs error paths and symlink containment"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:06Z"
+
+[[items.tasks]]
+id = "TASK-0081"
+title = "[TEST-04] Close core module unit test branch gaps (cli, adapter, audit, export, model, theme, error, style)"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:08Z"
+
+[[items.tasks]]
+id = "TASK-0082"
+title = "[TEST-05] Decouple brittle tests/e2e.rs assertions and replace Unix-only sh -c mocks"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:09Z"
+
+[[items.tasks]]
+id = "TASK-0083"
+title = "[CI-01] Pin GitHub Actions in ci.yml to immutable 40-char commit SHAs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:11Z"
+
+[[items.tasks]]
+id = "TASK-0084"
+title = "[CI-02] Add security audit, cargo doc, and script lint checks to ci.yml"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:13Z"
+
+[[items.tasks]]
+id = "TASK-0085"
+title = "[CI-03] Add cross-platform CI matrix and tag-triggered release workflow"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:14Z"
+
+[[items.tasks]]
+id = "TASK-0086"
+title = "[CI-04] Add --locked flag to cargo clippy and cargo test in ci.yml"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:15Z"
+
+[[items.tasks]]
+id = "TASK-0087"
+title = "[CI-05] Add .agents/ and editor/OS temp patterns to .gitignore"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:16Z"
+
+[[items.tasks]]
+id = "TASK-0088"
+title = "[PKG-01] Set rust-version (MSRV 1.88) in Cargo.toml"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:17Z"
+
+[[items.tasks]]
+id = "TASK-0089"
+title = "[PKG-02] Exclude docs/** from Cargo.toml package.exclude"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:18Z"
+
+[[items.tasks]]
+id = "TASK-0090"
+title = "[PKG-03] Add [profile.release] and [lints] configuration to Cargo.toml"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:20Z"
+
+[[items.tasks]]
+id = "TASK-0091"
+title = "[DOC-01] Fix README.md omissions and add License/Testing/release docs"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:21Z"
+
+[[items.tasks]]
+id = "TASK-0092"
+title = "[DOC-02] Archive or update stale Rocket Factory.md design note"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:22Z"
+
+[[items.tasks]]
+id = "TASK-0093"
+title = "[META-01] Reconcile post-Phase-14 plan, .orrery/phase.toml, and .tracker/ metadata drift"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T15:53:23Z"
+
+[[items.tasks]]
+id = "TASK-0094"
+title = "[META-02] Review tracked internal harness metadata (.tracker/, .orrery/, .phased/) on master"
+status = "open"
+severity = "low"
+created_at = "2026-11-23T15:53:25Z"
+
+[[items.tasks]]
+id = "TASK-0095"
+title = "packaging"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T20:12:06Z"
+
+[[items.tasks]]
+id = "TASK-0096"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T20:12:06Z"
+
+[[items.tasks]]
+id = "TASK-0097"
+title = "ui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T20:12:06Z"
+
+[[items.tasks]]
+id = "TASK-0098"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-23T20:12:06Z"

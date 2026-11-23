@@ -1,0 +1,17 @@
+[item]
+id = "BUG-0043"
+type = "bug"
+title = "[BUG-20] Touching/overlapping card routing reversal and unchecked u16 + 1"
+status = "open"
+severity = "low"
+scope_ref = "inbox"
+created_at = "2026-11-23T15:52:03Z"
+updated_at = "2026-11-23T15:52:03Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

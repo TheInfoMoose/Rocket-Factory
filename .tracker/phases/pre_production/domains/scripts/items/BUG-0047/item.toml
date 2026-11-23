@@ -1,0 +1,17 @@
+[item]
+id = "BUG-0047"
+type = "bug"
+title = "[SCR-01] Unanchored grep -qF in phased-step.sh defer dirty check"
+status = "open"
+severity = "high"
+scope_ref = "scripts"
+created_at = "2026-11-23T15:52:23Z"
+updated_at = "2026-11-23T15:52:23Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

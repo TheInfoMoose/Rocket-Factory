@@ -1,0 +1,19 @@
+schema_version = 2
+
+[item]
+id = "TASK-0076"
+type = "task"
+title = "[PERF-03] Avoid full Project deep clone and repeated JSON serialization per sync"
+status = "open"
+severity = "medium"
+scope_ref = "inbox"
+created_at = "2026-11-23T15:52:46Z"
+updated_at = "2026-11-23T15:52:46Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []
