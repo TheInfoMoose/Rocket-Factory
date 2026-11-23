@@ -12,7 +12,7 @@ use rocket_factory::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFo
 use rocket_factory::archetype::scaffold_component;
 use rocket_factory::cli::{execute_command, Command, ExportKind};
 use rocket_factory::model::{
-    ComponentKind, Connection, EdgeKind, FeatureItem, GridPos, TaskStatus,
+    ComponentKind, Connection, EdgeKind, FeatureItem, GridConfig, GridPos, TaskStatus,
 };
 use rocket_factory::storage;
 use rocket_factory::theme::{default_theme, DEFAULT_CRT_AMBER_RON};
@@ -724,12 +724,35 @@ fn type_text(app: &mut App, text: &str) {
 }
 
 fn select_component_by_id(app: &mut App, id: &str) {
-    let vis_idx = app
+    let visible_len = app.visible_component_indices().len();
+    assert!(
+        visible_len > 0,
+        "expected visible component '{id}', but component list is empty"
+    );
+    let target_idx = app
         .visible_component_indices()
         .iter()
         .position(|&idx| app.project.components.get(idx).is_some_and(|c| c.id == id))
         .unwrap_or_else(|| panic!("expected visible component '{id}'"));
-    app.selected_index = vis_idx;
+
+    let nav_key = if target_idx >= app.selected_index {
+        KeyCode::Down
+    } else {
+        KeyCode::Up
+    };
+
+    for _ in 0..visible_len {
+        if app.selected_component().is_some_and(|c| c.id == id) {
+            return;
+        }
+        app.handle_key(key(nav_key));
+    }
+
+    assert_eq!(
+        app.selected_component().map(|c| c.id.as_str()),
+        Some(id),
+        "failed to navigate to visible component '{id}' via key events"
+    );
 }
 
 fn rect_to_string(buffer: &Buffer, rect: Rect) -> String {
@@ -1087,6 +1110,15 @@ fn e2e_canvas_zoom_levels_and_compact_4x4_capacity() {
         "expected [Expanded] in canvas title:\n{expanded_canvas}"
     );
 
+    // Select a card at col 3 (row 0, col 3 -> c03 / C03) via key navigation and render at 140x40
+    select_component_by_id(&mut app, "c03");
+    let _ = render_app(&mut app, 140, 40);
+    assert!(
+        app.viewport.scroll_col > 0,
+        "expected viewport.scroll_col > 0 after selecting col-3 card in Expanded zoom, got {}",
+        app.viewport.scroll_col
+    );
+
     // Zoom out twice via `-` -> Compact
     app.handle_key(key(KeyCode::Char('-')));
     app.handle_key(key(KeyCode::Char('-')));
@@ -1097,6 +1129,16 @@ fn e2e_canvas_zoom_levels_and_compact_4x4_capacity() {
         back_compact_canvas.contains("[Compact]"),
         "expected [Compact] after zooming back out:\n{back_compact_canvas}"
     );
+    assert_eq!(
+        app.viewport.scroll_col, 0,
+        "expected zoom-out to Compact to pull viewport.scroll_col back to 0"
+    );
+    for name in ["C00", "C01", "C02", "C03"] {
+        assert!(
+            back_compact_canvas.contains(name),
+            "expected row-0 card '{name}' visible in Compact canvas rect after zoom-out:\n{back_compact_canvas}"
+        );
+    }
 
     // Inspect bottom footer row (y = 39) for underlined hotkey cells and absence of legacy brackets
     let footer_row = rect_to_string(&back_compact_buf, Rect::new(0, 39, 140, 1));
@@ -1127,14 +1169,21 @@ fn e2e_top_center_default_placement_and_grid_expansion_persists() {
     )
     .expect("init workspace");
 
-    let project = storage::load_project(dir.path()).expect("load empty project");
+    let mut cfg = storage::load_project(dir.path())
+        .expect("load initial project")
+        .config;
+    cfg.grid = GridConfig { cols: 1, rows: 1 };
+    storage::save_project_config(dir.path(), &cfg).expect("save 1x1 grid config");
+
+    let project = storage::load_project(dir.path()).expect("load 1x1 project");
+    assert_eq!(project.config.grid, GridConfig { cols: 1, rows: 1 });
     let theme = default_theme().expect("load default theme");
     let mut app = App::new(dir.path().to_path_buf(), project, theme);
 
     // Render once at 140x40 so last_canvas_capacity is populated
     let _ = render_app(&mut app, 140, 40);
 
-    // Drive `n` to create top-level component `core_hub`
+    // Drive `n` to create top-level component `core_hub` beyond the saved 1x1 grid bounds
     app.handle_key(key(KeyCode::Char('n')));
     type_text(&mut app, "core_hub");
     app.handle_key(key(KeyCode::Tab));
@@ -1152,10 +1201,28 @@ fn e2e_top_center_default_placement_and_grid_expansion_persists() {
         "expected top-center placement with col > 0, got {:?}",
         core_hub.position
     );
+    assert!(
+        app.project.config.grid.cols > 1 || app.project.config.grid.rows > 1,
+        "expected saved 1x1 grid to expand after creating core_hub at {:?}, got {:?}",
+        core_hub.position,
+        app.project.config.grid
+    );
+    assert!(
+        app.project.config.grid.cols > core_hub.position.col,
+        "expected grid.cols ({}) > core_hub.position.col ({})",
+        app.project.config.grid.cols,
+        core_hub.position.col
+    );
 
     let reloaded = storage::load_project(dir.path()).expect("reload project from disk");
     let persisted = reloaded
         .component("core_hub")
         .expect("core_hub persisted on disk");
     assert_eq!(persisted.position, core_hub.position);
+    assert_eq!(reloaded.config.grid, app.project.config.grid);
+    assert!(
+        reloaded.config.grid.cols > 1 || reloaded.config.grid.rows > 1,
+        "expected expanded grid dimensions persisted on disk, got {:?}",
+        reloaded.config.grid
+    );
 }
