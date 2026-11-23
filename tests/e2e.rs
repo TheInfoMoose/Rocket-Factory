@@ -8,17 +8,17 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
-use rocket_factory::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};
-use rocket_factory::archetype::scaffold_component;
-use rocket_factory::cli::{execute_command, Command, ExportKind};
-use rocket_factory::model::{
+use rocket_bench::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};
+use rocket_bench::archetype::scaffold_component;
+use rocket_bench::cli::{execute_command, Command, ExportKind};
+use rocket_bench::model::{
     ComponentKind, Connection, EdgeKind, FeatureItem, GridConfig, GridPos, TaskStatus,
 };
-use rocket_factory::storage;
-use rocket_factory::theme::{default_theme, DEFAULT_CRT_AMBER_RON};
-use rocket_factory::tui::app::App;
-use rocket_factory::tui::canvas::ZoomLevel;
-use rocket_factory::tui::ui::{column_layout, render};
+use rocket_bench::storage;
+use rocket_bench::theme::{default_theme, DEFAULT_CRT_AMBER_RON};
+use rocket_bench::tui::app::App;
+use rocket_bench::tui::canvas::ZoomLevel;
+use rocket_bench::tui::ui::{column_layout, render};
 
 fn buffer_to_string(buffer: &Buffer) -> String {
     let mut text = String::new();
@@ -599,7 +599,7 @@ fn e2e_help_overlay_80x24_shows_close_footer_hint() {
 
 #[test]
 fn e2e_tui_delete_connection_and_component_persists_to_disk() {
-    use rocket_factory::audit::{audit_project, FindingKind};
+    use rocket_bench::audit::{audit_project, FindingKind};
 
     let dir = tempfile::tempdir().expect("create workspace tempdir");
     storage::init_workspace(

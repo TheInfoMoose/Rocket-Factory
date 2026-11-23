@@ -1,8 +1,9 @@
 [package]
-name = "rocket-factory"
+name = "rocket-bench"
 version = "0.1.0"
 edition = "2021"
-description = "Retro-futuristic TUI development planning platform"
+rust-version = "1.88"
+description = "Retro-futuristic TUI development planning workbench"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/TheInfoMoose/Rocket-Factory"
@@ -15,18 +16,26 @@ exclude = [
     ".phased/**",
     ".rocket/**",
     ".tracker/**",
+    "docs/**",
     "scripts/**",
     "Rocket Factory.md",
     "STEPPED_IMPLEMENTATION_PLAN.md",
 ]
 
 [lib]
-name = "rocket_factory"
+name = "rocket_bench"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rf"
+name = "rktb"
 path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "forbid"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

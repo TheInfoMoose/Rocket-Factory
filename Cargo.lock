@@ -496,7 +496,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rocket-factory"
+name = "rocket-bench"
 version = "0.1.0"
 dependencies = [
  "clap",
