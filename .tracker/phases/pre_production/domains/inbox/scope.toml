@@ -595,7 +595,7 @@ created_at = "2026-11-22T20:22:04Z"
 [[items.tasks]]
 id = "TASK-0063"
 title = "canvas"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T00:45:16Z"
 
