@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0065"
 type = "task"
 title = "ui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T00:45:16Z"
-updated_at = "2026-11-23T00:45:16Z"
+updated_at = "2026-11-23T00:55:48Z"
 source_ref = "STEP 13C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0065@2026-11-23T00:52:11Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "0f0e256"
+summary = "STEP 13C: Narrow Help Modal Sizing, Component List Count Preservation & UI Key-Path Tests (`BUG-0011`, `BUG-0012`, `TASK-0060`, `TASK-0061`) (phased check PASS)"
