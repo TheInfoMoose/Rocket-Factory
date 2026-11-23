@@ -3595,6 +3595,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 ### STEP 15B: Rename Error Types `RfError` / `RfResult` to `RbError` / `RbResult` (`FEAT-0006`)
 
 * **Recommended Command:** `/goal`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
@@ -3610,6 +3611,7 @@ ALLOWED_FILES:
   - src/storage.rs
   - src/theme.rs
   - src/tui/app.rs
+  - src/tui/terminal.rs
 READ_ONLY_REFS:
   - src/main.rs:1-60 (binary entry point)
 FORBIDDEN_SCOPE:
@@ -3625,7 +3627,7 @@ Goal: The public and internal error types are named `RbError` and `RbResult` thr
 Contract & Behavior:
   1. `src/error.rs`: rename `pub enum RfError` -> `pub enum RbError` and `pub type RfResult<T>` -> `pub type RbResult<T> = std::result::Result<T, RbError>;`, preserving all variants and display strings.
   2. `src/lib.rs`: update re-export to `pub use error::{RbError, RbResult};`.
-  3. `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs`: update all `RfError` / `RfResult` references and test assertions to `RbError` / `RbResult`.
+  3. `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs`, `src/tui/terminal.rs`: update all `RfError` / `RfResult` references and test assertions to `RbError` / `RbResult`.
 
 Must still work:
   - All error variants, `Display` messages, and error-handling tests behave identically.
