@@ -1226,3 +1226,220 @@ fn e2e_top_center_default_placement_and_grid_expansion_persists() {
         reloaded.config.grid
     );
 }
+
+#[test]
+fn e2e_vertical_scroll_and_minimum_4x4_compact_canvas() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "zoom-vert-4x4",
+        "Vertical zoom scroll and 114x26 4x4 Compact capacity E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let mut short_names = Vec::new();
+    for row in 0..4u16 {
+        for col in 0..4u16 {
+            let id = format!("c{row}{col}");
+            let name = format!("C{row}{col}");
+            let comp = scaffold_component(&id, &name, ComponentKind::Concept, GridPos { col, row });
+            storage::save_component(dir.path(), &comp).expect("save grid component");
+            short_names.push(name);
+        }
+    }
+
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+
+    let wide_canvas_rect = column_layout(Rect::new(0, 3, 140, 36))[1];
+    assert!(
+        wide_canvas_rect.width * 100 / 140 >= 60,
+        "expected canvas width >= 60% of 140 cols, got {}",
+        wide_canvas_rect.width
+    );
+
+    // Render at minimum 114x26 terminal in Compact zoom and verify all 16 cards fit
+    let min_canvas_rect = column_layout(Rect::new(0, 3, 114, 22))[1];
+    let min_compact_buf = render_app(&mut app, 114, 26);
+    let min_compact_canvas = rect_to_string(&min_compact_buf, min_canvas_rect);
+    for name in &short_names {
+        assert!(
+            min_compact_canvas.contains(name.as_str()),
+            "expected card '{name}' inside 114x26 Compact canvas rect:\n{min_compact_canvas}"
+        );
+    }
+
+    // Zoom in via `+` and `=` -> Expanded
+    app.handle_key(key(KeyCode::Char('+')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Normal);
+    app.handle_key(key(KeyCode::Char('=')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Expanded);
+
+    // Select row-3 card `c30` via real key navigation and render at 140x40
+    select_component_by_id(&mut app, "c30");
+    let _ = render_app(&mut app, 140, 40);
+    assert!(
+        app.viewport.scroll_row > 0,
+        "expected viewport.scroll_row > 0 after selecting row-3 card in Expanded zoom, got {}",
+        app.viewport.scroll_row
+    );
+
+    // Zoom out twice via `-` -> Compact and verify vertical scroll pullback
+    app.handle_key(key(KeyCode::Char('-')));
+    app.handle_key(key(KeyCode::Char('-')));
+    assert_eq!(app.viewport.zoom, ZoomLevel::Compact);
+
+    let back_compact_buf = render_app(&mut app, 140, 40);
+    let back_compact_canvas = rect_to_string(&back_compact_buf, wide_canvas_rect);
+    assert_eq!(
+        app.viewport.scroll_row, 0,
+        "expected zoom-out to Compact to pull viewport.scroll_row back to 0"
+    );
+    for name in ["C00", "C10", "C20", "C30"] {
+        assert!(
+            back_compact_canvas.contains(name),
+            "expected column-0 card '{name}' visible in Compact canvas rect after zoom-out:\n{back_compact_canvas}"
+        );
+    }
+}
+
+#[test]
+fn e2e_help_modal_connect_direction_and_edit_edge_preview() {
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    storage::init_workspace(
+        dir.path(),
+        "rf-e2e",
+        "Help modal, connect direction, and edit edge preview E2E for testuser@example.com",
+    )
+    .expect("init workspace");
+
+    let frontend = scaffold_component(
+        "frontend",
+        "Frontend",
+        ComponentKind::Interface,
+        GridPos { col: 0, row: 0 },
+    );
+    let backend = scaffold_component(
+        "backend",
+        "Backend",
+        ComponentKind::Logic,
+        GridPos { col: 1, row: 0 },
+    );
+    storage::save_component(dir.path(), &frontend).expect("save frontend");
+    storage::save_component(dir.path(), &backend).expect("save backend");
+
+    let project = storage::load_project(dir.path()).expect("load project");
+    let theme = default_theme().expect("load default theme");
+    let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+    // Press `?` to open Keyboard Help modal and verify at 80x24 and 140x40
+    app.handle_key(key(KeyCode::Char('?')));
+    for (width, height) in [(80, 24), (140, 40)] {
+        let rendered = buffer_to_string(&render_app(&mut app, width, height));
+        for expected in [
+            "Keyboard Help",
+            "Connect (A depends on B)",
+            "Zoom in",
+            "Zoom out",
+            "[Esc/?/Enter/q] Close",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "expected '{expected}' in Help modal at {width}x{height}:\n{rendered}"
+            );
+        }
+    }
+
+    // Press `?` again to close Help modal
+    app.handle_key(key(KeyCode::Char('?')));
+    assert!(app.modal.is_none());
+
+    // Select `frontend`, press `c`, and verify rendered header prompt direction
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('c')));
+    let connect_buf = render_app(&mut app, 140, 40);
+    let header_text = rect_to_string(&connect_buf, Rect::new(0, 0, 140, 3));
+    assert!(
+        header_text.contains("Frontend depends on <target>"),
+        "expected connect header prompt to clarify direction:\n{header_text}"
+    );
+
+    // Navigate via real key events to `backend` and press Enter to confirm connection
+    select_component_by_id(&mut app, "backend");
+    app.handle_key(key(KeyCode::Enter));
+
+    // Reselect `frontend`, press `E` to open Edit Connection modal, and verify edge preview
+    select_component_by_id(&mut app, "frontend");
+    app.handle_key(key(KeyCode::Char('E')));
+    let edit_edge_rendered = buffer_to_string(&render_app(&mut app, 140, 40));
+    assert!(
+        edit_edge_rendered.contains("Edit Connection"),
+        "expected 'Edit Connection' modal title:\n{edit_edge_rendered}"
+    );
+    assert!(
+        edit_edge_rendered.contains("Edge: frontend depends on backend"),
+        "expected 'Edge: frontend depends on backend' in Edit Connection modal:\n{edit_edge_rendered}"
+    );
+
+    // Press Esc to close Edit Connection modal
+    app.handle_key(key(KeyCode::Esc));
+    assert!(app.modal.is_none());
+}
+
+#[test]
+fn e2e_readme_documents_release_build_and_tui_features() {
+    let readme_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    let readme = fs::read_to_string(&readme_path).expect("read README.md");
+
+    assert!(
+        readme.contains("### Build and install from a local clone"),
+        "README.md missing local clone build heading"
+    );
+
+    let install_pos = readme
+        .find("cargo install --path . --locked")
+        .expect("README.md missing cargo install --path . --locked");
+    let build_pos = readme
+        .find("cargo build --release --locked")
+        .expect("README.md missing cargo build --release --locked");
+    assert!(
+        install_pos < build_pos,
+        "expected cargo install block before cargo build --release block"
+    );
+    assert!(
+        readme[install_pos..build_pos].contains("```"),
+        "expected cargo install and cargo build --release in separate fenced code blocks"
+    );
+
+    for binding in [
+        "| `+` / `=` |",
+        "| `-` |",
+        "| `c` |",
+        "| `a` |",
+        "| `E` |",
+        "<A> depends on <target>",
+    ] {
+        assert!(
+            readme.contains(binding),
+            "README.md missing TUI keyboard documentation '{binding}'"
+        );
+    }
+
+    for doc_token in [
+        "`concept`",
+        "`interface`",
+        "`logic`",
+        "`data`",
+        "`integration`",
+        "`custom`",
+        "`parent_id`",
+    ] {
+        assert!(
+            readme.contains(doc_token),
+            "README.md missing archetype/sub-component documentation '{doc_token}'"
+        );
+    }
+}
