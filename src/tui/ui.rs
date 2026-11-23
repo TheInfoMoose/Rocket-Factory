@@ -676,7 +676,7 @@ fn render_modal(
                             (" d          Delete component", false),
                             (" D          Delete edge", false),
                             (" m          Move card mode", false),
-                            (" c          Connect cards", false),
+                            (" c          Connect (A depends on B)", false),
                             (" v          Edit Markdown", false),
                         ],
                         &[
@@ -712,7 +712,7 @@ fn render_modal(
                             (" d                Delete component", false),
                             (" D                Delete edge", false),
                             (" m                Move card mode", false),
-                            (" c                Connect cards", false),
+                            (" c                Connect (A depends on B)", false),
                             (" v                Edit Markdown", false),
                         ],
                         &[
@@ -1500,6 +1500,57 @@ mod tests {
         assert!(
             depth2_row.contains("(0/0)"),
             "expected preserved (0/0) task count in narrow list row, got: {depth2_row:?}"
+        );
+    }
+
+    #[test]
+    fn render_help_modal_clarifies_connect_dependency_direction() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        for width in [80u16, 68u16] {
+            let mut app = make_test_app();
+            app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+
+            let backend = TestBackend::new(width, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    text.push_str(buffer[(x, y)].symbol());
+                }
+                text.push('\n');
+            }
+
+            assert!(
+                text.contains("Connect (A depends on B)"),
+                "expected Connect dependency direction at {width}x24:\n{text}"
+            );
+            assert!(
+                text.contains("[Esc/?/Enter/q] Close"),
+                "expected close hint without clipping at {width}x24:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn column_layout_gives_canvas_at_least_60_percent_at_140_cols_and_4x4_at_114x26() {
+        use crate::tui::canvas::{visible_grid_capacity_for, ZoomLevel};
+
+        let cols_140 = column_layout(Rect::new(0, 3, 140, 36));
+        assert!(
+            u32::from(cols_140[1].width) * 100 / 140 >= 60,
+            "expected middle column >= 60% width at 140 cols, got {}",
+            cols_140[1].width
+        );
+
+        let cols_114 = column_layout(Rect::new(0, 3, 114, 22));
+        let canvas_inner = Block::default().borders(Borders::ALL).inner(cols_114[1]);
+        let (vis_cols, vis_rows) = visible_grid_capacity_for(canvas_inner, ZoomLevel::Compact);
+        assert!(
+            vis_cols >= 4 && vis_rows >= 4,
+            "expected >= (4, 4) Compact grid capacity at 114x26, got ({vis_cols}, {vis_rows})"
         );
     }
 }
