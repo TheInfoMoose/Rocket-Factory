@@ -88,7 +88,16 @@
 
 ### Future phases
 
-_None — Phase 13 resolves Phase 12 review findings (`BUG-0011`–`BUG-0017`, `TASK-0060`–`TASK-0062`) and completes the current roadmap. Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
+- **Phase 14 — Open Feature Verification & Gap Closure (`FEAT-0002`–`FEAT-0005`):**
+  - **Goal:** Audit `FEAT-0002`, `FEAT-0003`, `FEAT-0004`, and `FEAT-0005` against the current TUI, `README.md`, and test suite, fix any remaining behavioral/UI/doc gaps, and add missing regression coverage so all four `neb` feature items can be formally closed in Phase 14 review.
+  - **Done looks like:** Every acceptance criterion in `FEAT-0002` (widened ~60%+ snap grid, `Compact`/`Normal`/`Expanded` zoom defaulting to `Compact` with `>= 4x4` cards, top-center scrollable grid), `FEAT-0003` (per-key Keyboard Help modal & `README.md` rows, underlined-mnemonic footer), `FEAT-0004` (single-step Connect `<A> depends on <target>` prompt, Edit Connection preview, Help & `README.md`), and `FEAT-0005` (separate `cargo build --release --locked` block and updated docs in `README.md`) is verified with `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` passing.
+  - **Steps:**
+    1. **STEP 14A:** Canvas Zoom/Grid & Connect-Direction Verification and Gap Closure (`FEAT-0002`, `FEAT-0004`)
+    2. **STEP 14B:** Per-Key Help, Underlined-Mnemonic Footer & `README.md` Verification and Gap Closure (`FEAT-0003`, `FEAT-0004`, `FEAT-0005`)
+    3. **STEP 14C:** E2E Regression Coverage for `FEAT-0002`–`FEAT-0005`
+  - **Decision:** Add Phase 14 to verify `FEAT-0002`–`FEAT-0005` against the codebase, `README.md`, and tests, fix any gaps, and close them in `neb`.
+
+_Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
 ### Open Questions
 
