@@ -2,11 +2,11 @@
 id = "BUG-0014"
 type = "bug"
 title = "Selected card disappears on narrow canvas outside relative row 0"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T20:22:04Z"
-updated_at = "2026-11-22T20:22:04Z"
+updated_at = "2026-11-23T01:59:38Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "52dcc88"
+summary = "Fixed in Phase 13 (STEP 13A): card_rect clamps width and height independently for rel_col == 0 and rel_row == 0."

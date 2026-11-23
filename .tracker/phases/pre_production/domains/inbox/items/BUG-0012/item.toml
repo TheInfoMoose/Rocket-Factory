@@ -2,11 +2,11 @@
 id = "BUG-0012"
 type = "bug"
 title = "Narrower component list clips nested task counts"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T20:22:04Z"
-updated_at = "2026-11-22T20:22:04Z"
+updated_at = "2026-11-23T01:59:35Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "52dcc88"
+summary = "Fixed in Phase 13 (STEP 13C): format_component_list_label truncates component name with ellipsis while preserving (complete/total) suffix."

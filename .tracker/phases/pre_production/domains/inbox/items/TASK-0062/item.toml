@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0062"
 type = "task"
 title = "Close Phase 12 E2E gaps in navigation, zoom and grid expansion"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T20:22:04Z"
-updated_at = "2026-11-22T20:22:04Z"
+updated_at = "2026-11-23T01:59:46Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "52dcc88"
+summary = "Completed in Phase 13 (STEP 13D): E2E tests updated for key navigation, zoom-out scroll pullback, and 1x1 grid expansion persistence."
