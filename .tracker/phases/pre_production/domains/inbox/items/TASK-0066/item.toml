@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0066"
 type = "task"
 title = "tests"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T00:45:16Z"
-updated_at = "2026-11-23T00:45:16Z"
+updated_at = "2026-11-23T00:58:31Z"
 source_ref = "STEP 13D"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0066@2026-11-23T00:55:48Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "b3e2dbc"
+summary = "STEP 13D: Phase 12 E2E Test Hardening for Key Navigation, Zoom Scroll Pullback & Grid Expansion (`TASK-0062`) (phased check PASS)"
