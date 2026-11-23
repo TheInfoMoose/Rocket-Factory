@@ -1,0 +1,20 @@
+schema_version = 2
+
+[item]
+id = "TASK-0067"
+type = "task"
+title = "ui"
+status = "open"
+severity = "medium"
+scope_ref = "inbox"
+created_at = "2026-11-23T02:25:30Z"
+updated_at = "2026-11-23T02:25:30Z"
+source_ref = "STEP 14A"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

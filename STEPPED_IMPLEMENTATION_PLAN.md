@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 13):** Fix Phase 12 review bugs (`BUG-0011`–`BUG-0017`: Help modal narrow wrapping/height, component list task-count truncation, zoom-out scroll pullback, narrow-canvas row-1 card rect, config-write rollback on create/move, out-of-grid forward move), document acceptance of the 117-col footer (`TASK-0060`), and harden Phase 12 unit & E2E tests (`TASK-0061`, `TASK-0062`) to use real key/render paths.
+**Phase goal (Phase 14):** Close remaining verification and UI gaps for `FEAT-0002`, `FEAT-0003`, `FEAT-0004`, and `FEAT-0005` — clarify Connect dependency direction in the Keyboard Help modal (`src/tui/ui.rs`), verify 60%+ canvas width and `114x26` 4×4 Compact capacity, and add E2E regression coverage for vertical zoom scrolling, Help/Connect/Edit-Edge rendering, and `README.md` release/feature documentation (`tests/e2e.rs`) so all four feature items can be formally closed in Phase 14 review.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 13A** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs` | — |
-| 2 | **STEP 13B** | `/goal` | app | `src/tui/app.rs` | — |
-| 3 | **STEP 13C** | `/goal` | ui | `src/tui/ui.rs` | STEP 13A |
-| 4 | **STEP 13D** | `/goal` | tests | `tests/e2e.rs` | STEP 13A, STEP 13B, STEP 13C |
+| 1 | **STEP 14A** | `/goal` | ui | `src/tui/ui.rs` | — |
+| 2 | **STEP 14B** | `/goal` | tests | `tests/e2e.rs` | STEP 14A |
 
 ### Completed
 
@@ -85,17 +83,14 @@
 | **STEP 12B** | Done (`2bff7c6`) | `/goal` | ui | `src/tui/ui.rs` |
 | **STEP 12C** | Done (`29ffaf9`) | `/goal` | docs | `README.md` |
 | **STEP 12D** | Done (`3c7047f`) | `/goal` | tests | `tests/e2e.rs` |
+| **STEP 13A** | Done (`897c0bf`) | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs` |
+| **STEP 13B** | Done (`bd57c2f`) | `/goal` | app | `src/tui/app.rs` |
+| **STEP 13C** | Done (`0f0e256`) | `/goal` | ui | `src/tui/ui.rs` |
+| **STEP 13D** | Done (`b3e2dbc`) | `/goal` | tests | `tests/e2e.rs` |
 
 ### Future phases
 
-- **Phase 14 — Open Feature Verification & Gap Closure (`FEAT-0002`–`FEAT-0005`):**
-  - **Goal:** Audit `FEAT-0002`, `FEAT-0003`, `FEAT-0004`, and `FEAT-0005` against the current TUI, `README.md`, and test suite, fix any remaining behavioral/UI/doc gaps, and add missing regression coverage so all four `neb` feature items can be formally closed in Phase 14 review.
-  - **Done looks like:** Every acceptance criterion in `FEAT-0002` (widened ~60%+ snap grid, `Compact`/`Normal`/`Expanded` zoom defaulting to `Compact` with `>= 4x4` cards, top-center scrollable grid), `FEAT-0003` (per-key Keyboard Help modal & `README.md` rows, underlined-mnemonic footer), `FEAT-0004` (single-step Connect `<A> depends on <target>` prompt, Edit Connection preview, Help & `README.md`), and `FEAT-0005` (separate `cargo build --release --locked` block and updated docs in `README.md`) is verified with `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` passing.
-  - **Steps:**
-    1. **STEP 14A:** Canvas Zoom/Grid & Connect-Direction Verification and Gap Closure (`FEAT-0002`, `FEAT-0004`)
-    2. **STEP 14B:** Per-Key Help, Underlined-Mnemonic Footer & `README.md` Verification and Gap Closure (`FEAT-0003`, `FEAT-0004`, `FEAT-0005`)
-    3. **STEP 14C:** E2E Regression Coverage for `FEAT-0002`–`FEAT-0005`
-  - **Decision:** Add Phase 14 to verify `FEAT-0002`–`FEAT-0005` against the codebase, `README.md`, and tests, fix any gaps, and close them in `neb`.
+_None planned yet — add future phases via `project-plan` after Phase 14 review._
 
 _Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
@@ -3343,6 +3338,131 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_canvas_zoom_levels_and_compact_4x4_capacity' tests/e2e.rs && grep -q 'fn e2e_top_center_default_placement_and_grid_expansion_persists' tests/e2e.rs && ! grep -q 'app.selected_index = vis_idx' tests/e2e.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 14 Step Blocks
+
+### STEP 14A: Keyboard Help Connect-Direction Clarity & Canvas Scale Verification (`FEAT-0002`, `FEAT-0003`, `FEAT-0004`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 14A: Clarify Connect dependency direction in the Keyboard Help modal and add unit tests verifying Help direction clarity, >= 60% Snap Grid width, and 114x26 4x4 Compact capacity.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/ui.rs:18-33 (column_layout)
+  - src/tui/ui.rs:659-765 (ModalState::Help wide and narrow row tables)
+  - src/tui/ui.rs:1157-1190 (render_help_modal_fits_80x24_without_wrapping_or_footer_clipping)
+  - src/tui/ui.rs:1413-1441 (render_help_modal_shows_close_hint_at_68_and_79_cols)
+  - src/tui/canvas.rs:40-93,187-202 (ZoomLevel, visible_grid_capacity_for)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change column_layout proportions, render_footer items, or Help modal close keys.
+  - No references to "nebulous" (case-insensitive) or real hostnames/emails (use testuser@example.com).
+
+[PRE_GATE]
+grep -q 'fn render_help_modal_shows_close_hint_at_68_and_79_cols' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal: Pressing `?` shows explicit Connect dependency direction (`Connect (A depends on B)`) in the Keyboard Help modal across narrow and wide terminals without wrapping or clipping the close hint, and unit tests verify the >= 60% Snap Grid width and 114x26 4x4 Compact capacity (`FEAT-0002`, `FEAT-0003`, `FEAT-0004`).
+
+Contract & Behavior:
+  1. `src/tui/ui.rs` (`render_modal` -> `ModalState::Help`):
+     - In both the narrow (`area.width < 80`) and wide (`area.width >= 80`) Help modal row tables, replace the `c` action text `"Connect cards"` with `"Connect (A depends on B)"`:
+       - Narrow (`area.width < 80`): `" c          Connect (A depends on B)"`
+       - Wide (`area.width >= 80`): `" c                Connect (A depends on B)"`
+     - Keep all existing per-key rows, column alignments, and `[Esc/?/Enter/q] Close` footer hint intact so `68x24`, `79x24`, and `80x24` terminals render the entire Help modal with zero wrapping and zero footer clipping.
+  2. `src/tui/ui.rs` (`mod tests`):
+     - Add unit test `render_help_modal_clarifies_connect_dependency_direction` exercising the real `?` key event (`app.handle_key`) and rendering via `TestBackend` at both `80x24` and `68x24`, asserting both `"Connect (A depends on B)"` and `"[Esc/?/Enter/q] Close"` appear in the rendered buffer without clipping.
+     - Add unit test `column_layout_gives_canvas_at_least_60_percent_at_140_cols_and_4x4_at_114x26` asserting that `column_layout(Rect::new(0, 3, 140, 36))[1].width * 100 / 140 >= 60` and that at `114x26` (body `Rect::new(0, 3, 114, 22)`), `visible_grid_capacity_for(canvas_inner, ZoomLevel::Compact)` returns `>= (4, 4)`.
+
+Must still work:
+  - `render_help_modal_fits_80x24_without_wrapping_or_footer_clipping` and `render_help_modal_shows_close_hint_at_68_and_79_cols` continue passing with no wrapping or clipping.
+  - All other modal, footer, list, and detail panel tests in `src/tui/ui.rs` continue passing unchanged.
+
+Drops: none
+
+Tests:
+  - `render_help_modal_clarifies_connect_dependency_direction`: sends real `?` key to `make_test_app()` and renders at `80x24` and `68x24` -> both buffers contain `"Connect (A depends on B)"` and `"[Esc/?/Enter/q] Close"`.
+  - `column_layout_gives_canvas_at_least_60_percent_at_140_cols_and_4x4_at_114x26`: evaluates `column_layout` at `140x36` and `114x22` + `visible_grid_capacity_for(..., ZoomLevel::Compact)` -> middle column >= 60% width at 140 cols and capacity >= `(4, 4)` at `114x26`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'Connect (A depends on B)' src/tui/ui.rs && grep -q 'fn render_help_modal_clarifies_connect_dependency_direction' src/tui/ui.rs && grep -q 'fn column_layout_gives_canvas_at_least_60_percent_at_140_cols_and_4x4_at_114x26' src/tui/ui.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 14B: E2E Regression Coverage for `FEAT-0002`–`FEAT-0005`
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 14B: Add E2E tests in tests/e2e.rs covering vertical zoom scroll & 114x26 4x4 Compact capacity, Help/Connect/Edit-Edge rendered direction clarity, and README.md release/feature docs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - tests/e2e.rs:716-760 (key, type_text, select_component_by_id, rect_to_string)
+  - tests/e2e.rs:1054-1160 (e2e_canvas_zoom_levels_and_compact_4x4_capacity)
+  - src/tui/ui.rs:637-735 (EditConnection preview and Help modal rows)
+  - README.md:18-35,103-177 (local release build block, TUI keyboard reference, workspace layout)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify src/ files or README.md in this step.
+  - No references to "nebulous" (case-insensitive) or real hostnames/emails (use testuser@example.com).
+
+[PRE_GATE]
+grep -q 'Connect (A depends on B)' src/tui/ui.rs && grep -q 'fn render_help_modal_clarifies_connect_dependency_direction' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal: End-to-end tests verify the remaining acceptance criteria of `FEAT-0002` (vertical scroll + zoom-out pullback + 114x26 4x4 Compact capacity + >= 60% canvas width), `FEAT-0003` & `FEAT-0004` (Help modal via `?`, Connect header prompt via `c`, Edit Connection preview via `E`), and `FEAT-0005` (`README.md` separate local release build block and updated docs).
+
+Contract & Behavior:
+  1. `tests/e2e.rs` (`e2e_vertical_scroll_and_minimum_4x4_compact_canvas`):
+     - Initializes a temp workspace (`testuser@example.com`) with a 4x4 grid of components (`c00`..`c33`, names `C00`..`C33`) at `(col, row)` for `row in 0..4, col in 0..4`.
+     - Verifies `column_layout(Rect::new(0, 3, 140, 36))[1].width * 100 / 140 >= 60`.
+     - Renders at `114x26` in default `ZoomLevel::Compact` and asserts all 16 card names `C00`..`C33` appear inside `column_layout(Rect::new(0, 3, 114, 22))[1]`.
+     - Zooms in via `+` and `=` to `ZoomLevel::Expanded`, selects row-3 card `c30` via `select_component_by_id` (real key navigation), renders at `140x40`, and asserts `app.viewport.scroll_row > 0`.
+     - Zooms out twice via `-` back to `ZoomLevel::Compact`, renders at `140x40`, and asserts `app.viewport.scroll_row == 0` and all 4 column-0 cards (`C00`, `C10`, `C20`, `C30`) appear inside the canvas rect.
+  2. `tests/e2e.rs` (`e2e_help_modal_connect_direction_and_edit_edge_preview`):
+     - Initializes a temp workspace named `"rf-e2e"` (`testuser@example.com`) with `frontend` (`"Frontend"`) and `backend` (`"Backend"`).
+     - Presses `?` via `app.handle_key`, renders at `80x24` and `140x40`, asserts `"Keyboard Help"`, `"Connect (A depends on B)"`, `"Zoom in"`, `"Zoom out"`, and `"[Esc/?/Enter/q] Close"` appear, then presses `?` again and asserts `app.modal.is_none()`.
+     - Selects `frontend` via `select_component_by_id`, presses `c`, renders at `140x40`, and asserts the rendered header rect (`Rect::new(0, 0, 140, 3)`) contains `"Frontend depends on <target>"`.
+     - Navigates via real key events to `backend` and presses `Enter` to confirm the connection.
+     - Reselects `frontend`, presses `E` to open `Edit Connection`, renders at `140x40`, and asserts the rendered buffer contains `"Edit Connection"` and `"Edge: frontend depends on backend"`; presses `Esc` and asserts `app.modal.is_none()`.
+  3. `tests/e2e.rs` (`e2e_readme_documents_release_build_and_tui_features`):
+     - Reads `Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")` and asserts:
+       - `"### Build and install from a local clone"` appears, and `"cargo install --path . --locked"` and `"cargo build --release --locked"` appear in separate fenced code blocks (a closing triple-backtick fence occurs between them).
+       - Per-key TUI table entries for `` `+` / `=` ``, `` `-` ``, `` `c` ``, `` `a` ``, and `` `E` `` are present alongside `"<A> depends on <target>"`.
+       - Lightweight archetypes (`concept`, `interface`, `logic`, `data`, `integration`, `custom`) and sub-component `parent_id` documentation are present.
+
+Must still work:
+  - All existing E2E tests in `tests/e2e.rs` continue passing unchanged.
+
+Drops: none
+
+Tests:
+  - `e2e_vertical_scroll_and_minimum_4x4_compact_canvas`: 4x4 grid rendered at `114x26` (`Compact`) -> all 16 cards visible; zoomed to `Expanded` + `c30` selected -> `scroll_row > 0`; zoomed out to `Compact` -> `scroll_row == 0` and `C00..C30` visible.
+  - `e2e_help_modal_connect_direction_and_edit_edge_preview`: real `?`, `c`, `Enter`, `E`, `Esc` keys -> rendered Help modal shows `"Connect (A depends on B)"`, rendered header shows `"Frontend depends on <target>"`, rendered Edit Connection modal shows `"Edge: frontend depends on backend"`.
+  - `e2e_readme_documents_release_build_and_tui_features`: reads workspace `README.md` -> separate `cargo build --release --locked` fenced block, per-key bindings, connect direction, archetypes, and `parent_id` documented.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_vertical_scroll_and_minimum_4x4_compact_canvas' tests/e2e.rs && grep -q 'fn e2e_help_modal_connect_direction_and_edit_edge_preview' tests/e2e.rs && grep -q 'fn e2e_readme_documents_release_build_and_tui_features' tests/e2e.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
