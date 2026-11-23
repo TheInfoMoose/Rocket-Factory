@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 12):** Widen the Snap Grid canvas with capped sidebars, add `Compact`/`Normal`/`Expanded` zoom levels (`+`/`=`, `-`, defaulting to `Compact` with ≥4×4 capacity and top-center default placement), upgrade the `?` Help modal to per-action rows and footer to underlined-key mnemonics, update `README.md`, and add comprehensive Phase 11–12 E2E tests.
+**Phase goal (Phase 13):** Fix Phase 12 review bugs (`BUG-0011`–`BUG-0017`: Help modal narrow wrapping/height, component list task-count truncation, zoom-out scroll pullback, narrow-canvas row-1 card rect, config-write rollback on create/move, out-of-grid forward move), document acceptance of the 117-col footer (`TASK-0060`), and harden Phase 12 unit & E2E tests (`TASK-0061`, `TASK-0062`) to use real key/render paths.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 12A** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/app.rs`, `src/tui/ui.rs` | — |
-| 2 | **STEP 12B** | `/goal` | ui | `src/tui/ui.rs` | STEP 12A |
-| 3 | **STEP 12C** | `/goal` | docs | `README.md` | STEP 12A |
-| 4 | **STEP 12D** | `/goal` | tests | `tests/e2e.rs` | STEP 12B |
+| 1 | **STEP 13A** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs` | — |
+| 2 | **STEP 13B** | `/goal` | app | `src/tui/app.rs` | — |
+| 3 | **STEP 13C** | `/goal` | ui | `src/tui/ui.rs` | STEP 13A |
+| 4 | **STEP 13D** | `/goal` | tests | `tests/e2e.rs` | STEP 13A, STEP 13B, STEP 13C |
 
 ### Completed
 
@@ -81,10 +81,14 @@
 | **STEP 11B** | Done (`1169d58`) | `/goal` | modal | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/app.rs` |
 | **STEP 11C** | Done (`b13bd79`) | `/goal` | tui | `src/tui/app.rs` |
 | **STEP 11D** | Done (`3d031fa`) | `/goal` | ui | `src/tui/ui.rs`, `src/tui/canvas.rs` |
+| **STEP 12A** | Done (`be6463a`) | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/app.rs`, `src/tui/ui.rs` |
+| **STEP 12B** | Done (`2bff7c6`) | `/goal` | ui | `src/tui/ui.rs` |
+| **STEP 12C** | Done (`29ffaf9`) | `/goal` | docs | `README.md` |
+| **STEP 12D** | Done (`3c7047f`) | `/goal` | tests | `tests/e2e.rs` |
 
 ### Future phases
 
-_None — Phase 12 completes the current roadmap._
+_None — Phase 13 resolves Phase 12 review findings (`BUG-0011`–`BUG-0017`, `TASK-0060`–`TASK-0062`) and completes the current roadmap. Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
 ### Open Questions
 
@@ -3100,6 +3104,236 @@ Contract & Behavior:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_sub_component_creation_expand_collapse_and_collision_shifting' tests/e2e.rs && grep -q 'fn e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics' tests/e2e.rs && grep -q 'fn e2e_canvas_zoom_levels_and_compact_4x4_capacity' tests/e2e.rs && grep -q 'fn e2e_top_center_default_placement_and_grid_expansion_persists' tests/e2e.rs && ! grep -rqi 'nebulous' tests/
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 13 Step Blocks
+
+### STEP 13A: Canvas Narrow-Fallback Row Fix, Zoom-Out Scroll Pullback & Compact L-Bend Coverage (`BUG-0013`, `BUG-0014`, `TASK-0061`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 13A: Fix narrow-canvas card_rect for non-zero rows/columns, clamp viewport scroll against occupied extent on zoom/resize, and add Compact L-bend test coverage.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/canvas.rs
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/canvas.rs:120-195 (card_rect, visible_grid_capacity_for, ensure_visible)
+  - src/tui/canvas.rs:890-935 (render_canvas_buffer_with_zoom, render_canvas_buffer)
+  - src/tui/ui.rs:45-62 (render layout, ensure_visible call site)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change ZoomLevel metrics or render_footer in this step.
+  - No references to "nebulous" (case-insensitive).
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: A selected card on row > 0 or col > 0 in the first visible column/row renders on narrow canvases (`BUG-0014`), zooming out or widening the terminal pulls `scroll_col`/`scroll_row` back so all fitting cards are visible (`BUG-0013`), and `ZoomLevel::Compact` L-bend edge routing is tested (`TASK-0061`).
+
+Contract & Behavior:
+  1. `src/tui/canvas.rs` (`card_rect`):
+     - When `inner.width >= 4 && inner.height >= 3`, clamp width and height independently for the first visible column (`rel_col == 0`) and first visible row (`rel_row == 0`) instead of requiring `rel_col == 0 && rel_row == 0` simultaneously.
+     - Specifically: if `rel_col == 0`, clamp available width (`metrics.card_width.min(max_x.saturating_sub(x))`, requiring `>= 3`); otherwise require `x.saturating_add(metrics.card_width) <= max_x`. Independently, if `rel_row == 0`, clamp available height (`metrics.card_height.min(max_y.saturating_sub(y))`, requiring `>= 2`); otherwise require `y.saturating_add(metrics.card_height) <= max_y`.
+  2. `src/tui/canvas.rs` (`pub fn clamp_viewport_scroll(inner: Rect, viewport: &mut CanvasViewport, occupied_cols: u16, occupied_rows: u16)`):
+     - Compute `(vis_cols, vis_rows) = visible_grid_capacity_for(inner, viewport.zoom)`.
+     - Clamp `viewport.scroll_col` to at most `occupied_cols.saturating_sub(vis_cols)` and `viewport.scroll_row` to at most `occupied_rows.saturating_sub(vis_rows)`.
+  3. `src/tui/ui.rs` (`render`):
+     - Compute `occupied_cols` (max `c.position.col + 1` across `app.project.components`, or `0` if empty) and `occupied_rows` (max `c.position.row + 1`, or `0` if empty).
+     - Call `crate::tui::canvas::clamp_viewport_scroll(canvas_inner, &mut app.viewport, occupied_cols, occupied_rows)` before `ensure_visible`.
+  4. `src/tui/canvas.rs` (tests):
+     - Add unit tests for `BUG-0014` (`card_rect_narrow_canvas_draws_selected_row_one`), `BUG-0013` (`zoom_out_pulls_scroll_back_to_show_all_fitting_cards` driven through `+`/`-` keys and `ui::render`), and `TASK-0061` (`render_canvas_compact_renders_l_bend_edge` using `ZoomLevel::Compact`).
+
+Must still work:
+  - Existing `Normal` and `Expanded` card rendering and `ensure_visible` panning to off-screen selections.
+  - Existing `render_canvas_*` unit tests.
+
+Drops: none
+
+Tests:
+  - `card_rect_narrow_canvas_draws_selected_row_one`: `60x24` terminal, card at `(0, 1)`, `ZoomLevel::Expanded`, `viewport` at `(0, 0)` -> `card_rect` returns `Some` and rendered canvas contains the card.
+  - `zoom_out_pulls_scroll_back_to_show_all_fitting_cards`: `140x40` terminal, 4 cards in `col 0..4, row 0`, select `col 3`, drive `+` `+` (render) then `-` `-` (render) -> `scroll_col == 0` and all 4 cards appear in canvas buffer.
+  - `render_canvas_compact_renders_l_bend_edge`: two cards at `(0, 0)` and `(1, 1)` rendered at `ZoomLevel::Compact` -> routed L-bend box-drawing corner and arrowhead `▶` (or `▼`) appear in buffer.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'pub fn clamp_viewport_scroll' src/tui/canvas.rs && grep -q 'fn card_rect_narrow_canvas_draws_selected_row_one' src/tui/canvas.rs && grep -q 'fn zoom_out_pulls_scroll_back_to_show_all_fitting_cards' src/tui/canvas.rs && grep -q 'fn render_canvas_compact_renders_l_bend_edge' src/tui/canvas.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13B: Grid-Config Failure Rollback, Out-of-Grid Forward Move & App Real-Render Tests (`BUG-0015`, `BUG-0016`, `BUG-0017`, `TASK-0061`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 13B: Roll back component writes when grid config save fails on create or move, prevent backward jumps on out-of-grid forward moves, and update app.rs tests to render before input.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/storage.rs:138-175 (save_project_config, save_component, delete_component)
+  - src/tui/app.rs:510-595 (move_selected_component)
+  - src/tui/app.rs:960-1040 (NewComponent submit)
+  - src/tui/app.rs:1945-1985,3270-3297 (existing app.rs tests)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify src/storage.rs or src/tui/ui.rs.
+  - No references to "nebulous" (case-insensitive).
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Failed `save_project_config` during top-level create, sub-component create, or card move leaves disk and memory consistent without half-saved component files (`BUG-0015`, `BUG-0016`); `Right`/`Down` never moves an out-of-grid card backwards (`BUG-0017`); and `app.rs` Phase 12 tests drive `crate::tui::ui::render` before input instead of injecting `last_canvas_capacity` (`TASK-0061`).
+
+Contract & Behavior:
+  1. `src/tui/app.rs` (`NewComponent` submit for both top-level and sub-component):
+     - Share one save-and-rollback path when `self.root.join(ROCKET_DIR).exists()` and `grid_expanded_config` is `Some`: if `save_component(&self.root, &comp)` succeeds and `save_project_config(&self.root, cfg)` fails, call `delete_component(&self.root, &comp.id)` to remove the newly written component file before returning with the modal error and leaving `self.project` unchanged.
+  2. `src/tui/app.rs` (`move_selected_component`):
+     - When `self.root.join(ROCKET_DIR).exists()` and `expanded` is true: keep `previous = self.project.components[comp_idx].clone()`. If `save_component(&self.root, &candidate)` succeeds and `save_project_config(&self.root, &candidate_config)` fails, call `save_component(&self.root, &previous)` to restore the prior component file before returning with `status_message` and leaving `self.project` unchanged.
+  3. `src/tui/app.rs` (`move_selected_component` target calculation):
+     - For `Direction::Right`, compute `current_pos.col.saturating_add(1).min(max_col.max(current_pos.col))`.
+     - For `Direction::Down`, compute `current_pos.row.saturating_add(1).min(max_row.max(current_pos.row))`.
+     - If `target_pos == current_pos`, return without modifying state or disk.
+  4. `src/tui/app.rs` (tests):
+     - Update the existing tests around lines 1950–1985 and 3270–3297 to render via `crate::tui::ui::render` before sending `n` keystrokes (removing `app.last_canvas_capacity = Some((4, 4))` injection and asserting the real rendered placement).
+     - Add failure-path tests for top-level create rollback, sub-component create rollback, and card move rollback when `.rocket/project.toml` is read-only (restoring permissions before tempdir cleanup), plus an out-of-grid `Right`/`Down` no-backward-move test.
+
+Must still work:
+  - Normal top-level create, sub-component create, and card move with grid expansion when `project.toml` is writable.
+  - Collision checks when moving a card into an occupied cell.
+
+Drops: none
+
+Tests:
+  - `create_top_level_rolls_back_component_when_config_save_fails`: make `.rocket/project.toml` read-only, fill 1x1 grid, render at `140x40`, drive `n` to create `beta` -> modal stays open with error, `app.project.component("beta").is_none()`, and `load_project` after restoring permissions shows `beta` absent on disk.
+  - `create_sub_component_rolls_back_component_when_config_save_fails`: make `.rocket/project.toml` read-only, fill 1x1 grid, drive `a` to create sub-component, then `Esc` -> `load_project` shows sub-component absent on disk.
+  - `move_card_rolls_back_component_when_config_save_fails`: make `.rocket/project.toml` read-only, card at `(0, 0)` on `1x1` saved grid, render at `140x40`, drive `m` + `Right` -> `app.project` keeps `(0, 0)` and `load_project` shows `(0, 0)` on disk.
+  - `move_out_of_grid_card_forward_does_not_jump_backwards`: card at `(20, 0)` on `8x8` effective grid, drive `m` + `Right` -> card remains at `(20, 0)` (not `7`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn create_top_level_rolls_back_component_when_config_save_fails' src/tui/app.rs && grep -q 'fn create_sub_component_rolls_back_component_when_config_save_fails' src/tui/app.rs && grep -q 'fn move_card_rolls_back_component_when_config_save_fails' src/tui/app.rs && grep -q 'fn move_out_of_grid_card_forward_does_not_jump_backwards' src/tui/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13C: Narrow Help Modal Sizing, Component List Count Preservation & UI Key-Path Tests (`BUG-0011`, `BUG-0012`, `TASK-0060`, `TASK-0061`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 13C: Fix Keyboard Help modal wrapping/height on 68-79 column terminals, preserve nested task counts in narrow component lists, and update ui.rs tests to use real key paths.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+READ_ONLY_REFS:
+  - src/tui/ui.rs:18-33 (column_layout)
+  - src/tui/ui.rs:155-190 (render_component_list)
+  - src/tui/ui.rs:354-410 (render_footer, TASK-0060 accepted layout)
+  - src/tui/ui.rs:548-718 (ModalState::Help, render_modal)
+  - src/tui/ui.rs:920-1120 (existing ui.rs tests)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not widen left sidebar beyond its 22-column cap or shorten render_footer hints (TASK-0060 accepts the 117-column footer).
+  - No references to "nebulous" (case-insensitive).
+
+[PRE_GATE]
+grep -q 'pub fn clamp_viewport_scroll' src/tui/canvas.rs
+
+[MUTATION_SPEC]
+Goal: Pressing `?` on `68x24`–`79x24` terminals shows `[Esc/?/Enter/q] Close` without clipping (`BUG-0011`), nested component labels like depth-2 `worker_pool (0/0)` never lose their `(complete/total)` suffix in the narrower list (`BUG-0012`), and `ui.rs` tests open Help via `?` and zoom via `+` (`TASK-0061`).
+
+Contract & Behavior:
+  1. `src/tui/ui.rs` (`ModalState::Help` in `render_modal`):
+     - When `area.width < 80`, format Help in a single column (or compact rows) so rows fit comfortably within `area.width.saturating_sub(4)`.
+     - Compute `popup_inner_width = popup_width.saturating_sub(2)` and derive `popup_height` from the wrapped line count at `popup_inner_width` (e.g., `Paragraph::line_count(popup_inner_width)` + `2` borders, clamped to `area.height`), so `[Esc/?/Enter/q] Close` is never clipped when lines wrap.
+  2. `src/tui/ui.rs` (`render_component_list`):
+     - Compute the list inner width (`area.width.saturating_sub(2)`).
+     - Preserve `{indent}{expand_prefix}{glyph} ` and ` ({}/{})` (`(complete/total)`) intact; if the full label exceeds inner width, truncate `comp.name` (with `…` when space permits) so the count suffix remains visible inside the list rect.
+  3. `src/tui/ui.rs` (`render_footer`, `TASK-0060`):
+     - Keep the existing 117-column mnemonic footer unchanged (accepted in plan so `? help` and `q quit` remain visible at 80 columns).
+  4. `src/tui/ui.rs` (tests):
+     - Update tests around lines 927, 1002, and 1091 to open Help via `app.handle_key(KeyCode::Char('?'))` and zoom to `Normal` via `app.handle_key(KeyCode::Char('+'))` instead of setting `app.modal` or `app.viewport.zoom` directly.
+     - Add `render_help_modal_shows_close_hint_at_68_and_79_cols` (pressing `?`, asserting `[Esc/?/Enter/q] Close` at both `68x24` and `79x24`) and `render_component_list_preserves_task_count_when_narrow` (at `120x35` with depth-2 `worker_pool`, asserting `(0/0)` inside the list rect `column_layout(Rect::new(0, 3, 120, 31))[0]`).
+
+Must still work:
+  - Two-column Help modal at `80x24` and wider (`120x35`).
+  - Footer underlined-key mnemonics at `80x24` and `120x35`.
+
+Drops:
+  - At `80` columns the footer omits `E`, `v`, and `r/S` hints, and at `112–116` columns it omits the theme hint (`TASK-0060`, accepted in plan to keep `? help` and `q quit` visible at `80` columns).
+
+Tests:
+  - `render_help_modal_shows_close_hint_at_68_and_79_cols`: drive `KeyCode::Char('?')`, render at `68x24` and `79x24` -> buffer contains `Keyboard Help` and `[Esc/?/Enter/q] Close`.
+  - `render_component_list_preserves_task_count_when_narrow`: create depth-2 `worker_pool` under `bus_worker` under `core_bus`, render at `120x35`, slice buffer to left list rect -> row contains `(0/0)`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn render_help_modal_shows_close_hint_at_68_and_79_cols' src/tui/ui.rs && grep -q 'fn render_component_list_preserves_task_count_when_narrow' src/tui/ui.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13D: Phase 12 E2E Test Hardening for Key Navigation, Zoom Scroll Pullback & Grid Expansion (`TASK-0062`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 13D: Upgrade Phase 12 E2E tests to navigate via real keys, verify zoom-out scroll pullback from a scrolled selection, and verify grid expansion persistence on disk.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - tests/e2e.rs:716-745 (key, type_text, select_component_by_id, rect_to_string)
+  - tests/e2e.rs:1060-1161 (e2e_canvas_zoom_levels_and_compact_4x4_capacity, e2e_top_center_default_placement_and_grid_expansion_persists)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify src/ files in this step.
+  - No references to "nebulous" (case-insensitive) or real hostnames/emails (use testuser@example.com).
+
+[PRE_GATE]
+grep -q 'pub fn clamp_viewport_scroll' src/tui/canvas.rs && grep -q 'fn render_help_modal_shows_close_hint_at_68_and_79_cols' src/tui/ui.rs
+
+[MUTATION_SPEC]
+Goal: E2E tests navigate components using real key events instead of mutating `selected_index`, verify zoom-out restores all fitting cards from a scrolled selection, and verify grid expansion actually grows and persists `grid` on disk (`TASK-0062`).
+
+Contract & Behavior:
+  1. `tests/e2e.rs` (`select_component_by_id`):
+     - Replace direct `app.selected_index = vis_idx` assignment with real `Down` / `Up` (or `j` / `k`) key events via `app.handle_key(...)` until the target component is selected (asserting it reaches `id`).
+  2. `tests/e2e.rs` (`e2e_canvas_zoom_levels_and_compact_4x4_capacity`):
+     - After zooming to `Expanded` (`+`, `=`), select a card at `col 3` (e.g. `C30`) via key navigation and render at `140x40` so `app.viewport.scroll_col > 0`.
+     - Then zoom out twice (`-`, `-`) back to `Compact`, render at `140x40`, and assert inside `canvas_rect` that `app.viewport.scroll_col == 0` and all 4 cards on row 0 (`C00`, `C10`, `C20`, `C30`) are visible in the canvas rect.
+  3. `tests/e2e.rs` (`e2e_top_center_default_placement_and_grid_expansion_persists`):
+     - Set or start with a `1x1` saved grid (or fill the initial grid) and render at `140x40`, then create components via `n` beyond the saved `grid` bounds so `app.project.config.grid` expands (assert `cols > 1` or `rows > 1` or `> initial_grid`), and reload via `storage::load_project` to assert the expanded `grid` dimensions persisted on disk.
+
+Must still work:
+  - All existing E2E tests in `tests/e2e.rs` pass without weakening assertions.
+
+Drops: none
+
+Tests:
+  - `e2e_canvas_zoom_levels_and_compact_4x4_capacity`: zooms `+`, `=`, navigates to `C30` (`scroll_col > 0` after render), zooms `-`, `-` -> `scroll_col == 0` and `C00..C30` all appear in `canvas_rect`.
+  - `e2e_top_center_default_placement_and_grid_expansion_persists`: creates top-level component at top-center, expands saved `1x1` grid via `n` after render -> `app.project.config.grid` and `storage::load_project` both reflect expanded grid dimensions.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'fn e2e_canvas_zoom_levels_and_compact_4x4_capacity' tests/e2e.rs && grep -q 'fn e2e_top_center_default_placement_and_grid_expansion_persists' tests/e2e.rs && ! grep -q 'app.selected_index = vis_idx' tests/e2e.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
