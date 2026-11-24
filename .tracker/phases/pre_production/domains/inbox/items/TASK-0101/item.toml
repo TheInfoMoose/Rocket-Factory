@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0101"
 type = "task"
 title = "security"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:44:18Z"
-updated_at = "2026-11-24T04:44:18Z"
+updated_at = "2026-11-24T05:01:55Z"
 source_ref = "STEP 16B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0101@2026-11-24T04:59:11Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "3b8c122"
+summary = "STEP 16B: Remove CWD Adapters Fallback & Gate Startup Auto-Pull (`BUG-0018`) (phased check PASS)"
