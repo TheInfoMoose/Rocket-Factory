@@ -115,7 +115,7 @@ fn atomic_write_bytes(path: &Path, contents: &[u8]) -> RbResult<()> {
     Ok(())
 }
 
-fn ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf> {
+pub(crate) fn ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf> {
     let canon_base = fs::canonicalize(base).map_err(|source| RbError::Io {
         path: base.to_path_buf(),
         source,

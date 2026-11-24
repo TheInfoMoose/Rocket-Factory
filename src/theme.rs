@@ -132,35 +132,7 @@ pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RbResult<Them
             continue;
         }
         let candidate = dir.join(&filename);
-        let cand_meta = match std::fs::symlink_metadata(&candidate) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(source) => {
-                return Err(RbError::Io {
-                    path: candidate,
-                    source,
-                });
-            }
-        };
-        let canon_dir = std::fs::canonicalize(dir).map_err(|source| RbError::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let canon_candidate = match std::fs::canonicalize(&candidate) {
-            Ok(path) => path,
-            Err(_) if cand_meta.file_type().is_symlink() => {
-                return Err(RbError::PathEscape(candidate));
-            }
-            Err(source) => {
-                return Err(RbError::Io {
-                    path: candidate,
-                    source,
-                });
-            }
-        };
-        if !canon_candidate.starts_with(&canon_dir) {
-            return Err(RbError::PathEscape(candidate));
-        }
+        let canon_candidate = crate::storage::ensure_contained(dir, &candidate)?;
         if !canon_candidate.is_file() {
             continue;
         }
@@ -200,10 +172,10 @@ pub fn list_available_themes(search_dirs: &[PathBuf]) -> Vec<String> {
             if validate_theme_name(stem).is_err() {
                 continue;
             }
-            let Ok(canon_path) = std::fs::canonicalize(&path) else {
+            let Ok(canon_path) = crate::storage::ensure_contained(&canon_dir, &path) else {
                 continue;
             };
-            if !canon_path.is_file() || !canon_path.starts_with(&canon_dir) {
+            if !canon_path.is_file() {
                 continue;
             }
             themes.insert(stem.to_string());

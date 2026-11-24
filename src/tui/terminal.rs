@@ -12,7 +12,9 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::error::{RbError, RbResult};
-use crate::storage::{save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR};
+use crate::storage::{
+    ensure_contained, save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
+};
 use crate::tui::app::{App, SyncRequest};
 use crate::tui::ui;
 
@@ -211,27 +213,17 @@ where
         }
     }
 
-    let canon_dir = match std::fs::canonicalize(&components_dir) {
+    let canon_md = match ensure_contained(&components_dir, &md_path) {
         Ok(path) => path,
-        Err(err) => {
-            app.status_message =
-                format!("Failed to resolve components directory for {comp_id}: {err}");
+        Err(RbError::PathEscape(_)) => {
+            app.status_message = format!("Refusing to edit {comp_id}: path escapes components dir");
             return;
         }
-    };
-
-    let canon_md = match std::fs::canonicalize(&md_path) {
-        Ok(path) => path,
         Err(err) => {
             app.status_message = format!("Failed to resolve Markdown path for {comp_id}: {err}");
             return;
         }
     };
-
-    if !canon_md.starts_with(&canon_dir) {
-        app.status_message = format!("Refusing to edit {comp_id}: path escapes components dir");
-        return;
-    }
 
     match run_editor(&canon_md) {
         Ok(()) => {
