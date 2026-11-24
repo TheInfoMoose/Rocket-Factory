@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0118"
 type = "task"
 title = "terminal"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T19:11:20Z"
-updated_at = "2026-11-24T19:40:11Z"
+updated_at = "2026-11-24T20:21:42Z"
 source_ref = "STEP 18F"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 4
 iteration_count = 1
+last_timer_session = "TASK-0118@2026-11-24T20:16:55Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "7d6bb49"
+summary = "STEP 18F: Terminal Restore Safety, Async Adapter Sync & Dirty-Flag Event Loop (phased check PASS)"
