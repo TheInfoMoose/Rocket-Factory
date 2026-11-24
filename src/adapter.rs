@@ -618,12 +618,12 @@ pub fn run_pull_status(
     run_pull_status_with_payload(adapter, workdir, &payload)
 }
 
-pub fn sync_pull_project(
+fn sync_pull_project_in_memory_inner(
     project: &mut Project,
     root: &Path,
     adapters_path: &Path,
     adapter_filter: Option<&str>,
-) -> RbResult<PullSyncReport> {
+) -> RbResult<(PullSyncReport, Vec<usize>)> {
     if adapters_path.as_os_str().is_empty() {
         return Err(RbError::InvalidArgument(
             "no adapters file configured; set HOME or pass --adapters-file".into(),
@@ -644,10 +644,13 @@ pub fn sync_pull_project(
         .collect();
 
     if pull_adapters.is_empty() {
-        return Ok(PullSyncReport {
-            adapters_count: active_adapters.len(),
-            ..PullSyncReport::default()
-        });
+        return Ok((
+            PullSyncReport {
+                adapters_count: active_adapters.len(),
+                ..PullSyncReport::default()
+            },
+            Vec::new(),
+        ));
     }
 
     let payload = export_project_json(project)?;
@@ -672,40 +675,66 @@ pub fn sync_pull_project(
         }
     }
 
-    let backups: Vec<(usize, Vec<ExternalTaskRef>, Vec<FeatureItem>)> = updated_indices
+    let summary = reconcile_status_batch(project, &responses);
+
+    Ok((
+        PullSyncReport {
+            adapters_count: active_adapters.len(),
+            components_updated: summary.components_updated,
+            tasks_synced: summary.tasks_synced,
+            features_linked: summary.features_linked,
+        },
+        updated_indices,
+    ))
+}
+
+pub(crate) fn sync_pull_project_in_memory(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    adapter_filter: Option<&str>,
+) -> RbResult<PullSyncReport> {
+    let (report, _) =
+        sync_pull_project_in_memory_inner(project, root, adapters_path, adapter_filter)?;
+    Ok(report)
+}
+
+pub fn sync_pull_project(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    adapter_filter: Option<&str>,
+) -> RbResult<PullSyncReport> {
+    let backups: Vec<(Vec<ExternalTaskRef>, Vec<FeatureItem>)> = project
+        .components
         .iter()
-        .map(|&idx| {
-            let comp = &project.components[idx];
-            (idx, comp.external_tasks.clone(), comp.features.clone())
-        })
+        .map(|comp| (comp.external_tasks.clone(), comp.features.clone()))
         .collect();
 
-    let summary = reconcile_status_batch(project, &responses);
+    let (report, updated_indices) =
+        sync_pull_project_in_memory_inner(project, root, adapters_path, adapter_filter)?;
 
     for (pos, &idx) in updated_indices.iter().enumerate() {
         if let Err(err) = save_component(root, &project.components[idx]) {
-            for (restore_idx, prev_tasks, prev_features) in backups.into_iter().skip(pos) {
-                project.components[restore_idx].external_tasks = prev_tasks;
-                project.components[restore_idx].features = prev_features;
+            for &restore_idx in updated_indices.iter().skip(pos) {
+                let (ref prev_tasks, ref prev_features) = backups[restore_idx];
+                project.components[restore_idx].external_tasks = prev_tasks.clone();
+                project.components[restore_idx].features = prev_features.clone();
             }
             return Err(err);
         }
     }
 
-    Ok(PullSyncReport {
-        adapters_count: active_adapters.len(),
-        components_updated: summary.components_updated,
-        tasks_synced: summary.tasks_synced,
-        features_linked: summary.features_linked,
-    })
+    Ok(report)
 }
 
-pub fn sync_push_project(
+fn sync_push_project_in_memory_inner(
     project: &mut Project,
     root: &Path,
     adapters_path: &Path,
     component_ids: &[String],
     adapter_filter: Option<&str>,
+    modified_ids: &mut Vec<String>,
 ) -> RbResult<PushSyncReport> {
     if adapters_path.as_os_str().is_empty() {
         return Err(RbError::InvalidArgument(
@@ -751,17 +780,13 @@ pub fn sync_push_project(
             ) {
                 Ok(summary) => {
                     features_pushed += summary.features_pushed;
-                    if summary.modified {
-                        save_component(root, comp)?;
+                    if summary.modified && !modified_ids.contains(comp_id) {
+                        modified_ids.push(comp_id.clone());
                     }
                 }
                 Err(err) => {
-                    if modified {
-                        if let Err(save_err) = save_component(root, comp) {
-                            return Err(RbError::Adapter(format!(
-                                "{err}; additionally failed to persist partial push progress: {save_err}"
-                            )));
-                        }
+                    if modified && !modified_ids.contains(comp_id) {
+                        modified_ids.push(comp_id.clone());
                     }
                     return Err(err);
                 }
@@ -775,6 +800,63 @@ pub fn sync_push_project(
         features_pushed,
         responses,
     })
+}
+
+pub(crate) fn sync_push_project_in_memory(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    component_ids: &[String],
+    adapter_filter: Option<&str>,
+) -> RbResult<PushSyncReport> {
+    let mut modified_ids = Vec::new();
+    sync_push_project_in_memory_inner(
+        project,
+        root,
+        adapters_path,
+        component_ids,
+        adapter_filter,
+        &mut modified_ids,
+    )
+}
+
+pub fn sync_push_project(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    component_ids: &[String],
+    adapter_filter: Option<&str>,
+) -> RbResult<PushSyncReport> {
+    let mut modified_ids = Vec::new();
+    match sync_push_project_in_memory_inner(
+        project,
+        root,
+        adapters_path,
+        component_ids,
+        adapter_filter,
+        &mut modified_ids,
+    ) {
+        Ok(report) => {
+            for comp_id in &modified_ids {
+                if let Some(comp) = project.component(comp_id) {
+                    save_component(root, comp)?;
+                }
+            }
+            Ok(report)
+        }
+        Err(err) => {
+            for comp_id in &modified_ids {
+                if let Some(comp) = project.component(comp_id) {
+                    if let Err(save_err) = save_component(root, comp) {
+                        return Err(RbError::Adapter(format!(
+                            "{err}; additionally failed to persist partial push progress: {save_err}"
+                        )));
+                    }
+                }
+            }
+            Err(err)
+        }
+    }
 }
 
 #[cfg(test)]

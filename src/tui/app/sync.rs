@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::adapter::{sync_pull_project, sync_push_project, PullSyncReport, PushSyncReport};
+use crate::adapter::{
+    sync_pull_project, sync_pull_project_in_memory, sync_push_project, sync_push_project_in_memory,
+    PullSyncReport, PushSyncReport,
+};
 use crate::error::RbResult;
 use crate::model::{ExternalTaskRef, FeatureItem, Project};
 
@@ -61,7 +64,7 @@ pub(crate) fn run_sync_job(
         .collect();
 
     let result = match request {
-        SyncRequest::Pull => sync_pull_project(&mut project, root, adapters_path, None)
+        SyncRequest::Pull => sync_pull_project_in_memory(&mut project, root, adapters_path, None)
             .map(|report| format_pull_summary(&report)),
         SyncRequest::PushSelected => {
             let Some(comp_id) = target_comp_id else {
@@ -69,7 +72,7 @@ pub(crate) fn run_sync_job(
                     status_message: "No component selected to push".to_string(),
                 };
             };
-            sync_push_project(
+            sync_push_project_in_memory(
                 &mut project,
                 root,
                 adapters_path,
@@ -124,16 +127,47 @@ pub(crate) fn apply_sync_outcome(app: &mut App, outcome: SyncOutcome) {
             updates,
             status_message,
         } => {
+            let mut updated_indices: Vec<usize> = Vec::new();
+            let mut backups: Vec<(usize, Vec<ExternalTaskRef>, Vec<FeatureItem>)> = Vec::new();
+
             for update in updates {
-                if let Some(comp) = app.project.component_mut(&update.component_id) {
+                if let Some(idx) = app
+                    .project
+                    .components
+                    .iter()
+                    .position(|comp| comp.id == update.component_id)
+                {
+                    let comp = &mut app.project.components[idx];
+                    backups.push((idx, comp.external_tasks.clone(), comp.features.clone()));
                     comp.external_tasks = update.external_tasks;
                     comp.features = update.features;
+                    updated_indices.push(idx);
                 }
             }
+
+            let mut save_error: Option<String> = None;
+            for (pos, &idx) in updated_indices.iter().enumerate() {
+                if let Err(err) =
+                    crate::storage::save_component(&app.root, &app.project.components[idx])
+                {
+                    for (restore_idx, prev_tasks, prev_features) in
+                        backups.into_iter().skip(pos).rev()
+                    {
+                        app.project.components[restore_idx].external_tasks = prev_tasks;
+                        app.project.components[restore_idx].features = prev_features;
+                    }
+                    save_error = Some(format!("Failed to save synced component: {err}"));
+                    break;
+                }
+            }
+
             app.refresh_audit();
             app.clamp_selection();
             app.sync_in_flight = false;
-            app.status_message = status_message;
+            app.status_message = match save_error {
+                Some(err_msg) => err_msg,
+                None => status_message,
+            };
         }
         SyncOutcome::Error { status_message } => {
             app.sync_in_flight = false;

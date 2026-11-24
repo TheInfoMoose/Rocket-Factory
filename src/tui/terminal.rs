@@ -423,7 +423,12 @@ where
         dirty = true;
     }
 
-    if let Some(first) = next_event(Duration::from_millis(100))? {
+    let first_timeout = if dirty {
+        Duration::ZERO
+    } else {
+        Duration::from_millis(100)
+    };
+    if let Some(first) = next_event(first_timeout)? {
         if handle_event(app, first) {
             dirty = true;
         }
@@ -1014,5 +1019,136 @@ args = ["-c", 'sleep 0.1; printf "%s" "{\"components\":[{\"component_id\":\"auth
         .expect("resize step succeeds");
         assert!(dirty_resize);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn async_sync_does_not_overwrite_concurrent_foreground_disk_edits() {
+        use crate::storage::{delete_component, load_project};
+
+        let mut comp_a = make_component("comp_a", "# Comp A\n");
+        comp_a.description = "Initial summary".to_string();
+        comp_a.position = GridPos { col: 0, row: 0 };
+
+        let mut comp_b = make_component("comp_b", "# Comp B\n");
+        comp_b.description = "To be deleted".to_string();
+        comp_b.position = GridPos { col: 1, row: 0 };
+
+        let (dir, mut app) = make_workspace_app(vec![comp_a, comp_b]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+        for comp in &app.project.components {
+            save_component(&app.root, comp).expect("save initial component");
+        }
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"comp_a\",\"tasks\":[{\"external_id\":\"TASK-A1\",\"title\":\"Pulled A\",\"status\":\"complete\"}]},{\"component_id\":\"comp_b\",\"tasks\":[{\"external_id\":\"TASK-B1\",\"title\":\"Pulled B\",\"status\":\"in_progress\"}]}]}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        // Snapshot taken before concurrent foreground mutations
+        let project_snapshot = app.project.clone();
+
+        // Concurrent foreground edit to comp_a (both in memory and on disk)
+        {
+            let comp_a_live = app.project.component_mut("comp_a").expect("comp_a exists");
+            comp_a_live.description = "Foreground edited summary".to_string();
+            comp_a_live.position = GridPos { col: 3, row: 2 };
+            save_component(&app.root, comp_a_live).expect("save edited comp_a");
+        }
+
+        // Concurrent foreground deletion of comp_b (both in memory and on disk)
+        app.project.components.retain(|c| c.id != "comp_b");
+        delete_component(&app.root, "comp_b").expect("delete comp_b from disk");
+
+        let comp_b_toml = dir
+            .path()
+            .join(ROCKET_DIR)
+            .join(COMPONENTS_DIR)
+            .join("comp_b.toml");
+        assert!(!comp_b_toml.exists());
+
+        // Background worker runs on the stale snapshot
+        app.sync_in_flight = true;
+        let outcome = run_sync_job(
+            project_snapshot,
+            &app.root,
+            &adapters_path,
+            SyncRequest::Pull,
+            None,
+            false,
+        );
+
+        // Background worker must not have recreated comp_b.toml or overwritten comp_a on disk
+        assert!(!comp_b_toml.exists());
+
+        // UI thread applies outcome and persists live components
+        apply_sync_outcome(&mut app, outcome);
+
+        assert!(!app.sync_in_flight);
+        assert!(!comp_b_toml.exists());
+        assert!(app.project.component("comp_b").is_none());
+
+        let comp_a_mem = app.project.component("comp_a").expect("comp_a in memory");
+        assert_eq!(comp_a_mem.description, "Foreground edited summary");
+        assert_eq!(comp_a_mem.position, GridPos { col: 3, row: 2 });
+        assert_eq!(comp_a_mem.external_tasks.len(), 1);
+        assert_eq!(comp_a_mem.external_tasks[0].external_id, "TASK-A1");
+
+        let reloaded = load_project(&app.root).expect("reload project from disk");
+        assert!(reloaded.component("comp_b").is_none());
+        let comp_a_disk = reloaded.component("comp_a").expect("comp_a on disk");
+        assert_eq!(comp_a_disk.description, "Foreground edited summary");
+        assert_eq!(comp_a_disk.position, GridPos { col: 3, row: 2 });
+        assert_eq!(comp_a_disk.external_tasks.len(), 1);
+        assert_eq!(comp_a_disk.external_tasks[0].external_id, "TASK-A1");
+    }
+
+    #[test]
+    fn step_event_loop_returns_immediately_when_sync_outcome_ready() {
+        let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.sync_in_flight = true;
+
+        let (sync_tx, sync_rx) = mpsc::channel();
+        sync_tx
+            .send(SyncOutcome::Success {
+                updates: Vec::new(),
+                status_message: "Synced 1 adapter(s): 0 component(s) updated".to_string(),
+            })
+            .expect("send sync outcome");
+
+        let mut last_poll = Instant::now();
+        let mut ctx = EventLoopStepCtx {
+            adapters_path: None,
+            poll_interval: None,
+            last_poll: &mut last_poll,
+            sync_tx: &sync_tx,
+            sync_rx: &sync_rx,
+        };
+
+        let mut requested_timeouts = Vec::new();
+        let dirty = step_event_loop(
+            &mut app,
+            &mut ctx,
+            |timeout| {
+                requested_timeouts.push(timeout);
+                Ok(None)
+            },
+            |_| Ok(()),
+        )
+        .expect("step_event_loop succeeds");
+
+        assert!(dirty);
+        assert_eq!(requested_timeouts, vec![Duration::ZERO]);
+        assert!(!app.sync_in_flight);
+        assert_eq!(
+            app.status_message,
+            "Synced 1 adapter(s): 0 component(s) updated"
+        );
     }
 }
