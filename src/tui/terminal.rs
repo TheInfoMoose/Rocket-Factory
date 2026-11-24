@@ -66,11 +66,91 @@ pub fn restore_terminal(terminal: &mut TuiTerminal) -> RbResult<()> {
 }
 
 fn parse_editor_command(editor_value: Option<&str>) -> (String, Vec<String>) {
-    if let Some(raw) = editor_value {
-        let mut parts = raw.split_ascii_whitespace();
-        if let Some(program) = parts.next() {
-            let args = parts.map(str::to_string).collect();
-            return (program.to_string(), args);
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum QuoteState {
+        None,
+        Single,
+        Double,
+    }
+
+    let Some(raw) = editor_value else {
+        return ("vi".to_string(), Vec::new());
+    };
+
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut state = QuoteState::None;
+    let mut chars = raw.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match state {
+            QuoteState::None => match c {
+                c if c.is_ascii_whitespace() => {
+                    if in_token {
+                        tokens.push(std::mem::take(&mut current));
+                        in_token = false;
+                    }
+                }
+                '\'' => {
+                    state = QuoteState::Single;
+                    in_token = true;
+                }
+                '"' => {
+                    state = QuoteState::Double;
+                    in_token = true;
+                }
+                '\\' => {
+                    in_token = true;
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    } else {
+                        current.push('\\');
+                    }
+                }
+                other => {
+                    in_token = true;
+                    current.push(other);
+                }
+            },
+            QuoteState::Single => {
+                if c == '\'' {
+                    state = QuoteState::None;
+                } else {
+                    current.push(c);
+                }
+            }
+            QuoteState::Double => match c {
+                '"' => {
+                    state = QuoteState::None;
+                }
+                '\\' => {
+                    if let Some(&next) = chars.peek() {
+                        if next == '"' || next == '\\' {
+                            chars.next();
+                            current.push(next);
+                        } else {
+                            current.push('\\');
+                        }
+                    } else {
+                        current.push('\\');
+                    }
+                }
+                other => {
+                    current.push(other);
+                }
+            },
+        }
+    }
+
+    if in_token {
+        tokens.push(current);
+    }
+
+    let mut iter = tokens.into_iter();
+    if let Some(program) = iter.next() {
+        if !program.is_empty() {
+            return (program, iter.collect());
         }
     }
     ("vi".to_string(), Vec::new())
@@ -370,6 +450,55 @@ mod tests {
         assert_eq!(
             parse_editor_command(Some("   \t\n ")),
             ("vi".to_string(), Vec::new())
+        );
+    }
+
+    #[test]
+    fn parse_editor_command_preserves_quoted_paths_with_spaces() {
+        assert_eq!(
+            parse_editor_command(Some("\"/path/with spaces/code\" --wait")),
+            (
+                "/path/with spaces/code".to_string(),
+                vec!["--wait".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_editor_command(Some("'/opt/my editor/bin' -n")),
+            ("/opt/my editor/bin".to_string(), vec!["-n".to_string()])
+        );
+        assert_eq!(
+            parse_editor_command(Some("/opt/my\\ editor/bin --flag=\"a b\"")),
+            (
+                "/opt/my editor/bin".to_string(),
+                vec!["--flag=a b".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_editor_command(Some("editor --msg=\"say \\\"hi\\\\\\\"\" 'keep \\\"raw\"'")),
+            (
+                "editor".to_string(),
+                vec![
+                    "--msg=say \"hi\\\"".to_string(),
+                    "keep \\\"raw\"".to_string()
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn parse_editor_command_handles_unclosed_quotes_and_defaults() {
+        assert_eq!(parse_editor_command(None), ("vi".to_string(), Vec::new()));
+        assert_eq!(
+            parse_editor_command(Some("   ")),
+            ("vi".to_string(), Vec::new())
+        );
+        assert_eq!(
+            parse_editor_command(Some("\"/path/with spaces/code")),
+            ("/path/with spaces/code".to_string(), Vec::new())
+        );
+        assert_eq!(
+            parse_editor_command(Some("'/opt/unclosed editor")),
+            ("/opt/unclosed editor".to_string(), Vec::new())
         );
     }
 
