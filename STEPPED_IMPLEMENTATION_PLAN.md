@@ -4342,6 +4342,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 ### STEP 17E: Legacy ComponentKind Preservation & Narrow Crate Surface
 
 * **Recommended Command:** `/goal`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
@@ -4391,7 +4392,7 @@ Tests:
   - `edit_component_updates_kind_when_archetype_changed` (`src/tui/modal.rs`): open `ModalState::edit_component` for `ComponentKind::UiView`, cycle archetype to `Logic`, press Enter -> `ModalAction::UpdateComponent` emits `kind: ComponentKind::Logic`.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub\(crate\) mod modal' src/tui/mod.rs && grep -qE 'pub\(crate\) struct TuiTerminal' src/tui/terminal.rs && grep -qE 'fn edit_component_preserves_legacy_kind_when_archetype_unchanged' src/tui/modal.rs
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub\(crate\) mod modal' src/tui/mod.rs && grep -qE 'pub\(crate\) type TuiTerminal' src/tui/terminal.rs && grep -qE 'fn edit_component_preserves_legacy_kind_when_archetype_unchanged' src/tui/modal.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -4400,6 +4401,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 ### STEP 17F: Split `src/tui/app.rs` & Deduplicate Grid/Path Helpers
 
 * **Recommended Command:** `/boost`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
