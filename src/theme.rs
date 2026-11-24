@@ -337,4 +337,24 @@ mod tests {
             assert_eq!(available, vec!["crt_amber".to_string()]);
         }
     }
+
+    #[test]
+    fn theme_resolve_errors_on_malformed_ron_and_missing_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let search_dirs = vec![dir.path().to_path_buf()];
+
+        std::fs::write(dir.path().join("broken.ron"), "not valid ron (((").unwrap();
+
+        let parse_err = resolve_theme("broken", &search_dirs).unwrap_err();
+        assert!(
+            matches!(parse_err, RbError::RonParse { .. }),
+            "expected RbError::RonParse, got {parse_err:?}"
+        );
+
+        let missing_err = resolve_theme("does_not_exist", &search_dirs).unwrap_err();
+        assert!(
+            matches!(missing_err, RbError::NotFound(_)),
+            "expected RbError::NotFound, got {missing_err:?}"
+        );
+    }
 }

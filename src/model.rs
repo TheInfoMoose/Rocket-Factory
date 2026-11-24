@@ -425,4 +425,62 @@ row = 0
         ));
         assert!(GridConfig { cols: 1, rows: 1 }.validate().is_ok());
     }
+
+    #[test]
+    fn model_component_mut_and_all_component_kinds() {
+        let mut project = Project {
+            config: ProjectConfig::default(),
+            components: vec![Component {
+                id: "alpha".to_string(),
+                name: "Alpha".to_string(),
+                kind: ComponentKind::Concept,
+                ..Component::default()
+            }],
+        };
+
+        assert!(project.component_mut("missing").is_none());
+
+        let comp = project
+            .component_mut("alpha")
+            .expect("expected existing component");
+        comp.name = "Alpha Updated".to_string();
+        comp.kind = ComponentKind::Integration;
+
+        let updated = project.component("alpha").expect("updated component");
+        assert_eq!(updated.name, "Alpha Updated");
+        assert_eq!(updated.kind, ComponentKind::Integration);
+
+        assert_eq!(ComponentKind::default(), ComponentKind::Concept);
+
+        let all_kinds = [
+            (ComponentKind::Concept, "concept"),
+            (ComponentKind::Interface, "interface"),
+            (ComponentKind::Logic, "logic"),
+            (ComponentKind::Data, "data"),
+            (ComponentKind::Integration, "integration"),
+            (ComponentKind::UiView, "ui_view"),
+            (ComponentKind::DataStream, "data_stream"),
+            (ComponentKind::ServiceCore, "service_core"),
+            (ComponentKind::CliTool, "cli_tool"),
+            (ComponentKind::Storage, "storage"),
+            (ComponentKind::Custom, "custom"),
+        ];
+
+        for (kind, expected_str) in all_kinds {
+            let item = Component {
+                id: format!("comp_{expected_str}"),
+                name: format!("Component {expected_str}"),
+                kind,
+                ..Component::default()
+            };
+            let serialized = toml::to_string_pretty(&item).expect("serialize Component");
+            assert!(
+                serialized.contains(&format!("kind = \"{expected_str}\"")),
+                "expected serialized kind '{expected_str}' in:\n{serialized}"
+            );
+            let parsed: Component = toml::from_str(&serialized).expect("deserialize Component");
+            assert_eq!(parsed.kind, kind);
+            assert_eq!(parsed, item);
+        }
+    }
 }

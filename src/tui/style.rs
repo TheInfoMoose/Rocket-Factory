@@ -115,4 +115,38 @@ mod tests {
             Some(to_color(theme.palette.alert_error))
         );
     }
+
+    #[test]
+    fn style_covers_all_card_status_glyphs_and_border_colors() {
+        use std::collections::HashSet;
+
+        let theme = default_theme().unwrap();
+        let cases = [
+            (CardStatus::Gap, "[!]", theme.palette.status_gap),
+            (CardStatus::Planned, "[ ]", theme.palette.status_planned),
+            (
+                CardStatus::InProgress,
+                "[~]",
+                theme.palette.status_in_progress,
+            ),
+            (CardStatus::Blocked, "[X]", theme.palette.status_blocked),
+            (CardStatus::Complete, "[✓]", theme.palette.status_complete),
+        ];
+
+        let mut glyphs = HashSet::new();
+        let mut colors = HashSet::new();
+
+        for (status, expected_glyph, expected_rgb) in cases {
+            let glyph = status_glyph(status);
+            assert_eq!(glyph, expected_glyph);
+            glyphs.insert(glyph);
+
+            let color = card_border_color(&theme, status);
+            assert_eq!(color, to_color(expected_rgb));
+            colors.insert(color);
+        }
+
+        assert_eq!(glyphs.len(), 5);
+        assert_eq!(colors.len(), 5);
+    }
 }
