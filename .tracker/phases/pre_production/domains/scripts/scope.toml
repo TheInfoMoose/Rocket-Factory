@@ -60,3 +60,10 @@ title = "[SCR-07] neon-dispatch argument and flag expansion quirks"
 status = "open"
 severity = "low"
 created_at = "2026-11-23T15:52:30Z"
+
+[[items.tasks]]
+id = "TASK-0100"
+title = "scripts"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:44:18Z"

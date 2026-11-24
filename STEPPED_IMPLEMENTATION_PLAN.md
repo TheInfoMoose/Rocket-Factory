@@ -6,7 +6,7 @@
 
 **Base gate:** `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
 
-**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*:scripts/*`
+**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*`
 
 **Planning files:** `Rocket Factory.md:docs/*`
 
@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 15):** Rebrand the crate, binary (`rktb`), env var (`RKTB_POLL_INTERVAL_SECS`), error types (`RbError`/`RbResult`), user config dir (`~/.config/rocket-bench/`), and UI/CLI/docs/CI references to Rocket Bench/`rktb` (keeping `.rocket/`), exclude `docs/**` from packaging, set MSRV `1.88`, add `[profile.release]` and `[lints]`, and reconcile post-Phase-14 metadata (`FEAT-0006`, `TASK-0088`–`TASK-0090`, `TASK-0092`, `TASK-0093`).
+**Phase goal (Phase 16):** Fix all phased-workflow script bugs (`SCR-01`–`SCR-07`, `BUG-0047`–`BUG-0053`) and security vulnerabilities (`SEC-01`–`SEC-06`, `BUG-0018`–`BUG-0023`): harden `scripts/phased-step.sh` and `scripts/neon-dispatch`, remove CWD `.rocket/adapters.toml` fallback and require `--auto-pull` for startup adapter sync, add concurrent I/O + timeout + output bounds to `run_command_with_stdin`, harden symlink/size checks in `storage.rs` and `theme.rs`, add quote-aware `$EDITOR` parsing, and strip control characters in modal input and TUI rendering.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,10 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 15A** | `/goal` | packaging | `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `tests/e2e.rs` | — |
-| 2 | **STEP 15B** | `/goal` | core | `src/error.rs`, `src/lib.rs`, `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs` | STEP 15A |
-| 3 | **STEP 15C** | `/goal` | ui | `src/cli.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `src/model.rs` | STEP 15B |
-| 4 | **STEP 15D** | `/goal` | docs | `README.md`, `LICENSE`, `.github/workflows/ci.yml` | STEP 15C |
+| 1 | **STEP 16A** | `/goal` | scripts | `scripts/phased-step.sh`, `scripts/neon-dispatch` | — |
+| 2 | **STEP 16B** | `/goal` | security | `src/cli.rs`, `src/main.rs`, `src/tui/terminal.rs` | — |
+| 3 | **STEP 16C** | `/goal` | security | `src/adapter.rs` | — |
+| 4 | **STEP 16D** | `/goal` | security | `src/storage.rs`, `src/theme.rs` | — |
+| 5 | **STEP 16E** | `/goal` | security | `src/tui/terminal.rs` | — |
+| 6 | **STEP 16F** | `/goal` | security | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` | — |
 
 ### Completed
 
@@ -91,6 +93,10 @@
 | **STEP 13D** | Done (`b3e2dbc`) | `/goal` | tests | `tests/e2e.rs` |
 | **STEP 14A** | Done (`c02c609`) | `/goal` | ui | `src/tui/ui.rs` |
 | **STEP 14B** | Done (`332cc51`) | `/goal` | tests | `tests/e2e.rs` |
+| **STEP 15A** | Done (`d4c1f15`) | `/goal` | packaging | `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `tests/e2e.rs` |
+| **STEP 15B** | Done (`3167e10`) | `/goal` | core | `src/error.rs`, `src/lib.rs`, `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs`, `src/tui/terminal.rs` |
+| **STEP 15C** | Done (`864c112`) | `/goal` | ui | `src/cli.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `src/model.rs` |
+| **STEP 15D** | Done (`2e83b6e`) | `/goal` | docs | `README.md`, `LICENSE`, `.github/workflows/ci.yml` |
 
 ### Future phases
 
@@ -98,25 +104,8 @@
 - Rebrand app from **Rocket Factory** (`rf`) to **Rocket Bench** (`rktb`), crate `rocket-bench` (`rocket_bench`), env `RKTB_POLL_INTERVAL_SECS`, error types `RbError`/`RbResult`, user config `~/.config/rocket-bench/`.
 - Keep `.rocket/` project workspace directory (no directory rename or fallback needed).
 - Organize all 63 open items (Rebrand + 62 audit findings) into Phases 15–20.
-
-#### Phase 15: Rebrand to Rocket Bench (`rktb`) & Metadata Reconciliation
-- **Goal:** Rebrand the crate, binary (`rktb`), env var (`RKTB_POLL_INTERVAL_SECS`), error types (`RbError`/`RbResult`), user config dir (`~/.config/rocket-bench/`), UI/CLI/docs/CI references to Rocket Bench/`rktb` (keeping `.rocket/`), exclude `docs/**` from packaging, set MSRV `1.88`, and reconcile post-Phase-14 plan/tracker/Orrery metadata drift (`FEAT-0006`, `TASK-0088`, `TASK-0089`, `TASK-0090`, `TASK-0092`, `TASK-0093`).
-- **Done looks like:** `cargo build --bin rktb`, `cargo test --workspace`, and `cargo package --locked` succeed with `rktb` binary, `docs/**` excluded, MSRV `1.88` set, `.rocket/` preserved, and `STEP 14A`/`14B` metadata reconciled.
-- **Steps:**
-  - **STEP 15A:** Reconcile post-Phase-14 plan, `.orrery/phase.toml`, and `.tracker/` metadata (`TASK-0093`)
-  - **STEP 15B:** Rebrand `Cargo.toml` (`rocket-bench`, `rktb`, MSRV `1.88`, `docs/**` exclude, release profile/lints) and `src/error.rs` (`RbError`, `RbResult`) (`FEAT-0006`, `TASK-0088`, `TASK-0089`, `TASK-0090`)
-  - **STEP 15C:** Rebrand `src/` (`RKTB_POLL_INTERVAL_SECS`, `~/.config/rocket-bench/`, TUI title bar, CLI help/about) (`FEAT-0006`)
-  - **STEP 15D:** Rebrand `tests/`, `README.md`, `LICENSE`, `.github/workflows/ci.yml`, and archive/update `Rocket Factory.md` (`FEAT-0006`, `TASK-0092`)
-
-#### Phase 16: Workflow Scripts & Security Hardening
-- **Goal:** Fix all security vulnerabilities (`SEC-01`–`SEC-06`) and phased-workflow script bugs (`SCR-01`–`SCR-07`) (`BUG-0018`–`BUG-0023`, `BUG-0047`–`BUG-0053`).
-- **Done looks like:** `scripts/phased-step.sh` and `scripts/neon-dispatch` pass static checks with strict gate/TOML handling; adapters require explicit config or opt-in, subprocesses have timeout/bounded pipes, and path/terminal/editor inputs are hardened.
-- **Steps:**
-  - **STEP 16A:** Harden `scripts/phased-step.sh` and `scripts/neon-dispatch` (`BUG-0047`–`BUG-0053`)
-  - **STEP 16B:** Fix `default_adapters_path()` CWD fallback and disable unsafe startup auto-pull (`BUG-0018`)
-  - **STEP 16C:** Harden `run_command_with_stdin` pipe deadlock, timeout, and output bounds (`BUG-0019`)
-  - **STEP 16D:** Harden symlink containment in `storage.rs` and `theme.rs` (`BUG-0020`, `BUG-0023`)
-  - **STEP 16E:** Fix `$EDITOR` quoted-path parsing and sanitize control characters in terminal/modal input (`BUG-0021`, `BUG-0022`)
+- `scripts/*` is temporarily removed from `**Forbidden paths:**` for Phase 16 (`STEP 16A`) and must be restored to `**Forbidden paths:**` when planning Phase 17.
+- For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
 
 #### Phase 17: Architecture Refactor, Adapter Sync & Core Durability
 - **Goal:** Split the `src/tui/app.rs` monolith, consolidate CLI/TUI adapter sync, clean up `RbError`/public crate surface, and fix core model/storage/audit/export/adapter/CLI durability bugs (`TASK-0069`–`TASK-0073`, `TASK-0076`, `BUG-0033`–`BUG-0039`, `BUG-0044`–`BUG-0046`).
@@ -3750,6 +3739,364 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -q 'Rocket Bench (`rktb`)' README.md && grep -q 'Rocket Bench Contributors' LICENSE && grep -q 'target/release/rktb' .github/workflows/ci.yml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 16 Step Blocks
+
+### STEP 16A: Harden `scripts/phased-step.sh` and `scripts/neon-dispatch` (`BUG-0047`–`BUG-0053`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16A: Harden scripts/phased-step.sh and scripts/neon-dispatch against dirty-match, gate-bypass, TOML-swallow, rerun-grep, non-atomic write, portability, and flag-expansion bugs (BUG-0047 through BUG-0053).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - scripts/phased-step.sh
+  - scripts/neon-dispatch
+READ_ONLY_REFS:
+  - docs/codebase-audit-report.md:170-179 (SCR-01 through SCR-07 findings)
+  - STEPPED_IMPLEMENTATION_PLAN.md:1-40 (plan header format and Base gate)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter the CLI subcommand interface (`pregate`, `start`, `check`, `commit`, `defer`, `status`, `new-phase`) or exit-code semantics (0=pass, 1=fail, 2=usage/setup, 3=early-stop).
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: `scripts/phased-step.sh` and `scripts/neon-dispatch` enforce strict amendment/gate validation, exact dirty-path matching, loud `.tracker/` error reporting, subject-anchored rerun detection, atomic `.orrery/phase.toml` writes, POSIX-safe file discovery, and quote/empty-safe argument handling.
+
+Contract & Behavior:
+  1. `scripts/phased-step.sh`:
+     - Exact dirty-path matching in `defer` (`SCR-01` / `BUG-0047`): replace the unanchored `grep -qF "  ${p}" "${SNAP}/tree"` check with an exact comparison against the full path column after `"  "` on each line of `${SNAP}/tree`, so a pre-existing dirty path such as `src/foo.rs_bak` or `src/foo.rs/sub` never falsely matches `src/foo.rs`.
+     - Strict `read_amendment()` execution & gate validation (`SCR-02` / `BUG-0048`):
+       - Capture `read_amendment` output directly (instead of `< <(read_amendment)`) so any non-zero Python exit fails `check` instead of being swallowed by process substitution.
+       - Reject whitespace-varied and alternative shell bypasses in `post_gate` (such as `||  true`, `||:`, `;true`, `; :`, `; echo ok`, `&& true || :`, `set +e`, `2>/dev/null ||`) by rejecting shell control operators (`||`, `;`, background `&`, newlines) and `set +e` outside quoted grep-pattern literals, in addition to requiring `base_gate` verbatim and preserving all spec greps.
+     - Surface `.tracker/` TOML/I/O errors (`SCR-03` / `BUG-0049`): in `new-phase` and `find_task()`, do not silently swallow `tomllib.TOMLDecodeError` or `OSError` when reading `.tracker/**/item.toml`; print a diagnostic to `stderr` naming the failing `item.toml` path and exit non-zero.
+     - Subject-anchored rerun detection in `commit` (`SCR-04` / `BUG-0050`): replace `git log -n1 --format=%h -F --grep="STEP ${STEP_ID}: " HEAD` with a check that inspects commit subject lines only (e.g. `git log --format='%h%x09%s' HEAD`), so a commit body mentioning `STEP <ID>: ` never falsely marks an uncommitted step `committed-earlier`.
+     - Atomic `.orrery/phase.toml` write in `new-phase` (`SCR-05` / `BUG-0051`): write to a sibling temporary file inside `.orrery/` and replace `.orrery/phase.toml` via `os.replace()`.
+     - Portability & parser fixes (`SCR-06` / `BUG-0052`):
+       - Strip optional surrounding backticks when parsing `ALLOWED_FILES` bullet entries.
+       - Add `Cargo.lock` only when `Cargo.lock` appears as an `ALLOWED_FILES` bullet entry, not when mentioned in comments or prose.
+       - Replace GNU-only `find -printf '%h\n'` in `tracker_items()` with POSIX-portable `find .tracker -path '*/items/*/item.toml'` piped through `sed` and `sort -u`.
+       - In `defer`, treat `git diff --no-index --binary /dev/null "$p"` exit code `0` or `1` as normal diff output, and fail on exit codes `> 1`.
+  2. `scripts/neon-dispatch` (`SCR-07` / `BUG-0053`):
+     - Validate `--note` and `--plan` argument presence with `[[ $# -ge 2 ]]` (exiting `2` with usage message on missing value) while allowing an empty `--note ""` without bash `${2:?...}` exit `1`.
+     - Default `NEON_FLAGS` with `${NEON_FLAGS-"--dangerously-skip-permissions"}` (unset-only default) so an intentionally empty `NEON_FLAGS=""` passes zero extra flags, and split `NEON_FLAGS` using quote-aware parsing (`shlex.split` via `python3 -I`) so quoted arguments containing spaces stay intact.
+     - Include `$$` (PID) in the log filename (`neon-<UTC>-<pid>.log`) so sub-second retries do not overwrite an earlier log.
+
+Must still work:
+  - `scripts/phased-step.sh status`, `pregate`, `start`, `check`, `commit`, `defer`, and `new-phase` continue to work on valid `STEPPED_IMPLEMENTATION_PLAN.md` blocks and valid `.phased/amendments/<ID>.toml` files.
+  - `scripts/phased-step.sh check 16A` itself must pass after these edits.
+
+Drops: none
+
+Tests:
+  - Static syntax check: `bash -n scripts/phased-step.sh && bash -n scripts/neon-dispatch` -> exit `0`.
+  - Verify in a temporary scratch directory (cleaned up before exit) that:
+    - `defer` dirty-match does not match `src/foo.rs_bak` against `src/foo.rs`.
+    - `read_amendment` rejects `||  true`, `||:`, `; :`, and `; echo ok` in `post_gate` while accepting a valid `Base gate && grep ...` amendment.
+    - `neon-dispatch` accepts `--note ""` and empty `NEON_FLAGS=""` without exiting `1` on argument parsing, and exits `2` when `--note` has no value.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && bash -n scripts/phased-step.sh && bash -n scripts/neon-dispatch && grep -q 'os\.replace' scripts/phased-step.sh && grep -q 'shlex' scripts/neon-dispatch
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 16B: Remove CWD Adapters Fallback & Gate Startup Auto-Pull (`BUG-0018`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16B: Remove the unsafe CWD .rocket/adapters.toml fallback from default_adapters_path() and gate TUI startup adapter auto-pull behind --auto-pull (BUG-0018).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/cli.rs
+  - src/main.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/tui/mod.rs:1-20 (re-export of run_tui)
+  - src/tui/app.rs:1630-1660 (manual r/S sync trigger)
+  - docs/codebase-audit-report.md:191-196 (SEC-01 finding)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not change the signature of `rocket_bench::cli::execute_command(root: &Path, adapters_path: &Path, command: Command)` (called by `tests/e2e.rs`).
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Running `rktb` in an untrusted repository without `HOME` set never loads `.rocket/adapters.toml` from CWD, and launching the TUI never executes adapter commands on startup unless the user explicitly passes `--auto-pull`.
+
+Contract & Behavior:
+  1. `src/cli.rs`:
+     - Add `pub fn default_adapters_path_from_home(home: Option<&std::ffi::OsStr>) -> Option<PathBuf>`: returns `Some(PathBuf::from(home).join(".config/rocket-bench/adapters.toml"))` when `home` is `Some(h)` and `!h.is_empty()`, and `None` otherwise (no CWD `.rocket/adapters.toml` fallback).
+     - Change `pub fn default_adapters_path() -> Option<PathBuf>` to delegate to `default_adapters_path_from_home(std::env::var_os("HOME").as_deref())`.
+     - Add `#[arg(long, global = true, default_value_t = false)] pub auto_pull: bool` to `Cli`.
+     - In `execute_command`: for `Command::Push` and `Command::Pull`, if `adapters_path.as_os_str().is_empty()`, return `Err(RbError::NotFound("no adapters file configured; set HOME or pass --adapters-file".into()))` before invoking `adapter::load_adapters_file`.
+  2. `src/main.rs`:
+     - Resolve `let adapters_path: Option<PathBuf> = cli.adapters_file.or_else(rocket_bench::cli::default_adapters_path);`.
+     - For `Some(command)`: pass `adapters_path.as_deref().unwrap_or_else(|| std::path::Path::new(""))` to `execute_command`.
+     - For `None` (TUI): pass `adapters_path.as_deref()` and `cli.auto_pull` to `rocket_bench::tui::run_tui`.
+  3. `src/tui/terminal.rs`:
+     - Update `pub fn run_tui(root: &Path, theme_dirs: &[PathBuf], adapters_path: Option<&Path>, poll_interval: Option<Duration>, auto_pull: bool) -> RbResult<()>`.
+     - Add `pub(crate) fn should_startup_pull(auto_pull: bool, active_adapters: &[String], adapters_path: Option<&Path>) -> bool`: returns `true` iff `auto_pull` is `true`, `!active_adapters.is_empty()`, and `adapters_path.is_some()`.
+     - In `run_tui`: only call `app.sync_pull(path)` on startup when `should_startup_pull(...)` is `true`.
+     - Update `process_pending_sync(app: &mut App, adapters_path: Option<&Path>)`: when `adapters_path` is `None`, set `app.status_message` to `"No adapters file configured (set HOME or pass --adapters-file)"` without running any adapter command.
+     - Update `run_event_loop`: periodic `poll_interval` sync runs only when `adapters_path` is `Some(path)` (and `poll_interval` is `Some(...)` via explicit `RKTB_POLL_INTERVAL_SECS`).
+
+Must still work:
+  - `rktb init`, `rktb audit`, `rktb export` succeed even when `HOME` is unset and `--adapters-file` is omitted.
+  - `rktb push` / `rktb pull` with `--adapters-file <path>` or `HOME` set continue to work identically; all existing `tests/e2e.rs` tests pass unchanged.
+  - Manual TUI sync (`r`/`S`/`p`) and explicit `RKTB_POLL_INTERVAL_SECS` polling continue to work when an adapters path is available.
+
+Drops:
+  - CWD fallback to `.rocket/adapters.toml` when `HOME` is unset or empty.
+  - Unconditional adapter `sync_pull` on TUI launch when `--auto-pull` is not passed.
+
+Tests:
+  - `default_adapters_path_from_home_rejects_missing_or_empty_home` (`src/cli.rs`): call `default_adapters_path_from_home(None)`, `default_adapters_path_from_home(Some(OsStr::new("")))`, and `default_adapters_path_from_home(Some(OsStr::new("/home/testuser")))` -> `None`, `None`, and `Some("/home/testuser/.config/rocket-bench/adapters.toml")`.
+  - `execute_command_pull_errors_when_adapters_path_empty` (`src/cli.rs`): init workspace in tempdir, call `execute_command(dir.path(), Path::new(""), Command::Pull { adapter: None })` -> `Err(RbError::NotFound(_))` mentioning `--adapters-file`.
+  - `startup_pull_requires_auto_pull_flag_and_adapters_path` (`src/tui/terminal.rs`): verify `should_startup_pull` returns `false` when `auto_pull == false`, `false` when `adapters_path.is_none()`, `false` when `active_adapters` is empty, and `true` only when all three hold; also verify `process_pending_sync` with `None` sets the status message without panicking.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn default_adapters_path_from_home\b' src/cli.rs && grep -qE 'pub auto_pull: bool' src/cli.rs && grep -qE 'fn should_startup_pull\b' src/tui/terminal.rs && grep -qE 'fn default_adapters_path_from_home_rejects_missing_or_empty_home\b' src/cli.rs && grep -qE 'fn startup_pull_requires_auto_pull_flag_and_adapters_path\b' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 16C: Harden Adapter Subprocess I/O, Timeout, and Output Bounds (`BUG-0019`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16C: Harden run_command_with_stdin in src/adapter.rs with concurrent stdin/stdout/stderr streaming, execution timeout, and bounded output buffers (BUG-0019).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+READ_ONLY_REFS:
+  - src/error.rs:1-45 (RbError::Adapter)
+  - docs/codebase-audit-report.md:197-202 (SEC-02 finding)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No `unsafe` code (`unsafe_code = "forbid"` in Cargo.toml) and no new external crate dependencies.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Adapter subprocesses cannot deadlock on large concurrent stdin/stdout payloads, hang indefinitely, or exhaust host memory via unbounded output.
+
+Contract & Behavior:
+  1. `src/adapter.rs`:
+     - Export `pub const DEFAULT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);`
+     - Export `pub const MAX_COMMAND_OUTPUT_BYTES: usize = 4 * 1024 * 1024;`
+     - Implement internal `run_command_with_limits(spec: &CommandSpec, workdir: &Path, stdin_payload: &str, timeout: std::time::Duration, max_output_bytes: usize) -> RbResult<String>` and have `run_command_with_stdin` delegate to it using `DEFAULT_COMMAND_TIMEOUT` and `MAX_COMMAND_OUTPUT_BYTES`.
+     - Concurrent I/O: stream `stdin_payload` on a dedicated thread (ignoring `BrokenPipe` if child exits early, closing `stdin` on completion) while concurrently reading `stdout` and `stderr` on separate threads so pipe buffers never deadlock even when both stdin and stdout exceed 64 KiB.
+     - Bounded output: each output reader caps collection at `max_output_bytes` bytes (reading at most `max_output_bytes + 1` bytes via `Read::take` to detect overflow without unbounded allocation). If either `stdout` or `stderr` exceeds `max_output_bytes`, kill and reap the child if still running and return `Err(RbError::Adapter(...))` containing `"output exceeded"`.
+     - Timeout enforcement: poll `child.try_wait()` until the child exits or `timeout` elapses. On timeout, call `child.kill()`, reap via `child.wait()`, join reader/writer threads, and return `Err(RbError::Adapter(...))` containing `"timed out"`.
+     - Non-zero exit: preserve existing `Err(RbError::Adapter(...))` formatting with exit status and trimmed `stderr`.
+
+Must still work:
+  - All existing `src/adapter.rs` and `tests/e2e.rs` push/pull adapter tests continue to pass unchanged.
+
+Drops: none
+
+Tests:
+  - `command_large_stdin_and_stdout_does_not_deadlock` (`src/adapter.rs`): send a 200 KiB payload through `run_command_with_limits` to a command that echoes stdin to stdout (e.g. `cat` on Unix) with a 5s timeout and 1 MiB limit -> returns `Ok(output)` matching the full 200 KiB payload.
+  - `command_timeout_kills_stalled_process` (`src/adapter.rs`): run a sleeping command (e.g. `sleep 5`) via `run_command_with_limits` with a 100ms timeout -> returns `Err(RbError::Adapter(msg))` where `msg` contains `"timed out"`.
+  - `command_output_limit_rejects_oversized_stdout` (`src/adapter.rs`): run a command writing >512 bytes to stdout with `max_output_bytes = 256` -> returns `Err(RbError::Adapter(msg))` where `msg` contains `"output exceeded"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub const DEFAULT_COMMAND_TIMEOUT\b' src/adapter.rs && grep -qE 'pub const MAX_COMMAND_OUTPUT_BYTES\b' src/adapter.rs && grep -qE 'fn command_large_stdin_and_stdout_does_not_deadlock\b' src/adapter.rs && grep -qE 'fn command_timeout_kills_stalled_process\b' src/adapter.rs && grep -qE 'fn command_output_limit_rejects_oversized_stdout\b' src/adapter.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 16D: Harden Symlink Containment & Theme File Limits (`BUG-0020`, `BUG-0023`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16D: Harden symlink containment and regular-file checks in src/storage.rs and add bounded reads plus symlinked search_dir rejection in src/theme.rs (BUG-0020, BUG-0023).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/storage.rs
+  - src/theme.rs
+READ_ONLY_REFS:
+  - src/error.rs:1-45 (RbError::PathEscape, RbError::Io, RbError::NotFound)
+  - docs/codebase-audit-report.md:203-208,218-221 (SEC-03 and SEC-06 findings)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not reject directories whose ancestor (e.g. macOS `/var` -> `/private/var`) is a symlink; only reject symlinked workspace entries or symlinked leaf `search_dirs`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Symlinks escaping `.rocket/` (including dangling symlinks) cannot be read or written by `storage.rs`, and `theme.rs` caps `.ron` reads and refuses symlinked theme search directories.
+
+Contract & Behavior:
+  1. `src/storage.rs` (`BUG-0020`):
+     - In `ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf>`: check `resolved.symlink_metadata()` instead of `resolved.exists()`. When `symlink_metadata()` succeeds, canonicalize `resolved` and verify `canon_target.starts_with(&canon_base)`; if `resolved` is a dangling symlink (so `canonicalize` fails) or resolves outside `canon_base`, return `Err(RbError::PathEscape(candidate.to_path_buf()))`.
+     - In `load_project(root: &Path) -> RbResult<Project>`:
+       - Verify `.rocket` itself is contained within `root` (or return `RbError::NotFound` if `.rocket` / `project.toml` is absent).
+       - Validate `project.toml` with `ensure_contained(&rocket_dir, &project_path)?` and verify it is a regular file (`is_file()`); reject escaping symlinks with `RbError::PathEscape` and non-files with `RbError::Io`.
+       - Validate `.rocket/components` with `ensure_contained(&rocket_dir, &components_dir)?` when present.
+       - For each `*.toml` entry in `.rocket/components`: validate with `ensure_contained(&components_dir, &path)?` (rejecting escaping/dangling symlinks with `RbError::PathEscape`), and skip non-regular-file entries (such as an in-bounds directory named `something.toml`) instead of aborting with `IsADirectory`.
+       - For companion `{component.id}.md`: continue validating with `ensure_contained(&components_dir, ...)?` and ensure a non-regular file is rejected.
+  2. `src/theme.rs` (`BUG-0023`):
+     - Export `pub const MAX_THEME_FILE_BYTES: u64 = 256 * 1024;`
+     - In `load_theme_file(path: &Path) -> RbResult<Theme>`: open the file and read at most `MAX_THEME_FILE_BYTES + 1` bytes via `std::io::Read::take`; if more than `MAX_THEME_FILE_BYTES` bytes are read, return `Err(RbError::Io { path: path.to_path_buf(), source })` with `io::ErrorKind::InvalidData` mentioning the size limit.
+     - In `resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RbResult<Theme>`: before scanning a `dir` in `search_dirs`, check `std::fs::symlink_metadata(dir)`. If `dir` itself is a symlink (`file_type().is_symlink()`), return `Err(RbError::PathEscape(dir.to_path_buf()))`. Also check candidate `symlink_metadata()` so dangling symlinks are not silently ignored if they escape.
+     - In `list_available_themes(search_dirs: &[PathBuf]) -> Vec<String>`: check `std::fs::symlink_metadata(dir)` and skip any `dir` where `file_type().is_symlink()` is `true`.
+
+Must still work:
+  - Normal `.rocket/` workspaces and non-symlinked theme directories (including under tempdirs whose system ancestor may be a symlink) load, save, and list themes identically.
+
+Drops: none
+
+Tests:
+  - `storage_load_project_rejects_symlinked_project_and_component_toml` (`src/storage.rs`, `#[cfg(unix)]`): symlink `.rocket/project.toml` to an outside file -> `load_project` returns `Err(RbError::PathEscape(_))`; symlink `.rocket/components/evil.toml` to an outside file -> `load_project` returns `Err(RbError::PathEscape(_))`; dangling symlink `.rocket/components/ghost.toml` -> `Err(RbError::PathEscape(_))`; in-bounds directory `.rocket/components/dir.toml` -> skipped cleanly.
+  - `theme_load_rejects_oversized_ron_and_symlinked_search_dir` (`src/theme.rs`): file larger than `MAX_THEME_FILE_BYTES` -> `load_theme_file` returns `Err(RbError::Io { .. })`; (`#[cfg(unix)]`) symlinked `search_dir` -> `resolve_theme` returns `Err(RbError::PathEscape(_))` and `list_available_themes` ignores themes inside it.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub const MAX_THEME_FILE_BYTES\b' src/theme.rs && grep -qE 'fn storage_load_project_rejects_symlinked_project_and_component_toml\b' src/storage.rs && grep -qE 'fn theme_load_rejects_oversized_ron_and_symlinked_search_dir\b' src/theme.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 16E: Quote-Aware `$EDITOR` Command Parsing (`BUG-0021`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16E: Replace whitespace-only splitting in parse_editor_command (src/tui/terminal.rs) with quote-aware argument parsing supporting paths with spaces (BUG-0021).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/tui/terminal.rs:68-105 (parse_editor_command, suspend_for_editor)
+  - docs/codebase-audit-report.md:209-212 (SEC-04 finding)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not invoke a shell (`sh -c`); `suspend_for_editor` must continue executing `Command::new(&program).args(&args)`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: `$EDITOR` values containing quoted paths or arguments with spaces (e.g. `"/path/with spaces/code" --wait`) parse into the intended executable path and argument vector without invoking a shell.
+
+Contract & Behavior:
+  1. `src/tui/terminal.rs`:
+     - Update `parse_editor_command(editor_value: Option<&str>) -> (String, Vec<String>)` to tokenize with quote awareness:
+       - Single quotes (`'...'`): preserve spaces, backslashes, and double quotes literally until the closing `'`.
+       - Double quotes (`"..."`): preserve spaces and single quotes; unescape `\"` and `\\` inside double quotes.
+       - Outside quotes: split tokens on ASCII whitespace; backslash escapes the next character (e.g. `\ ` stays inside the token).
+       - Adjacent quoted and unquoted segments join into one token (e.g. `--flag="a b"` -> `--flag=a b`).
+       - Unclosed quotes do not panic; flush the accumulated token gracefully.
+       - `None`, empty, or whitespace-only values still return `("vi".to_string(), Vec::new())`.
+
+Must still work:
+  - Simple `$EDITOR` values (`vim`, `code --wait`, `nano -w`) parse identically to before.
+  - All existing `src/tui/terminal.rs` tests pass unchanged.
+
+Drops: none
+
+Tests:
+  - `parse_editor_command_preserves_quoted_paths_with_spaces` (`src/tui/terminal.rs`): verify `Some("\"/path/with spaces/code\" --wait")` -> `("/path/with spaces/code", ["--wait"])`, `Some("'/opt/my editor/bin' -n")` -> `("/opt/my editor/bin", ["-n"])`, and `Some("/opt/my\\ editor/bin --flag=\"a b\"")` -> `("/opt/my editor/bin", ["--flag=a b"])`.
+  - `parse_editor_command_handles_unclosed_quotes_and_defaults` (`src/tui/terminal.rs`): verify `None` and `Some("   ")` return `("vi", [])`, and an unclosed quote like `Some("\"/path/with spaces/code")` does not panic and returns `("/path/with spaces/code", [])`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn parse_editor_command_preserves_quoted_paths_with_spaces\b' src/tui/terminal.rs && grep -qE 'fn parse_editor_command_handles_unclosed_quotes_and_defaults\b' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 16F: Sanitize Control Characters in Modal Input & TUI Rendering (`BUG-0022`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 16F: Reject control characters in modal text input and strip C0/C1 control characters from rendered TUI and canvas text (BUG-0022).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/ui.rs
+  - src/tui/canvas.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs:355-370 (is_printable_char)
+  - src/tui/ui.rs:90-125 (render_header)
+  - src/tui/canvas.rs:610-670 (edge label & card rendering)
+  - docs/codebase-audit-report.md:213-217 (SEC-05 finding)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter normal Unicode/ASCII printable text or line splitting (`.lines()`) in markdown bodies.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Untrusted strings from `.rocket/` files, external adapters, or terminal key events cannot inject ANSI escape sequences, BEL, CR, DEL, or C1 control characters into modal inputs or rendered TUI frames.
+
+Contract & Behavior:
+  1. `src/tui/modal.rs`:
+     - Update `is_printable_char(key: KeyEvent) -> Option<char>` to reject any character where `c.is_control()` (C0 `U+0000..=U+001F`, DEL `U+007F`, and C1 `U+0080..=U+009F`).
+  2. `src/tui/ui.rs`:
+     - Add `pub(crate) fn sanitize_display_text(input: &str) -> String`: replaces `\t` with `' '` and removes all other characters where `c.is_control()`.
+     - Apply `sanitize_display_text` to all persisted/external/dynamic strings rendered in `ui.rs`: project name, status message, component names/IDs/descriptions/tags/tech_stack/files/flags, feature titles/external IDs, external task titles/IDs, connection labels, modal text input fields, and each line of `markdown_body` (applied per line after `.lines()` so multi-line markdown layout is preserved).
+  3. `src/tui/canvas.rs`:
+     - Apply `crate::tui::ui::sanitize_display_text` to rendered card titles, IDs, status/progress text, and edge labels before writing characters into the ratatui buffer.
+
+Must still work:
+  - Normal ASCII and Unicode text (including `—`, `·`, `→`, box-drawing glyphs) renders unchanged in header, list, canvas, detail panel, and modals.
+  - Multi-line markdown bodies in the detail panel continue to render line by line.
+  - Narrow-terminal (`80x24`) rendering and long text truncation remain intact with no panics.
+
+Drops: none
+
+Tests:
+  - `modal_rejects_control_characters_in_text_input` (`src/tui/modal.rs`): feed `KeyCode::Char('\x1b')`, `KeyCode::Char('\x07')`, `KeyCode::Char('\x7f')`, `KeyCode::Char('\u{009b}')`, and `KeyCode::Char('a')` into `ModalState::NewComponent` -> only `'a'` is appended to the active field.
+  - `render_strips_control_chars_from_untrusted_text` (`src/tui/ui.rs`): build an `App` whose project name, status message, component name, feature title, and long markdown body contain `\x1b[31m`, `\r`, `\x07`, `\t`, and `\u{009b}`; render into a `TestBackend::new(80, 24)` -> assert every cell in the rendered buffer has no character where `c.is_control()`, and printable text (e.g. `"Rocket"`, `"SafeTitle"`) still appears.
+  - `canvas_strips_control_chars_from_card_and_edge_labels` (`src/tui/canvas.rs`): build an `App` with two connected components whose names and edge label contain `\x1b[31m`, `\x07`, and `\u{009b}`; render canvas into a `TestBackend::new(80, 24)` -> assert no buffer cell contains any `c.is_control()` character and sanitized card/edge text renders cleanly.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub\(crate\) fn sanitize_display_text\b' src/tui/ui.rs && grep -qE 'fn modal_rejects_control_characters_in_text_input\b' src/tui/modal.rs && grep -qE 'fn render_strips_control_chars_from_untrusted_text\b' src/tui/ui.rs && grep -qE 'fn canvas_strips_control_chars_from_card_and_edge_labels\b' src/tui/canvas.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
