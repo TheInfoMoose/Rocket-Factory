@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 18):** Fix Phase 17 follow-up bugs in adapter task pruning and audit grid checks (`BUG-0054`, `BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`, `BUG-0055`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
+**Phase goal (Phase 19):** Fix Phase 18 review follow-up bugs (`BUG-0057`, `BUG-0058`, `BUG-0059`) and close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,12 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 18A** | `/goal` | core | `src/adapter.rs`, `src/audit.rs` | — |
-| 2 | **STEP 18B** | `/goal` | tui | `src/tui/app/state.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs` | — |
-| 3 | **STEP 18C** | `/goal` | tui | `src/tui/app/actions.rs`, `src/tui/app/grid.rs`, `src/tui/app/mod.rs` | **STEP 18B** |
-| 4 | **STEP 18D** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs` | **STEP 18C** |
-| 5 | **STEP 18E** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs`, `src/tui/app/state.rs` | **STEP 18D** |
-| 6 | **STEP 18F** | `/boost` | terminal | `src/tui/terminal.rs`, `src/tui/app/state.rs`, `src/tui/app/sync.rs`, `src/tui/app/mod.rs` | **STEP 18E** |
+| 1 | **STEP 19A** | `/goal` | sync | `src/adapter.rs`, `src/tui/app/sync.rs`, `src/tui/terminal.rs` | — |
+| 2 | **STEP 19B** | `/goal` | modal | `src/tui/modal.rs` | — |
+| 3 | **STEP 19C** | `/goal` | tests | `tests/e2e.rs` | — |
+| 4 | **STEP 19D** | `/goal` | tests | `src/tui/terminal.rs`, `src/storage.rs` | **STEP 19A** |
+| 5 | **STEP 19E** | `/goal` | tests | `src/cli.rs`, `src/audit.rs`, `src/export.rs` | — |
+| 6 | **STEP 19F** | `/goal` | tests | `src/model.rs`, `src/theme.rs`, `src/tui/style.rs` | — |
 
 ### Completed
 
@@ -109,6 +109,12 @@
 | **STEP 17D** | Done (`bc61b2f`) | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` |
 | **STEP 17E** | Done (`a7ed114`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/mod.rs`, `src/tui/canvas.rs`, `src/tui/terminal.rs` |
 | **STEP 17F** | Done (`6939805`) | `/goal` | tui | `src/tui/app.rs`, `src/tui/app/*`, `src/storage.rs`, `src/theme.rs`, `src/tui/terminal.rs` |
+| **STEP 18A** | Done (`0bb5480`) | `/goal` | core | `src/adapter.rs`, `src/audit.rs` |
+| **STEP 18B** | Done (`0bd2eff`) | `/goal` | tui | `src/tui/app/state.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs` |
+| **STEP 18C** | Done (`cc221b8`) | `/goal` | tui | `src/tui/app/actions.rs`, `src/tui/app/grid.rs`, `src/tui/app/mod.rs` |
+| **STEP 18D** | Done (`b0237dc`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs`, `tests/e2e.rs` |
+| **STEP 18E** | Done (`32d285a`) | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs`, `src/tui/app/state.rs` |
+| **STEP 18F** | Done (`7d6bb49`) | `/boost` | terminal | `src/tui/terminal.rs`, `src/tui/app/state.rs`, `src/tui/app/sync.rs`, `src/tui/app/mod.rs` |
 
 ### Future phases
 
@@ -119,18 +125,15 @@
 - `scripts/*` is temporarily removed from `**Forbidden paths:**` for Phase 16 (`STEP 16A`) and must be restored to `**Forbidden paths:**` when planning Phase 17.
 - For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
 
-#### Phase 18: TUI, Canvas & Responsiveness Fixes (Active)
+#### Phase 18: TUI, Canvas & Responsiveness Fixes (Done)
 - **Goal:** Fix Phase 17 follow-up bugs (`BUG-0054`–`BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
 - **Done looks like:** Stale pulled tasks are pruned, audit checks global grid bounds/overlaps, component list and detail panel scroll properly, canvas handles Unicode and overlapping edges cleanly, TUI mutations and `Contains` edges stay atomic and in sync, and adapter sync runs off the UI thread with dirty-flag redraws.
-- **Steps:** `STEP 18A`–`STEP 18F` (see `### Up Next` and `## Phase 18 Step Blocks`).
+- **Steps:** `STEP 18A`–`STEP 18F` (completed).
 
-#### Phase 19: Comprehensive Test Coverage
-- **Goal:** Close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
-- **Done looks like:** `rktb` binary CLI is tested end-to-end via `CARGO_BIN_EXE_rktb`, `terminal.rs` and `storage.rs` edge/error paths are covered, and E2E tests are cross-platform.
-- **Steps:**
-  - **STEP 19A:** Add `CARGO_BIN_EXE_rktb` CLI subprocess integration tests and decouple Unix-only `sh -c` mocks in `tests/e2e.rs` (`TASK-0078`, `TASK-0082`)
-  - **STEP 19B:** Add `terminal.rs` runtime/event-loop/suspend-restore tests and `storage.rs` error-path/symlink tests (`TASK-0079`, `TASK-0080`)
-  - **STEP 19C:** Close remaining core module unit-test branch gaps (`cli`, `adapter`, `audit`, `export`, `model`, `theme`, `error`, `style`) (`TASK-0081`)
+#### Phase 19: Follow-Up Fixes & Comprehensive Test Coverage (Active)
+- **Goal:** Fix Phase 18 review follow-up bugs (`BUG-0057`, `BUG-0058`, `BUG-0059`) and close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
+- **Done looks like:** Background sync never overwrites concurrent foreground disk edits, `SyncOutcome` triggers immediate redraw, `EditConnectionForm` allows `[`/`]` in `Label`, `rktb` binary CLI is tested end-to-end via `CARGO_BIN_EXE_rktb`, `terminal.rs` and `storage.rs` edge/error paths are covered, core module branch gaps are closed, and E2E tests are cross-platform.
+- **Steps:** `STEP 19A`–`STEP 19F` (see `### Up Next` and `## Phase 19 Step Blocks`).
 
 #### Phase 20: CI, Documentation & Release Readiness
 - **Goal:** Harden GitHub Actions CI, add cross-platform matrix and tag-triggered release workflow, complete `README.md` documentation, and audit `.gitignore` / tracked harness metadata (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`).
@@ -4807,6 +4810,328 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub sync_in_flight: bool' src/tui/app/state.rs && grep -qE 'mpsc::channel' src/tui/terminal.rs && grep -qE 'fn combine_tui_results_preserves_both_loop_and_restore_errors\b' src/tui/terminal.rs && grep -qE 'fn async_sync_channel_applies_pull_outcome_without_blocking\b' src/tui/terminal.rs && grep -qE 'fn event_loop_dirty_flag_skips_idle_redraws_and_drains_burst_events\b' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 19 Step Blocks
+
+### STEP 19A: Safe Background Sync Persistence & Immediate Outcome Redraw (`BUG-0057`, `BUG-0059`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0057`, `BUG-0059`
+
+```text
+[STEP_ID]
+STEP 19A: Run background adapter sync in-memory so concurrent foreground disk edits are never overwritten, persist merged updates on the UI thread, and wake the event loop immediately when a SyncOutcome arrives.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+  - src/tui/app/sync.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:621-778 (sync_pull_project, sync_push_project)
+  - src/tui/app/sync.rs:49-143 (run_sync_job, apply_sync_outcome)
+  - src/tui/terminal.rs:284-351,409-473 (spawn_sync_request, step_event_loop)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change synchronous CLI or App::sync_pull / App::sync_push_selected persistence semantics.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Concurrent foreground component edits, moves, or deletions on disk are never overwritten or recreated by an in-flight background sync, and received SyncOutcome values trigger an immediate UI redraw without waiting up to 100 ms.
+
+Contract & Behavior:
+  1. src/adapter.rs (`BUG-0057`):
+     - Extract `pub(crate) fn sync_pull_project_in_memory(project: &mut Project, root: &Path, adapters_path: &Path, adapter_filter: Option<&str>) -> RbResult<PullSyncReport>` and `pub(crate) fn sync_push_project_in_memory(project: &mut Project, root: &Path, adapters_path: &Path, component_ids: &[String], adapter_filter: Option<&str>) -> RbResult<PushSyncReport>` that execute adapter subprocesses and mutate `project.components` (`external_tasks` and `features`) in memory without calling `save_component`.
+     - Keep `pub fn sync_pull_project` and `pub fn sync_push_project` delegating to the in-memory helpers and persisting modified components via `save_component` with their existing rollback guarantees.
+  2. src/tui/app/sync.rs (`BUG-0057`):
+     - In `run_sync_job`, call `sync_pull_project_in_memory` / `sync_push_project_in_memory` instead of `sync_pull_project` / `sync_push_project`, so the background worker never writes stale `project_snapshot` components to disk.
+     - In `apply_sync_outcome`, for each `ComponentSyncUpdate`, only update components that still exist in `app.project` (never recreating deleted components), merge `external_tasks` and `features`, and persist each updated live component via `crate::storage::save_component(&app.root, comp)`. If `save_component` fails, restore previous in-memory `external_tasks`/`features` for unsaved components and set `app.status_message` to an error message; always clear `app.sync_in_flight = false`.
+  3. src/tui/terminal.rs (`BUG-0059`):
+     - In `step_event_loop`, after draining `ctx.sync_rx`, if `dirty` is already `true`, pass `Duration::ZERO` to `next_event(...)` instead of `Duration::from_millis(100)` so pending sync outcomes redraw immediately without blocking.
+
+Must still work:
+  - Synchronous `App::sync_pull`, `App::sync_push_selected`, and CLI `rktb pull` / `rktb push` still persist component updates to disk and roll back on failure.
+  - Existing `async_sync_channel_applies_pull_outcome_without_blocking` and `event_loop_dirty_flag_skips_idle_redraws_and_drains_burst_events` continue to pass.
+
+Drops: none
+
+Tests:
+  - `async_sync_does_not_overwrite_concurrent_foreground_disk_edits` (in `src/tui/terminal.rs`): create a workspace with two components (`comp_a`, `comp_b`), take a `project_snapshot`, then edit and save `comp_a` summary/position in `app.project` + disk and delete `comp_b` from `app.project` + disk; run `run_sync_job` on the stale `project_snapshot` with a mock pull adapter returning tasks for both `comp_a` and `comp_b`, then call `apply_sync_outcome` -> `comp_a` on disk and in memory retains the foreground summary/position plus the pulled tasks, and `comp_b.toml` is not recreated on disk.
+  - `step_event_loop_returns_immediately_when_sync_outcome_ready` (in `src/tui/terminal.rs`): send a `SyncOutcome` on `sync_tx`, call `step_event_loop` with a `next_event` closure capturing the requested `Duration` -> `next_event` is called with `Duration::ZERO` (not 100 ms) and `step_event_loop` returns `Ok(true)`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn sync_pull_project_in_memory\b' src/adapter.rs && grep -qE 'fn sync_push_project_in_memory\b' src/adapter.rs && grep -qE 'fn async_sync_does_not_overwrite_concurrent_foreground_disk_edits\b' src/tui/terminal.rs && grep -qE 'fn step_event_loop_returns_immediately_when_sync_outcome_ready\b' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 19B: Guard `[` / `]` Edge Cycling in `EditConnectionForm` Label Field (`BUG-0058`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0058`
+
+```text
+[STEP_ID]
+STEP 19B: Restrict `[` and `]` edge-candidate cycling in `handle_edit_connection_key` to `active_field == 0` so `[` and `]` can be typed into the Label field.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs:595-645 (handle_edit_connection_key)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Users can type `[` and `]` into the `EditConnection` modal's Label field (`active_field == 1`) even when the selected component has multiple outgoing edges, while `[` / `]` on `active_field == 0` and `PageUp` / `PageDown` on any field continue to cycle edge candidates.
+
+Contract & Behavior:
+  1. src/tui/modal.rs (`BUG-0058`):
+     - In `handle_edit_connection_key`, guard `KeyCode::Char('[')` and `KeyCode::Char(']')` with `form.candidates.len() > 1 && form.active_field == 0`.
+     - Keep `KeyCode::PageUp` and `KeyCode::PageDown` guarded by `form.candidates.len() > 1` so candidate cycling remains available regardless of `active_field`.
+     - When `form.active_field == 1` (`Label`), `KeyCode::Char('[')` and `KeyCode::Char(']')` fall through to printable-char insertion into `form.label` and clear `form.error`.
+
+Must still work:
+  - `EditConnection` edge cycling with `[` / `]` on `active_field == 0` and `PageUp` / `PageDown` on any field.
+  - `DeleteConnection` modal key handling and all existing `modal.rs` tests.
+
+Drops: none
+
+Tests:
+  - `edit_connection_allows_brackets_in_label_field` (in `src/tui/modal.rs`): construct `EditConnectionForm` with 2 candidate edges, verify `[` / `]` cycles `selected_candidate` when `active_field == 0`, then send `Tab` to move to `active_field == 1` (`Label`) and type `[tag]` -> `selected_candidate` stays unchanged and `form.label` contains `"[tag]"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn edit_connection_allows_brackets_in_label_field\b' src/tui/modal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 19C: `CARGO_BIN_EXE_rktb` Subprocess CLI Tests & Cross-Platform E2E Cleanup (`TASK-0078`, `TASK-0082`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `TASK-0078`, `TASK-0082`
+
+```text
+[STEP_ID]
+STEP 19C: Add `CARGO_BIN_EXE_rktb` binary subprocess integration tests and replace brittle README-prose assertions and single-quoted `sh -c` mocks in `tests/e2e.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/main.rs:1-65 (Cli::parse, RKTB_POLL_INTERVAL_SECS, ExitCode)
+  - tests/e2e.rs:43-75,490-525,1395-1448
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify `src/` or `README.md`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: The compiled `rktb` binary is verified end-to-end as a subprocess (`clap` parsing, `ExitCode`, stderr errors, `RKTB_POLL_INTERVAL_SECS` warning, `init`/`audit`/`export`), and `tests/e2e.rs` no longer breaks on `README.md` prose edits or single-quotes in `TMPDIR`.
+
+Contract & Behavior:
+  1. tests/e2e.rs (`TASK-0078`):
+     - Add binary subprocess integration tests using `env!("CARGO_BIN_EXE_rktb")` (`std::process::Command`) verifying:
+       a) `--help` and `--version` exit 0 with expected CLI name/usage on stdout.
+       b) `init`, `audit --strict` (non-zero exit code on incomplete workspace), and `export --format json` succeed against a temp workspace.
+       c) Running a subcommand (e.g. `audit`) on an uninitialized temp directory exits non-zero and prints `error:` on stderr.
+       d) Launching `rktb --path <missing_dir>` with `RKTB_POLL_INTERVAL_SECS=invalid` prints `warning: ignoring invalid RKTB_POLL_INTERVAL_SECS` on stderr and exits non-zero with `error:`.
+  2. tests/e2e.rs (`TASK-0082`):
+     - Replace `sh -c` single-quoted path interpolation in `write_mock_adapters_toml` and `e2e_multi_adapter_feature_push_cli_and_tui` with a cross-platform helper (`#[cfg(unix)]` positional `"$1"`/`"$2"` args without single-quoted `TMPDIR` interpolation, and `#[cfg(windows)]` `cmd /C` equivalent).
+     - Remove `e2e_readme_documents_release_build_and_tui_features` (which coupled `cargo test` to exact `README.md` headings and table formatting).
+
+Must still work:
+  - All remaining E2E tests in `tests/e2e.rs` pass without regression.
+
+Drops: none
+
+Tests:
+  - `e2e_binary_cli_subprocess_lifecycle_and_errors` (in `tests/e2e.rs`): spawns `CARGO_BIN_EXE_rktb` for `--help`, `init`, `audit --strict`, `export --format json`, uninitialized `audit` stderr/exit-code check, and `RKTB_POLL_INTERVAL_SECS=abc` stderr warning check -> all assertions pass.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'CARGO_BIN_EXE_rktb' tests/e2e.rs && grep -qE 'fn e2e_binary_cli_subprocess_lifecycle_and_errors\b' tests/e2e.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 19D: `terminal.rs` Event-Loop/Editor & `storage.rs` Error/Symlink Tests (`TASK-0079`, `TASK-0080`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `TASK-0079`, `TASK-0080`
+
+```text
+[STEP_ID]
+STEP 19D: Add headless unit tests for `terminal.rs` event-loop/key-filtering/auto-poll paths and `storage.rs` error paths and `ensure_contained` symlink containment.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs
+  - src/storage.rs
+READ_ONLY_REFS:
+  - src/tui/terminal.rs:353-530 (build_tui_app, handle_event, step_event_loop)
+  - src/storage.rs:118-320 (ensure_contained, init_workspace, save_component, load_project)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not invoke real raw-mode terminal syscalls in headless unit tests.
+
+[PRE_GATE]
+grep -qE 'fn step_event_loop_returns_immediately_when_sync_outcome_ready\b' src/tui/terminal.rs
+
+[MUTATION_SPEC]
+Goal: Close unit-test coverage gaps in `src/tui/terminal.rs` (event filtering, auto-poll interval, editor dispatch, `build_tui_app` errors, `combine_tui_results`) and `src/storage.rs` (`ensure_contained`, `AlreadyExists`, `NotFound`, `TomlParse`, missing `components/` or `.md`).
+
+Contract & Behavior:
+  1. src/tui/terminal.rs (`TASK-0079`):
+     - Add unit tests covering:
+       a) `handle_event`: `KeyEventKind::Press` returns `true`, `KeyEventKind::Release` and `KeyEventKind::Repeat` return `false`, `Event::Resize` returns `true`, other events return `false`.
+       b) `step_event_loop` with `poll_interval: Some(Duration::from_millis(10))` and elapsed `last_poll` triggers background sync (`app.sync_in_flight == true`), and `pending_editor_component` invokes `run_editor` closure and reloads edited markdown.
+       c) `build_tui_app` returns `RbError::NotFound` on an uninitialized directory; `combine_tui_results` handles `(Ok(()), Ok(()))`, `(Err(_), Ok(()))`, and `(Ok(()), Err(_))`.
+  2. src/storage.rs (`TASK-0080`):
+     - Add unit tests covering:
+       a) `ensure_contained`: valid file inside `base`, non-existent file inside existing `base`, `RbError::PathEscape` on `..` traversal, and (under `#[cfg(unix)]`) `RbError::PathEscape` on a symlink pointing outside `base`.
+       b) `init_workspace` returning `RbError::AlreadyExists` when `.rocket/` already exists.
+       c) `load_project` returning `RbError::NotFound` on missing workspace/`project.toml`, `RbError::TomlParse` on malformed `project.toml` or component `.toml`, and succeeding when `components/` directory or a component `.md` file is absent (defaulting `markdown_body` to empty).
+
+Must still work:
+  - All existing `terminal.rs` and `storage.rs` tests pass.
+
+Drops: none
+
+Tests:
+  - `handle_event_filters_key_kind_and_accepts_resize` (in `src/tui/terminal.rs`): pass `Press`, `Release`, `Repeat`, `Resize`, and `FocusGained` -> `Press`/`Resize` return `true`, others `false`.
+  - `step_event_loop_triggers_auto_poll_and_editor_dispatch` (in `src/tui/terminal.rs`): drive `step_event_loop` with expired `last_poll` and `pending_editor_component` -> `sync_in_flight` becomes `true` and `run_editor` closure is invoked.
+  - `storage_ensure_contained_and_error_paths` (in `src/storage.rs`): test `ensure_contained`, `AlreadyExists`, `NotFound`, `TomlParse`, and missing `components/` / `.md` -> expected `Ok` and `RbError` variants returned.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn handle_event_filters_key_kind_and_accepts_resize\b' src/tui/terminal.rs && grep -qE 'fn step_event_loop_triggers_auto_poll_and_editor_dispatch\b' src/tui/terminal.rs && grep -qE 'fn storage_ensure_contained_and_error_paths\b' src/storage.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 19E: Close Unit-Test Branch Gaps in `cli.rs`, `audit.rs`, and `export.rs` (`TASK-0081` Part 1)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `TASK-0081`
+
+```text
+[STEP_ID]
+STEP 19E: Add unit tests for remaining uncovered branches in `src/cli.rs`, `src/audit.rs`, and `src/export.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/cli.rs
+  - src/audit.rs
+  - src/export.rs
+READ_ONLY_REFS:
+  - src/cli.rs:78-200 (execute_command)
+  - src/audit.rs:1-290 (audit_project)
+  - src/export.rs:1-155 (export_component_manifest, export_roadmap_markdown)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Cover remaining CLI command/flag branches, audit warning/dangling-source branches, and export error/clean-roadmap branches.
+
+Contract & Behavior:
+  1. src/cli.rs (`TASK-0081`):
+     - Add unit tests covering `Command::Pull` happy path with `--adapter` override, `Command::Push` with `--component` and `--adapter` override, and `Command::Audit { strict: false }` returning `exit_code == 0` even when gaps exist.
+  2. src/audit.rs (`TASK-0081`):
+     - Add unit tests covering `AuditIssueKind::UnpushedFeatures` (component with `pushed: false` feature) and dangling `conn.from` (connection whose `from` ID does not exist in `project.components`).
+  3. src/export.rs (`TASK-0081`):
+     - Add unit tests covering `export_component_manifest` returning `RbError::NotFound` for an unknown component ID and `export_roadmap_markdown` on a zero-gap project with `pushed: true` features.
+
+Must still work:
+  - All existing `cli.rs`, `audit.rs`, and `export.rs` unit tests pass.
+
+Drops: none
+
+Tests:
+  - `cli_pull_push_adapter_override_and_nonstrict_audit` (in `src/cli.rs`): run `Pull` with `adapter`, `Push` with `component` + `adapter`, and non-strict `Audit` on a project with gaps -> expected `CliOutput` stdout and `exit_code == 0`.
+  - `audit_flags_unpushed_features_and_dangling_from_connection` (in `src/audit.rs`): audit project with unpushed feature and dangling `conn.from` -> issues contain `UnpushedFeatures` and `DanglingConnection`.
+  - `export_manifest_not_found_and_clean_roadmap` (in `src/export.rs`): call `export_component_manifest` with missing ID -> `Err(RbError::NotFound(_))`; call `export_roadmap_markdown` with zero gaps and `pushed: true` -> contains `[pushed]` and no gaps.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn cli_pull_push_adapter_override_and_nonstrict_audit\b' src/cli.rs && grep -qE 'fn audit_flags_unpushed_features_and_dangling_from_connection\b' src/audit.rs && grep -qE 'fn export_manifest_not_found_and_clean_roadmap\b' src/export.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 19F: Close Unit-Test Branch Gaps in `model.rs`, `theme.rs`, and `tui/style.rs` (`TASK-0081` Part 2)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `TASK-0081`
+
+```text
+[STEP_ID]
+STEP 19F: Add unit tests for remaining uncovered branches in `src/model.rs`, `src/theme.rs`, and `src/tui/style.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/model.rs
+  - src/theme.rs
+  - src/tui/style.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-180 (Project::component_mut, ComponentKind)
+  - src/theme.rs:1-190 (resolve_theme)
+  - src/tui/style.rs:1-88 (card_border_color, status_glyph)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Cover `Project::component_mut` and `ComponentKind` variants in `model.rs`, `RonParse`/`NotFound` errors in `theme.rs`, and all `CardStatus` variants in `tui/style.rs`.
+
+Contract & Behavior:
+  1. src/model.rs (`TASK-0081`):
+     - Add unit tests covering `Project::component_mut` (found and missing ID) and all `ComponentKind::ALL` variants (`as_str`, `Display`, and TOML roundtrip).
+  2. src/theme.rs (`TASK-0081`):
+     - Add unit tests covering `resolve_theme` returning `RbError::RonParse` on a malformed `.ron` file and `RbError::NotFound` on a missing theme name.
+  3. src/tui/style.rs (`TASK-0081`):
+     - Add unit tests covering `status_glyph` and `card_border_color` across all 5 `CardStatus` variants (`Untracked`, `InProgress`, `Complete`, `Gap`, `Blocked`).
+
+Must still work:
+  - All existing `model.rs`, `theme.rs`, and `tui/style.rs` unit tests pass.
+
+Drops: none
+
+Tests:
+  - `model_component_mut_and_all_component_kinds` (in `src/model.rs`): test `component_mut` hit/miss and roundtrip every `ComponentKind::ALL` variant -> expected mutations and roundtrips succeed.
+  - `theme_resolve_errors_on_malformed_ron_and_missing_name` (in `src/theme.rs`): pass malformed `.ron` and unknown theme name to `resolve_theme` -> `RbError::RonParse` and `RbError::NotFound`.
+  - `style_covers_all_card_status_glyphs_and_border_colors` (in `src/tui/style.rs`): call `status_glyph` and `card_border_color` on all 5 `CardStatus` variants -> distinct expected glyphs and theme colors returned.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn model_component_mut_and_all_component_kinds\b' src/model.rs && grep -qE 'fn theme_resolve_errors_on_malformed_ron_and_missing_name\b' src/theme.rs && grep -qE 'fn style_covers_all_card_status_glyphs_and_border_colors\b' src/tui/style.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
