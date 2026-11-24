@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn model_toml_roundtrip() {
         let cfg = ProjectConfig {
-            name: "Rocket Factory".to_string(),
+            name: "Rocket Bench".to_string(),
             description: "Retro-futuristic TUI planning workspace".to_string(),
             theme: "crt_amber".to_string(),
             active_adapters: vec!["tracker".to_string()],

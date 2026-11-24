@@ -29,7 +29,7 @@ pub fn default_theme_dirs(root: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![root.join(".rocket/themes")];
     if let Ok(home) = std::env::var("HOME") {
         if !home.is_empty() {
-            dirs.push(PathBuf::from(home).join(".config/rocket-factory/themes"));
+            dirs.push(PathBuf::from(home).join(".config/rocket-bench/themes"));
         }
     }
     dirs
@@ -296,6 +296,14 @@ mod tests {
     fn default_theme_dirs_includes_project_local_dir() {
         let dirs = default_theme_dirs(Path::new("/tmp/rf_demo"));
         assert_eq!(dirs[0], PathBuf::from("/tmp/rf_demo/.rocket/themes"));
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                assert_eq!(
+                    dirs.get(1),
+                    Some(&PathBuf::from(home).join(".config/rocket-bench/themes"))
+                );
+            }
+        }
     }
 
     #[test]

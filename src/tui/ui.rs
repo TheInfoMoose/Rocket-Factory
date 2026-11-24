@@ -99,7 +99,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let line = Line::from(vec![
         Span::styled(
-            format!(" ROCKET FACTORY :: {}", app.project.config.name),
+            format!(" ROCKET BENCH :: {}", app.project.config.name),
             style::header_style(&app.theme),
         ),
         Span::styled(
@@ -962,7 +962,7 @@ mod tests {
         let mut app = make_test_app();
         let text = render_to_string(&mut app);
 
-        assert!(text.contains("ROCKET FACTORY"));
+        assert!(text.contains("ROCKET BENCH"));
         assert!(text.contains("GAPS: 1"));
         assert!(text.contains("Components"));
         assert!(text.contains("Snap Grid"));

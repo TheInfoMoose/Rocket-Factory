@@ -9,8 +9,8 @@ use crate::storage;
 
 #[derive(Debug, clap::Parser)]
 #[command(
-    name = "rf",
-    about = "Rocket Factory — retro-futuristic architecture planning TUI & CLI"
+    name = "rktb",
+    about = "Rocket Bench — retro-futuristic architecture planning TUI & CLI"
 )]
 pub struct Cli {
     #[arg(long, global = true, default_value = ".")]
@@ -67,7 +67,7 @@ pub struct CliOutput {
 pub fn default_adapters_path() -> PathBuf {
     match std::env::var_os("HOME") {
         Some(home) if !home.is_empty() => {
-            PathBuf::from(home).join(".config/rocket-factory/adapters.toml")
+            PathBuf::from(home).join(".config/rocket-bench/adapters.toml")
         }
         _ => PathBuf::from(".rocket/adapters.toml"),
     }
@@ -79,7 +79,7 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
             storage::init_workspace(root, &name, &description)?;
             Ok(CliOutput {
                 stdout: format!(
-                    "Initialized Rocket Factory workspace '{name}' in {}\n",
+                    "Initialized Rocket Bench workspace '{name}' in {}\n",
                     root.display()
                 ),
                 exit_code: 0,
@@ -240,6 +240,9 @@ mod tests {
         )
         .expect("init workspace");
         assert_eq!(init_out.exit_code, 0);
+        assert!(init_out
+            .stdout
+            .contains("Initialized Rocket Bench workspace 'apollo'"));
 
         let mut hud = scaffold_component("hud", "HUD", ComponentKind::UiView, GridPos::default());
         hud.features.push(FeatureItem {
@@ -396,5 +399,21 @@ mod tests {
         let hud = reloaded.component("hud").expect("hud exists");
         assert!(hud.features[0].pushed);
         assert_eq!(hud.features[0].external_id.as_deref(), Some("A-101"));
+    }
+
+    #[test]
+    fn default_adapters_path_uses_rocket_bench_config_dir() {
+        let path = default_adapters_path();
+        match std::env::var_os("HOME") {
+            Some(home) if !home.is_empty() => {
+                assert_eq!(
+                    path,
+                    PathBuf::from(home).join(".config/rocket-bench/adapters.toml")
+                );
+            }
+            _ => {
+                assert_eq!(path, PathBuf::from(".rocket/adapters.toml"));
+            }
+        }
     }
 }
