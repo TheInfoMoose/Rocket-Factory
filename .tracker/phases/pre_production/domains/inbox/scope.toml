@@ -231,49 +231,49 @@ created_at = "2026-11-23T15:51:50Z"
 [[items.bugs]]
 id = "BUG-0033"
 title = "[BUG-10] Missing .rocket/ silently turns mutations into in-memory edits"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:52Z"
 
 [[items.bugs]]
 id = "BUG-0034"
 title = "[BUG-11] load_project omits duplicate-ID and filename-stem checks"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:53Z"
 
 [[items.bugs]]
 id = "BUG-0035"
 title = "[BUG-12] atomic_write and two-file save_component durability gaps"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:54Z"
 
 [[items.bugs]]
 id = "BUG-0036"
 title = "[BUG-13] reconcile_status multi-adapter overwrite and unattributed auto-linking"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:55Z"
 
 [[items.bugs]]
 id = "BUG-0037"
 title = "[BUG-14] push_unpushed_features partial-failure retry duplication and dropped IDs"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:57Z"
 
 [[items.bugs]]
 id = "BUG-0038"
 title = "[BUG-15] audit_project structural blind spots (cycles, duplicates, self-edges, grid overlaps)"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:58Z"
 
 [[items.bugs]]
 id = "BUG-0039"
 title = "[BUG-16] Missing #[serde(default)] on model structs and unvalidated 0x0 GridConfig"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:59Z"
 
@@ -308,23 +308,44 @@ created_at = "2026-11-23T15:52:03Z"
 [[items.bugs]]
 id = "BUG-0044"
 title = "[BUG-21] Export manifest omissions and unescaped Markdown in export.rs"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:05Z"
 
 [[items.bugs]]
 id = "BUG-0045"
 title = "[BUG-22] run_push_component skips MarkdownRoadmap existence check and lossy UTF-8 decoding"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:06Z"
 
 [[items.bugs]]
 id = "BUG-0046"
 title = "[BUG-23] CLI exit code truncation, silent env parse, and ignored --component flag"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:07Z"
+
+[[items.bugs]]
+id = "BUG-0054"
+title = "sync_pull_project / reconcile_status never prunes deleted external tasks"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T18:57:21Z"
+
+[[items.bugs]]
+id = "BUG-0055"
+title = "TUI sub-component creation triggers immediate HierarchyDrift audit warnings"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T18:57:22Z"
+
+[[items.bugs]]
+id = "BUG-0056"
+title = "audit_project skips grid-bounds checks for sub-components and misses cross-parent grid overlaps"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T18:57:22Z"
 
 [[items.features]]
 id = "FEAT-0001"
@@ -847,35 +868,35 @@ created_at = "2026-11-23T02:25:30Z"
 [[items.tasks]]
 id = "TASK-0069"
 title = "[ARCH-01] Split monolithic src/tui/app.rs and deduplicate grid/path logic"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:36Z"
 
 [[items.tasks]]
 id = "TASK-0070"
 title = "[ARCH-02] Consolidate duplicated CLI vs TUI sync orchestration and surface PushResponse"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:37Z"
 
 [[items.tasks]]
 id = "TASK-0071"
 title = "[ARCH-03] Preserve legacy ComponentKind on TUI edit unless explicitly changed"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:39Z"
 
 [[items.tasks]]
 id = "TASK-0072"
 title = "[ARCH-04] Clean up RfError variant overloading in src/error.rs"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:40Z"
 
 [[items.tasks]]
 id = "TASK-0073"
 title = "[ARCH-05] Narrow over-exposed pub crate surface and remove unused exports"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:41Z"
 
@@ -896,7 +917,7 @@ created_at = "2026-11-23T15:52:44Z"
 [[items.tasks]]
 id = "TASK-0076"
 title = "[PERF-03] Avoid full Project deep clone and repeated JSON serialization per sync"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:46Z"
 
@@ -1141,6 +1162,6 @@ created_at = "2026-11-24T05:31:30Z"
 [[items.tasks]]
 id = "TASK-0112"
 title = "Fix STEP 17E POST_GATE grep for TuiTerminal type alias"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-24T05:54:56Z"

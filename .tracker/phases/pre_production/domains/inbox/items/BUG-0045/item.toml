@@ -2,11 +2,11 @@
 id = "BUG-0045"
 type = "bug"
 title = "[BUG-22] run_push_component skips MarkdownRoadmap existence check and lossy UTF-8 decoding"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:52:06Z"
-updated_at = "2026-11-23T15:52:06Z"
+updated_at = "2026-11-24T18:59:05Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "7e92a0f"
+summary = "Completed and verified in Phase 17 review"
