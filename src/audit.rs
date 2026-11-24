@@ -110,7 +110,7 @@ pub fn audit_project(project: &Project) -> Vec<AuditFinding> {
         });
     }
 
-    let mut occupied_positions: HashMap<(Option<&str>, GridPos), &str> = HashMap::new();
+    let mut occupied_positions: HashMap<GridPos, &str> = HashMap::new();
     let mut contains_edges: HashSet<(&str, &str)> = HashSet::new();
     for conn in &project.config.connections {
         if conn.kind == EdgeKind::Contains {
@@ -204,7 +204,9 @@ pub fn audit_project(project: &Project) -> Vec<AuditFinding> {
                     });
                 }
             }
-        } else if grid_valid
+        }
+
+        if grid_valid
             && (component.position.col >= grid.cols || component.position.row >= grid.rows)
         {
             findings.push(AuditFinding {
@@ -222,30 +224,18 @@ pub fn audit_project(project: &Project) -> Vec<AuditFinding> {
             });
         }
 
-        let pos_key = (component.parent_id.as_deref(), component.position);
-        if let Some(&existing_id) = occupied_positions.get(&pos_key) {
-            let message = match component.parent_id.as_deref() {
-                Some(parent_id) => format!(
-                    "Component '{}' overlaps sibling '{}' at ({}, {}) under parent '{}'",
-                    component.id,
-                    existing_id,
-                    component.position.col,
-                    component.position.row,
-                    parent_id
-                ),
-                None => format!(
-                    "Component '{}' overlaps '{}' at grid position ({}, {})",
-                    component.id, existing_id, component.position.col, component.position.row
-                ),
-            };
+        if let Some(&existing_id) = occupied_positions.get(&component.position) {
             findings.push(AuditFinding {
                 severity: FindingSeverity::Error,
                 kind: FindingKind::InvalidGrid,
                 component_id: Some(component.id.clone()),
-                message,
+                message: format!(
+                    "Component '{}' overlaps '{}' at grid position ({}, {})",
+                    component.id, existing_id, component.position.col, component.position.row
+                ),
             });
         } else {
-            occupied_positions.insert(pos_key, component.id.as_str());
+            occupied_positions.insert(component.position, component.id.as_str());
         }
     }
 
@@ -532,6 +522,63 @@ mod tests {
             finding.kind == FindingKind::HierarchyDrift
                 && finding.severity == FindingSeverity::Warning
                 && finding.component_id.as_deref() == Some("drift_target")
+        }));
+    }
+
+    #[test]
+    fn audit_flags_sub_component_out_of_bounds_and_cross_parent_overlap() {
+        let mut root_a = make_component("root_a");
+        root_a.position = GridPos { col: 0, row: 0 };
+
+        let mut root_b = make_component("root_b");
+        root_b.position = GridPos { col: 1, row: 0 };
+
+        let mut oob_child = make_component("oob_child");
+        oob_child.parent_id = Some("root_a".to_string());
+        oob_child.position = GridPos { col: 5, row: 0 };
+
+        let mut overlap_child = make_component("overlap_child");
+        overlap_child.parent_id = Some("root_b".to_string());
+        overlap_child.position = GridPos { col: 0, row: 0 };
+
+        let project = Project {
+            config: ProjectConfig {
+                name: "Global Grid Audit".to_string(),
+                description: "Checks global bounds and overlaps".to_string(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig { cols: 4, rows: 4 },
+                connections: vec![
+                    Connection {
+                        from: "root_a".to_string(),
+                        to: "oob_child".to_string(),
+                        kind: EdgeKind::Contains,
+                        label: None,
+                    },
+                    Connection {
+                        from: "root_b".to_string(),
+                        to: "overlap_child".to_string(),
+                        kind: EdgeKind::Contains,
+                        label: None,
+                    },
+                ],
+            },
+            components: vec![root_a, root_b, oob_child, overlap_child],
+        };
+
+        let findings = audit_project(&project);
+
+        assert!(findings.iter().any(|finding| {
+            finding.kind == FindingKind::InvalidGrid
+                && finding.severity == FindingSeverity::Error
+                && finding.component_id.as_deref() == Some("oob_child")
+                && finding.message.contains("outside grid bounds")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.kind == FindingKind::InvalidGrid
+                && finding.severity == FindingSeverity::Error
+                && finding.component_id.as_deref() == Some("overlap_child")
+                && finding.message.contains("overlaps")
         }));
     }
 }

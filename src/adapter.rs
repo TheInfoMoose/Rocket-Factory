@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -157,36 +157,58 @@ pub fn resolve_active_adapters<'a>(
     Ok(resolved)
 }
 
-pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) -> ReconcileSummary {
+pub fn reconcile_status_batch(
+    project: &mut Project,
+    responses: &[PullStatusResponse],
+) -> ReconcileSummary {
     let mut summary = ReconcileSummary::default();
-    let mut updated_components: HashSet<String> = HashSet::new();
+    let mut merged_by_component: HashMap<&str, Vec<ExternalTaskRef>> = HashMap::new();
+    let mut component_order: Vec<&str> = Vec::new();
 
-    for entry in &response.components {
-        let Some(component) = project.component_mut(&entry.component_id) else {
+    for response in responses {
+        for entry in &response.components {
+            let component_id = entry.component_id.as_str();
+            if project.component(component_id).is_none() {
+                continue;
+            }
+            let merged = merged_by_component.entry(component_id).or_insert_with(|| {
+                component_order.push(component_id);
+                Vec::new()
+            });
+            for incoming in &entry.tasks {
+                if let Some(existing) = merged
+                    .iter_mut()
+                    .find(|task| task.external_id == incoming.external_id)
+                {
+                    *existing = incoming.clone();
+                } else {
+                    merged.push(incoming.clone());
+                }
+            }
+        }
+    }
+
+    for component_id in component_order {
+        let Some(merged_tasks) = merged_by_component.remove(component_id) else {
+            continue;
+        };
+        let Some(component) = project.component_mut(component_id) else {
             continue;
         };
 
-        updated_components.insert(entry.component_id.clone());
-
-        for incoming in &entry.tasks {
-            if let Some(existing) = component
-                .external_tasks
-                .iter_mut()
-                .find(|task| task.external_id == incoming.external_id)
-            {
-                *existing = incoming.clone();
-            } else {
-                component.external_tasks.push(incoming.clone());
-            }
-        }
-        summary.tasks_synced += entry.tasks.len();
+        summary.components_updated += 1;
+        summary.tasks_synced += merged_tasks.len();
+        component.external_tasks = merged_tasks;
 
         for feature in &mut component.features {
             let matched_task = match feature.external_id.as_deref() {
-                Some(ext_id) => entry.tasks.iter().find(|task| task.external_id == ext_id),
+                Some(ext_id) => component
+                    .external_tasks
+                    .iter()
+                    .find(|task| task.external_id == ext_id),
                 None => {
-                    let mut matches = entry
-                        .tasks
+                    let mut matches = component
+                        .external_tasks
                         .iter()
                         .filter(|task| task.title == feature.title);
                     match (matches.next(), matches.next()) {
@@ -204,8 +226,11 @@ pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) ->
         }
     }
 
-    summary.components_updated = updated_components.len();
     summary
+}
+
+pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) -> ReconcileSummary {
+    reconcile_status_batch(project, std::slice::from_ref(response))
 }
 
 fn read_bounded<R: Read>(
@@ -655,13 +680,7 @@ pub fn sync_pull_project(
         })
         .collect();
 
-    let mut tasks_synced = 0usize;
-    let mut features_linked = 0usize;
-    for resp in &responses {
-        let summary = reconcile_status(project, resp);
-        tasks_synced += summary.tasks_synced;
-        features_linked += summary.features_linked;
-    }
+    let summary = reconcile_status_batch(project, &responses);
 
     for (pos, &idx) in updated_indices.iter().enumerate() {
         if let Err(err) = save_component(root, &project.components[idx]) {
@@ -675,9 +694,9 @@ pub fn sync_pull_project(
 
     Ok(PullSyncReport {
         adapters_count: active_adapters.len(),
-        components_updated: updated_ids.len(),
-        tasks_synced,
-        features_linked,
+        components_updated: summary.components_updated,
+        tasks_synced: summary.tasks_synced,
+        features_linked: summary.features_linked,
     })
 }
 
@@ -1116,18 +1135,100 @@ export_format = "json"
     }
 
     #[test]
+    fn reconcile_status_prunes_deleted_and_empty_tasks() {
+        let mut project = sample_project();
+        project.component_mut("view_box").unwrap().external_tasks = vec![
+            ExternalTaskRef {
+                external_id: "T-1".to_string(),
+                title: "Stale task".to_string(),
+                status: TaskStatus::Pending,
+            },
+            ExternalTaskRef {
+                external_id: "T-2".to_string(),
+                title: "Draw box".to_string(),
+                status: TaskStatus::InProgress,
+            },
+        ];
+        project.components.push(Component {
+            id: "sibling".to_string(),
+            name: "Sibling".to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: None,
+            description: String::new(),
+            relative_path: None,
+            position: GridPos { col: 1, row: 0 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: vec![ExternalTaskRef {
+                external_id: "S-1".to_string(),
+                title: "Keep me".to_string(),
+                status: TaskStatus::Complete,
+            }],
+            markdown_body: String::new(),
+        });
+
+        let partial = PullStatusResponse {
+            components: vec![PulledComponentStatus {
+                component_id: "view_box".to_string(),
+                tasks: vec![ExternalTaskRef {
+                    external_id: "T-2".to_string(),
+                    title: "Draw box".to_string(),
+                    status: TaskStatus::Complete,
+                }],
+            }],
+        };
+
+        let summary = reconcile_status(&mut project, &partial);
+        assert_eq!(summary.components_updated, 1);
+        assert_eq!(summary.tasks_synced, 1);
+        assert_eq!(summary.features_linked, 1);
+
+        let view_box = project.component("view_box").unwrap();
+        assert_eq!(view_box.external_tasks.len(), 1);
+        assert_eq!(view_box.external_tasks[0].external_id, "T-2");
+        assert_eq!(view_box.external_tasks[0].status, TaskStatus::Complete);
+
+        let empty = PullStatusResponse {
+            components: vec![PulledComponentStatus {
+                component_id: "view_box".to_string(),
+                tasks: Vec::new(),
+            }],
+        };
+
+        let empty_summary = reconcile_status(&mut project, &empty);
+        assert_eq!(empty_summary.components_updated, 1);
+        assert_eq!(empty_summary.tasks_synced, 0);
+        assert_eq!(empty_summary.features_linked, 0);
+
+        assert!(project
+            .component("view_box")
+            .unwrap()
+            .external_tasks
+            .is_empty());
+
+        let sibling = project.component("sibling").unwrap();
+        assert_eq!(sibling.external_tasks.len(), 1);
+        assert_eq!(sibling.external_tasks[0].external_id, "S-1");
+    }
+
+    #[test]
     fn reconcile_status_merges_multi_adapter_tasks_without_clobbering() {
         let mut project = sample_project();
-        project
-            .component_mut("view_box")
-            .unwrap()
-            .features
-            .push(FeatureItem {
-                id: "f2".to_string(),
-                title: "Ambiguous title".to_string(),
-                pushed: false,
-                external_id: None,
-            });
+        let view_box = project.component_mut("view_box").unwrap();
+        view_box.external_tasks.push(ExternalTaskRef {
+            external_id: "STALE-1".to_string(),
+            title: "Removed upstream".to_string(),
+            status: TaskStatus::Pending,
+        });
+        view_box.features.push(FeatureItem {
+            id: "f2".to_string(),
+            title: "Ambiguous title".to_string(),
+            pushed: false,
+            external_id: None,
+        });
 
         let response_a = PullStatusResponse {
             components: vec![
@@ -1157,11 +1258,6 @@ export_format = "json"
             ],
         };
 
-        let summary_a = reconcile_status(&mut project, &response_a);
-        assert_eq!(summary_a.components_updated, 1);
-        assert_eq!(summary_a.tasks_synced, 3);
-        assert_eq!(summary_a.features_linked, 1);
-
         let response_b = PullStatusResponse {
             components: vec![PulledComponentStatus {
                 component_id: "view_box".to_string(),
@@ -1180,12 +1276,17 @@ export_format = "json"
             }],
         };
 
-        let summary_b = reconcile_status(&mut project, &response_b);
-        assert_eq!(summary_b.components_updated, 1);
-        assert_eq!(summary_b.tasks_synced, 2);
+        let summary = reconcile_status_batch(&mut project, &[response_a, response_b]);
+        assert_eq!(summary.components_updated, 1);
+        assert_eq!(summary.tasks_synced, 4);
+        assert_eq!(summary.features_linked, 1);
 
         let comp = project.component("view_box").unwrap();
         assert_eq!(comp.external_tasks.len(), 4);
+        assert!(!comp
+            .external_tasks
+            .iter()
+            .any(|t| t.external_id == "STALE-1"));
         assert_eq!(
             comp.external_tasks
                 .iter()
