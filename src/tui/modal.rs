@@ -594,12 +594,22 @@ fn handle_edit_component_key(form: &mut EditComponentForm, key: KeyEvent) -> Mod
 
 fn handle_edit_connection_key(form: &mut EditConnectionForm, key: KeyEvent) -> ModalAction {
     match key.code {
-        KeyCode::Char('[') | KeyCode::PageUp if form.candidates.len() > 1 => {
+        KeyCode::Char('[') if form.candidates.len() > 1 && form.active_field == 0 => {
             let next = cycle_prev(form.selected_candidate, form.candidates.len());
             form.select_candidate(next);
             ModalAction::None
         }
-        KeyCode::Char(']') | KeyCode::PageDown if form.candidates.len() > 1 => {
+        KeyCode::PageUp if form.candidates.len() > 1 => {
+            let next = cycle_prev(form.selected_candidate, form.candidates.len());
+            form.select_candidate(next);
+            ModalAction::None
+        }
+        KeyCode::Char(']') if form.candidates.len() > 1 && form.active_field == 0 => {
+            let next = cycle_next(form.selected_candidate, form.candidates.len());
+            form.select_candidate(next);
+            ModalAction::None
+        }
+        KeyCode::PageDown if form.candidates.len() > 1 => {
             let next = cycle_next(form.selected_candidate, form.candidates.len());
             form.select_candidate(next);
             ModalAction::None
@@ -974,6 +984,74 @@ mod tests {
 
         // Esc cancels
         assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+    }
+
+    #[test]
+    fn edit_connection_allows_brackets_in_label_field() {
+        let mut modal = ModalState::edit_connections(vec![
+            Connection {
+                from: "api".to_string(),
+                to: "db".to_string(),
+                kind: EdgeKind::DependsOn,
+                label: None,
+            },
+            Connection {
+                from: "api".to_string(),
+                to: "cache".to_string(),
+                kind: EdgeKind::DataFlow,
+                label: Some("cache_sync".to_string()),
+            },
+        ]);
+
+        // On active_field == 0, ']' and '[' cycle selected_candidate.
+        assert_eq!(modal.handle_key(key(KeyCode::Char(']'))), ModalAction::None);
+        {
+            let ModalState::EditConnection(ref form) = modal else {
+                panic!("expected EditConnection");
+            };
+            assert_eq!(form.selected_candidate, 1);
+            assert_eq!(form.active_field, 0);
+        }
+
+        assert_eq!(modal.handle_key(key(KeyCode::Char('['))), ModalAction::None);
+        {
+            let ModalState::EditConnection(ref form) = modal else {
+                panic!("expected EditConnection");
+            };
+            assert_eq!(form.selected_candidate, 0);
+        }
+
+        // Move to Label field (active_field == 1) and type "[tag]".
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        if let ModalState::EditConnection(ref mut form) = modal {
+            form.error = Some("previous error".to_string());
+        }
+        type_text(&mut modal, "[tag]");
+        {
+            let ModalState::EditConnection(ref form) = modal else {
+                panic!("expected EditConnection");
+            };
+            assert_eq!(form.active_field, 1);
+            assert_eq!(form.selected_candidate, 0);
+            assert_eq!(form.label, "[tag]");
+            assert!(form.error.is_none());
+        }
+
+        // PageDown / PageUp continue to cycle candidates regardless of active_field.
+        assert_eq!(modal.handle_key(key(KeyCode::PageDown)), ModalAction::None);
+        {
+            let ModalState::EditConnection(ref form) = modal else {
+                panic!("expected EditConnection");
+            };
+            assert_eq!(form.selected_candidate, 1);
+        }
+        assert_eq!(modal.handle_key(key(KeyCode::PageUp)), ModalAction::None);
+        {
+            let ModalState::EditConnection(ref form) = modal else {
+                panic!("expected EditConnection");
+            };
+            assert_eq!(form.selected_candidate, 0);
+        }
     }
 
     #[test]
