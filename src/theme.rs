@@ -107,11 +107,12 @@ pub fn validate_theme_name(name: &str) -> RbResult<()> {
         || name.contains('/')
         || name.contains('\\')
         || name.contains("..")
+        || name.contains('\0')
         || !name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
-        return Err(RbError::PathEscape(PathBuf::from(name)));
+        return Err(RbError::Validation(format!("invalid theme name: '{name}'")));
     }
     Ok(())
 }
@@ -252,14 +253,32 @@ mod tests {
         for bad_name in ["../secret", "a/b", "a\\b", "", "foo.bar", "bad name"] {
             let err = resolve_theme(bad_name, &search_dirs).unwrap_err();
             assert!(
-                matches!(err, RbError::PathEscape(_)),
-                "expected PathEscape for '{bad_name}', got {err:?}"
+                matches!(err, RbError::Validation(_)),
+                "expected Validation for '{bad_name}', got {err:?}"
             );
             assert!(validate_theme_name(bad_name).is_err());
         }
 
         assert!(validate_theme_name("crt_amber").is_ok());
         assert!(validate_theme_name("Neon-Grid_01").is_ok());
+    }
+
+    #[test]
+    fn resolve_theme_rejects_invalid_theme_name_with_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let search_dirs = vec![dir.path().to_path_buf()];
+
+        let err_traversal = resolve_theme("../evil", &search_dirs).unwrap_err();
+        assert!(
+            matches!(err_traversal, RbError::Validation(_)),
+            "expected Validation for '../evil', got {err_traversal:?}"
+        );
+
+        let err_empty = resolve_theme("", &search_dirs).unwrap_err();
+        assert!(
+            matches!(err_empty, RbError::Validation(_)),
+            "expected Validation for '', got {err_empty:?}"
+        );
     }
 
     #[cfg(unix)]

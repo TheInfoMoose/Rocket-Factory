@@ -25,8 +25,8 @@ pub enum RbError {
     #[error("TOML serialization error: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
 
-    #[error("JSON serialization error: {0}")]
-    JsonSerialize(#[from] serde_json::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 
     #[error("RON parse error in {path}: {source}")]
     RonParse {
@@ -40,6 +40,12 @@ pub enum RbError {
 
     #[error("already exists: {0}")]
     AlreadyExists(String),
+
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("validation error: {0}")]
+    Validation(String),
 
     #[error("adapter error: {0}")]
     Adapter(String),

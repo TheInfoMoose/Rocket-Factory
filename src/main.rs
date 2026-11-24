@@ -16,7 +16,7 @@ fn main() -> ExitCode {
                 Ok(output) => {
                     print!("{}", output.stdout);
                     if output.exit_code != 0 {
-                        ExitCode::from(output.exit_code as u8)
+                        ExitCode::from(u8::try_from(output.exit_code).unwrap_or(1))
                     } else {
                         ExitCode::SUCCESS
                     }
@@ -29,11 +29,24 @@ fn main() -> ExitCode {
         }
         None => {
             let theme_dirs = rocket_bench::tui::default_theme_dirs(&cli.path);
-            let poll_interval = std::env::var("RKTB_POLL_INTERVAL_SECS")
-                .ok()
-                .and_then(|raw| raw.trim().parse::<u64>().ok())
-                .filter(|&secs| secs > 0)
-                .map(std::time::Duration::from_secs);
+            let poll_interval = match std::env::var("RKTB_POLL_INTERVAL_SECS") {
+                Ok(raw) => match raw.trim().parse::<u64>() {
+                    Ok(secs) if secs > 0 => Some(std::time::Duration::from_secs(secs)),
+                    _ => {
+                        eprintln!(
+                            "warning: ignoring invalid RKTB_POLL_INTERVAL_SECS={raw:?}; expected positive integer seconds"
+                        );
+                        None
+                    }
+                },
+                Err(std::env::VarError::NotPresent) => None,
+                Err(std::env::VarError::NotUnicode(raw)) => {
+                    eprintln!(
+                        "warning: ignoring invalid RKTB_POLL_INTERVAL_SECS={raw:?}; expected positive integer seconds"
+                    );
+                    None
+                }
+            };
             match rocket_bench::tui::run_tui(
                 &cli.path,
                 &theme_dirs,
