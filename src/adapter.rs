@@ -1,12 +1,17 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{RbError, RbResult};
 use crate::export::{export_component_manifest_toml, export_project_json, export_roadmap_markdown};
 use crate::model::{Component, ExternalTaskRef, FeatureItem, Project};
+
+pub const DEFAULT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub const MAX_COMMAND_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -143,10 +148,27 @@ pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) ->
     summary
 }
 
-fn run_command_with_stdin(
+fn read_bounded<R: Read>(
+    reader: R,
+    max_output_bytes: usize,
+    overflow_flag: &AtomicBool,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    let limit = (max_output_bytes as u64).saturating_add(1);
+    let mut buf = Vec::new();
+    reader.take(limit).read_to_end(&mut buf)?;
+    let exceeded = buf.len() > max_output_bytes;
+    if exceeded {
+        overflow_flag.store(true, Ordering::Release);
+    }
+    Ok((buf, exceeded))
+}
+
+fn run_command_with_limits(
     spec: &CommandSpec,
     workdir: &Path,
     stdin_payload: &str,
+    timeout: std::time::Duration,
+    max_output_bytes: usize,
 ) -> RbResult<String> {
     let mut child = Command::new(&spec.program)
         .args(&spec.args)
@@ -159,34 +181,184 @@ fn run_command_with_stdin(
             RbError::Adapter(format!("failed to spawn command '{}': {err}", spec.program))
         })?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(err) = stdin.write_all(stdin_payload.as_bytes()) {
-            if err.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(RbError::Adapter(format!(
-                    "failed to write stdin to '{}': {err}",
-                    spec.program
-                )));
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(RbError::Adapter(format!(
+            "failed to capture stdin for command '{}'",
+            spec.program
+        )));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(RbError::Adapter(format!(
+            "failed to capture stdout for command '{}'",
+            spec.program
+        )));
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(RbError::Adapter(format!(
+            "failed to capture stderr for command '{}'",
+            spec.program
+        )));
+    };
+
+    let output_exceeded = AtomicBool::new(false);
+    let stdin_bytes = stdin_payload.as_bytes();
+
+    std::thread::scope(|scope| {
+        let stdin_handle = scope.spawn(move || -> std::io::Result<()> {
+            let mut stdin = stdin;
+            if let Err(err) = stdin.write_all(stdin_bytes) {
+                if err.kind() != std::io::ErrorKind::BrokenPipe {
+                    return Err(err);
+                }
+            }
+            Ok(())
+        });
+
+        let stdout_flag = &output_exceeded;
+        let stdout_handle =
+            scope.spawn(move || read_bounded(stdout, max_output_bytes, stdout_flag));
+
+        let stderr_flag = &output_exceeded;
+        let stderr_handle =
+            scope.spawn(move || read_bounded(stderr, max_output_bytes, stderr_flag));
+
+        let start = Instant::now();
+        let mut timed_out = false;
+        let mut exit_status = None;
+
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    exit_status = Some(status);
+                    break;
+                }
+                Ok(None) => {
+                    if output_exceeded.load(Ordering::Acquire) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                    if start.elapsed() >= timeout {
+                        timed_out = true;
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                    let remaining = timeout.saturating_sub(start.elapsed());
+                    std::thread::sleep(remaining.min(Duration::from_millis(10)));
+                }
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdin_handle.join();
+                    let _ = stdout_handle.join();
+                    let _ = stderr_handle.join();
+                    return Err(RbError::Adapter(format!(
+                        "failed to wait for command '{}': {err}",
+                        spec.program
+                    )));
+                }
             }
         }
-    }
 
-    let output = child.wait_with_output().map_err(|err| {
-        RbError::Adapter(format!(
-            "failed to wait for command '{}': {err}",
-            spec.program
-        ))
-    })?;
+        let stdin_join = stdin_handle.join();
+        let stdout_join = stdout_handle.join();
+        let stderr_join = stderr_handle.join();
 
-    if !output.status.success() {
-        return Err(RbError::Adapter(format!(
-            "command '{}' exited with {}: {}",
-            spec.program,
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
+        if timed_out {
+            return Err(RbError::Adapter(format!(
+                "command '{}' timed out after {:?}",
+                spec.program, timeout
+            )));
+        }
 
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        let (stdout_bytes, stdout_exceeded) = stdout_join
+            .map_err(|_| {
+                RbError::Adapter(format!(
+                    "stdout reader thread panicked for command '{}'",
+                    spec.program
+                ))
+            })?
+            .map_err(|err| {
+                RbError::Adapter(format!(
+                    "failed to read stdout from '{}': {err}",
+                    spec.program
+                ))
+            })?;
+
+        let (stderr_bytes, stderr_exceeded) = stderr_join
+            .map_err(|_| {
+                RbError::Adapter(format!(
+                    "stderr reader thread panicked for command '{}'",
+                    spec.program
+                ))
+            })?
+            .map_err(|err| {
+                RbError::Adapter(format!(
+                    "failed to read stderr from '{}': {err}",
+                    spec.program
+                ))
+            })?;
+
+        if stdout_exceeded || stderr_exceeded {
+            return Err(RbError::Adapter(format!(
+                "command '{}' output exceeded limit of {max_output_bytes} bytes",
+                spec.program
+            )));
+        }
+
+        stdin_join
+            .map_err(|_| {
+                RbError::Adapter(format!(
+                    "stdin writer thread panicked for command '{}'",
+                    spec.program
+                ))
+            })?
+            .map_err(|err| {
+                RbError::Adapter(format!(
+                    "failed to write stdin to '{}': {err}",
+                    spec.program
+                ))
+            })?;
+
+        let Some(status) = exit_status else {
+            return Err(RbError::Adapter(format!(
+                "command '{}' terminated before returning an exit status",
+                spec.program
+            )));
+        };
+
+        if !status.success() {
+            return Err(RbError::Adapter(format!(
+                "command '{}' exited with {}: {}",
+                spec.program,
+                status,
+                String::from_utf8_lossy(&stderr_bytes).trim()
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
+    })
+}
+
+fn run_command_with_stdin(
+    spec: &CommandSpec,
+    workdir: &Path,
+    stdin_payload: &str,
+) -> RbResult<String> {
+    run_command_with_limits(
+        spec,
+        workdir,
+        stdin_payload,
+        DEFAULT_COMMAND_TIMEOUT,
+        MAX_COMMAND_OUTPUT_BYTES,
+    )
 }
 
 fn parse_push_response(adapter_name: &str, stdout: &str) -> RbResult<PushResponse> {
@@ -626,5 +798,65 @@ export_format = "json"
         ));
         assert!(!comp.features[0].pushed);
         assert!(comp.features[0].external_id.is_none());
+    }
+
+    #[test]
+    fn command_large_stdin_and_stdout_does_not_deadlock() {
+        let dir = tempdir().unwrap();
+        let payload = "x".repeat(200 * 1024);
+        let spec = CommandSpec {
+            program: "cat".into(),
+            args: Vec::new(),
+        };
+
+        let output = run_command_with_limits(
+            &spec,
+            dir.path(),
+            &payload,
+            Duration::from_secs(5),
+            1024 * 1024,
+        )
+        .unwrap();
+        assert_eq!(output.len(), payload.len());
+        assert_eq!(output, payload);
+    }
+
+    #[test]
+    fn command_timeout_kills_stalled_process() {
+        let dir = tempdir().unwrap();
+        let spec = CommandSpec {
+            program: "sleep".into(),
+            args: vec!["5".into()],
+        };
+
+        let err = run_command_with_limits(
+            &spec,
+            dir.path(),
+            "",
+            Duration::from_millis(100),
+            MAX_COMMAND_OUTPUT_BYTES,
+        );
+        assert!(matches!(
+            err,
+            Err(RbError::Adapter(msg)) if msg.contains("timed out")
+        ));
+    }
+
+    #[test]
+    fn command_output_limit_rejects_oversized_stdout() {
+        let dir = tempdir().unwrap();
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "i=0; while [ $i -lt 64 ]; do printf '0123456789abcdef'; i=$((i+1)); done".into(),
+            ],
+        };
+
+        let err = run_command_with_limits(&spec, dir.path(), "", Duration::from_secs(5), 256);
+        assert!(matches!(
+            err,
+            Err(RbError::Adapter(msg)) if msg.contains("output exceeded")
+        ));
     }
 }
