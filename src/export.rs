@@ -3,7 +3,7 @@ use std::fmt::Write;
 use serde::Serialize;
 
 use crate::error::{RbError, RbResult};
-use crate::model::{ComponentKind, EdgeKind, Project};
+use crate::model::{ComponentKind, EdgeKind, GridPos, Project};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExportDependency {
@@ -17,6 +17,8 @@ pub struct ComponentManifestExport {
     pub id: String,
     pub name: String,
     pub component_type: String,
+    pub parent_id: Option<String>,
+    pub position: GridPos,
     pub relative_path: Option<String>,
     pub description: String,
     pub tags: Vec<String>,
@@ -51,7 +53,7 @@ pub fn export_component_manifest_toml(project: &Project, component_id: &str) -> 
         .config
         .connections
         .iter()
-        .filter(|conn| conn.from == component_id)
+        .filter(|conn| conn.from == component_id && conn.kind != EdgeKind::Contains)
         .map(|conn| ExportDependency {
             target: conn.to.clone(),
             kind: conn.kind,
@@ -63,6 +65,8 @@ pub fn export_component_manifest_toml(project: &Project, component_id: &str) -> 
         id: component.id.clone(),
         name: component.name.clone(),
         component_type: map_component_type(component.kind).to_string(),
+        parent_id: component.parent_id.clone(),
+        position: component.position,
         relative_path: component.relative_path.clone(),
         description: component.description.clone(),
         tags: component.tags.clone(),
@@ -75,9 +79,26 @@ pub fn export_component_manifest_toml(project: &Project, component_id: &str) -> 
     Ok(toml::to_string_pretty(&manifest)?)
 }
 
+fn escape_markdown_cell(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '|' => escaped.push_str("\\|"),
+            '`' => escaped.push_str("\\`"),
+            '\r' | '\n' => escaped.push(' '),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
 pub fn export_roadmap_markdown(project: &Project) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "# {} — Blueprint Roadmap\n", project.config.name);
+    let _ = writeln!(
+        out,
+        "# {} — Blueprint Roadmap\n",
+        escape_markdown_cell(&project.config.name)
+    );
     let _ = writeln!(out, "## Up Next\n");
     let _ = writeln!(out, "| # | Source Ref | Component | Feature | Status |");
     let _ = writeln!(out, "|---|---|---|---|---|");
@@ -89,7 +110,10 @@ pub fn export_roadmap_markdown(project: &Project) -> String {
             let _ = writeln!(
                 out,
                 "| {row_idx} | FEAT {}:{} | {} | {} | {status} |",
-                component.id, feature.id, component.name, feature.title
+                escape_markdown_cell(&component.id),
+                escape_markdown_cell(&feature.id),
+                escape_markdown_cell(&component.name),
+                escape_markdown_cell(&feature.title),
             );
             row_idx += 1;
         }
@@ -106,7 +130,12 @@ pub fn export_roadmap_markdown(project: &Project) -> String {
         let _ = writeln!(out, "_None_");
     } else {
         for component in gaps {
-            let _ = writeln!(out, "- `{}` ({})", component.id, component.name);
+            let _ = writeln!(
+                out,
+                "- `{}` ({})",
+                escape_markdown_cell(&component.id),
+                escape_markdown_cell(&component.name),
+            );
         }
     }
 
@@ -114,7 +143,9 @@ pub fn export_roadmap_markdown(project: &Project) -> String {
 }
 
 pub fn export_project_json(project: &Project) -> RbResult<String> {
-    Ok(serde_json::to_string_pretty(project)?)
+    let mut json = serde_json::to_string_pretty(project)?;
+    json.push('\n');
+    Ok(json)
 }
 
 #[cfg(test)]
@@ -216,5 +247,74 @@ mod tests {
         let json_str = export_project_json(&project).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(val["config"]["name"], "demo");
+    }
+
+    #[test]
+    fn export_manifest_includes_hierarchy_and_excludes_contains() {
+        let parent = sample_component("parent_svc", "Parent Svc", ComponentKind::ServiceCore);
+        let mut child = sample_component("child_svc", "Child Svc", ComponentKind::Logic);
+        child.parent_id = Some("parent_svc".to_string());
+        child.position = GridPos { col: 2, row: 1 };
+        let leaf = sample_component("leaf_svc", "Leaf Svc", ComponentKind::Data);
+        let dep_target = sample_component("dep_svc", "Dep Svc", ComponentKind::Storage);
+
+        let project = sample_project(
+            "hierarchy",
+            vec![parent, child, leaf, dep_target],
+            vec![
+                Connection {
+                    from: "child_svc".to_string(),
+                    to: "leaf_svc".to_string(),
+                    kind: EdgeKind::Contains,
+                    label: None,
+                },
+                Connection {
+                    from: "child_svc".to_string(),
+                    to: "dep_svc".to_string(),
+                    kind: EdgeKind::DependsOn,
+                    label: Some("reads".to_string()),
+                },
+            ],
+        );
+
+        let rendered = export_component_manifest_toml(&project, "child_svc").unwrap();
+        assert!(rendered.contains("parent_id = \"parent_svc\""));
+        assert!(rendered.contains("[position]"));
+        assert!(rendered.contains("col = 2"));
+        assert!(rendered.contains("row = 1"));
+        assert!(rendered.contains("target = \"dep_svc\""));
+        assert!(rendered.contains("kind = \"depends_on\""));
+        assert!(!rendered.contains("target = \"leaf_svc\""));
+    }
+
+    #[test]
+    fn export_roadmap_escapes_markdown_cells() {
+        let mut comp = sample_component(
+            "edge_node",
+            "Alpha | `Beta`\nGamma",
+            ComponentKind::Interface,
+        );
+        comp.features.push(FeatureItem {
+            id: "f1".to_string(),
+            title: "Parse `pipe | token`\r\nsafely".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        let project = sample_project("Demo | `v1`\nPlan", vec![comp], Vec::new());
+
+        let md = export_roadmap_markdown(&project);
+        assert!(md.contains("# Demo \\| \\`v1\\` Plan — Blueprint Roadmap"));
+
+        let table_row = md
+            .lines()
+            .find(|line| line.starts_with("| 1 |"))
+            .expect("missing feature table row");
+        assert!(table_row.contains("Alpha \\| \\`Beta\\` Gamma"));
+        assert!(table_row.contains("Parse \\`pipe \\| token\\`  safely"));
+
+        let json_str = export_project_json(&project).unwrap();
+        assert!(json_str.ends_with('\n'));
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["config"]["name"], "Demo | `v1`\nPlan");
     }
 }
