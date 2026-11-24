@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0104"
 type = "task"
 title = "security"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:44:18Z"
-updated_at = "2026-11-24T04:44:18Z"
+updated_at = "2026-11-24T05:10:07Z"
 source_ref = "STEP 16E"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0104@2026-11-24T05:07:46Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "db3e74f"
+summary = "STEP 16E: Quote-Aware `$EDITOR` Command Parsing (`BUG-0021`) (phased check PASS)"

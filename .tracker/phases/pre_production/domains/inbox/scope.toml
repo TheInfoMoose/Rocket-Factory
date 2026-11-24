@@ -1085,7 +1085,7 @@ created_at = "2026-11-24T04:44:18Z"
 [[items.tasks]]
 id = "TASK-0104"
 title = "security"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T04:44:18Z"
 
