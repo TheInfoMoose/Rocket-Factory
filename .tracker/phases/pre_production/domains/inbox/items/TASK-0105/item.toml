@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0105"
 type = "task"
 title = "security"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:44:18Z"
-updated_at = "2026-11-24T04:44:18Z"
+updated_at = "2026-11-24T05:13:52Z"
 source_ref = "STEP 16F"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0105@2026-11-24T05:10:07Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "1c5c729"
+summary = "STEP 16F: Sanitize Control Characters in Modal Input & TUI Rendering (`BUG-0022`) (phased check PASS)"
