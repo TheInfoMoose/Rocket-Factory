@@ -1106,7 +1106,7 @@ created_at = "2026-11-24T05:31:30Z"
 [[items.tasks]]
 id = "TASK-0107"
 title = "storage"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T05:31:30Z"
 
