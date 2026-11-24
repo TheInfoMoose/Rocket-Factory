@@ -359,7 +359,8 @@ fn is_printable_char(key: KeyEvent) -> Option<char> {
         KeyCode::Char(c)
             if !key
                 .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !c.is_control() =>
         {
             Some(c)
         }
@@ -972,5 +973,18 @@ mod tests {
             ModalAction::Cancel
         );
         assert_eq!(modal.handle_key(key(KeyCode::Esc)), ModalAction::Cancel);
+    }
+
+    #[test]
+    fn modal_rejects_control_characters_in_text_input() {
+        let mut modal = ModalState::new_component();
+        for ch in ['\x1b', '\x07', '\x7f', '\u{009b}', 'a'] {
+            assert_eq!(modal.handle_key(key(KeyCode::Char(ch))), ModalAction::None);
+        }
+
+        let ModalState::NewComponent(ref form) = modal else {
+            panic!("expected NewComponent");
+        };
+        assert_eq!(form.id, "a");
     }
 }

@@ -597,10 +597,11 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         } else {
             conn.label
                 .as_deref()
+                .map(crate::tui::ui::sanitize_display_text)
                 .filter(|s| !s.is_empty())
-                .or(Some(edge_kind_tag(conn.kind)))
+                .or_else(|| Some(edge_kind_tag(conn.kind).to_string()))
         };
-        let routed = route_orthogonal_edge(from_rect, to_rect, edge_label, inner);
+        let routed = route_orthogonal_edge(from_rect, to_rect, edge_label.as_deref(), inner);
 
         let is_highlighted =
             selected_id == Some(conn.from.as_str()) || selected_id == Some(conn.to.as_str());
@@ -648,7 +649,8 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             if avail == 0 {
                 continue;
             }
-            let clipped = truncate_text(text, avail);
+            let safe_label = crate::tui::ui::sanitize_display_text(text);
+            let clipped = truncate_text(&safe_label, avail);
             for (offset, ch) in clipped.chars().enumerate() {
                 let Ok(dx) = u16::try_from(offset) else {
                     break;
@@ -688,6 +690,8 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         let inner_w = rect.width.saturating_sub(2) as usize;
         let inner_h = rect.height.saturating_sub(2) as usize;
         let sub_count = app.project.sub_components(&comp.id).len();
+        let safe_name = crate::tui::ui::sanitize_display_text(&comp.name);
+        let safe_description = crate::tui::ui::sanitize_display_text(&comp.description);
         let line1 = if sub_count > 0 {
             let badge = if app.is_expanded(&comp.id) {
                 format!("[-{sub_count}]")
@@ -697,50 +701,56 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             let badge_len = badge.chars().count();
             if inner_w > badge_len + 1 {
                 let prefix =
-                    truncate_text(&format!("{glyph} {}", comp.name), inner_w - badge_len - 1);
+                    truncate_text(&format!("{glyph} {safe_name}"), inner_w - badge_len - 1);
                 format!("{prefix} {badge}")
             } else {
-                truncate_text(&format!("{glyph} {} {badge}", comp.name), inner_w)
+                truncate_text(&format!("{glyph} {safe_name} {badge}"), inner_w)
             }
         } else {
-            truncate_text(&format!("{glyph} {}", comp.name), inner_w)
+            truncate_text(&format!("{glyph} {safe_name}"), inner_w)
         };
         let archetype = archetype_for(comp.kind);
         let mut lines = match viewport.zoom {
             ZoomLevel::Compact => vec![
                 Line::from(line1),
                 Line::from(truncate_text(
-                    &format!("Tasks {}/{}", progress.complete, progress.total),
+                    &crate::tui::ui::sanitize_display_text(&format!(
+                        "Tasks {}/{}",
+                        progress.complete, progress.total
+                    )),
                     inner_w,
                 )),
             ],
             ZoomLevel::Normal => vec![
                 Line::from(line1),
                 Line::from(truncate_text(
-                    &format!(
+                    &crate::tui::ui::sanitize_display_text(&format!(
                         "Tasks {}/{} [{}]",
                         progress.complete, progress.total, archetype.label
-                    ),
+                    )),
                     inner_w,
                 )),
-                Line::from(truncate_text(&comp.description, inner_w)),
+                Line::from(truncate_text(&safe_description, inner_w)),
             ],
             ZoomLevel::Expanded => {
                 let tags_summary = if comp.tags.is_empty() {
                     "Tags: -".to_string()
                 } else {
-                    format!("Tags: {}", comp.tags.join(", "))
+                    format!(
+                        "Tags: {}",
+                        crate::tui::ui::sanitize_display_text(&comp.tags.join(", "))
+                    )
                 };
                 vec![
                     Line::from(line1),
                     Line::from(truncate_text(
-                        &format!(
+                        &crate::tui::ui::sanitize_display_text(&format!(
                             "Tasks {}/{} [{}]",
                             progress.complete, progress.total, archetype.label
-                        ),
+                        )),
                         inner_w,
                     )),
-                    Line::from(truncate_text(&comp.description, inner_w)),
+                    Line::from(truncate_text(&safe_description, inner_w)),
                     Line::from(truncate_text(&tags_summary, inner_w)),
                     Line::from(truncate_text(
                         &format!("Feat: {} | Sub: {}", comp.features.len(), sub_count),
@@ -1362,5 +1372,34 @@ mod tests {
                 "Compact L-bend segment at ({x}, {y}) missing or overwritten"
             );
         }
+    }
+
+    #[test]
+    fn canvas_strips_control_chars_from_card_and_edge_labels() {
+        let mut app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 2, row: 0 },
+            Some("flow\x1b[31m\x07\u{009b}"),
+        );
+        app.project.components[0].name = "Alpha\x1b[31m\x07\u{009b}".to_string();
+        app.project.components[1].name = "Beta\x1b[31m\x07\u{009b}".to_string();
+
+        let buf = render_canvas_buffer(&app, 80, 24);
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let sym = buf[(x, y)].symbol();
+                assert!(
+                    !sym.chars().any(char::is_control),
+                    "found control character in canvas cell ({x}, {y}): {sym:?}"
+                );
+                text.push_str(sym);
+            }
+            text.push('\n');
+        }
+
+        assert!(text.contains("Alpha"));
+        assert!(text.contains("Beta"));
+        assert!(text.contains("flow"));
     }
 }

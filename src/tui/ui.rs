@@ -15,6 +15,21 @@ use crate::tui::modal::{
 };
 use crate::tui::style;
 
+pub(crate) fn sanitize_display_text(input: &str) -> String {
+    input
+        .chars()
+        .filter_map(|c| {
+            if c == '\t' {
+                Some(' ')
+            } else if c.is_control() {
+                None
+            } else {
+                Some(c)
+            }
+        })
+        .collect()
+}
+
 pub fn column_layout(area: Rect) -> [Rect; 3] {
     let left_w = ((u32::from(area.width) * 19 / 100) as u16)
         .clamp(14, 22)
@@ -99,7 +114,10 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let line = Line::from(vec![
         Span::styled(
-            format!(" ROCKET BENCH :: {}", app.project.config.name),
+            format!(
+                " ROCKET BENCH :: {}",
+                sanitize_display_text(&app.project.config.name)
+            ),
             style::header_style(&app.theme),
         ),
         Span::styled(
@@ -108,7 +126,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(format!("GAPS: {gap_count}"), gap_style),
         Span::styled(
-            format!(" | {}", app.status_message),
+            format!(" | {}", sanitize_display_text(&app.status_message)),
             style::base_style(&app.theme),
         ),
     ]);
@@ -235,11 +253,12 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 ""
             };
+            let safe_name = sanitize_display_text(&comp.name);
             let label = format_component_list_label(
                 &indent,
                 expand_prefix,
                 glyph,
-                &comp.name,
+                &safe_name,
                 progress.complete,
                 progress.total,
                 inner_width,
@@ -280,11 +299,15 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 
     let status = compute_card_status(comp);
     let archetype = archetype_for(comp.kind);
-    let path_display = comp.relative_path.as_deref().unwrap_or("-");
+    let path_display = comp
+        .relative_path
+        .as_deref()
+        .map(sanitize_display_text)
+        .unwrap_or_else(|| "-".to_string());
     let tags_display = if comp.tags.is_empty() {
         "-".to_string()
     } else {
-        comp.tags.join(", ")
+        sanitize_display_text(&comp.tags.join(", "))
     };
 
     let heading_style = Style::default()
@@ -295,7 +318,11 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(
-            format!("Name: {} ({})", comp.name, comp.id),
+            format!(
+                "Name: {} ({})",
+                sanitize_display_text(&comp.name),
+                sanitize_display_text(&comp.id)
+            ),
             base.add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
@@ -307,7 +334,10 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         )),
     ];
     if let Some(pid) = comp.parent_id.as_deref() {
-        lines.push(Line::from(Span::styled(format!("Parent: {pid}"), base)));
+        lines.push(Line::from(Span::styled(
+            format!("Parent: {}", sanitize_display_text(pid)),
+            base,
+        )));
     }
     lines.push(Line::from(Span::styled(
         format!("Path: {path_display}"),
@@ -318,7 +348,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         base,
     )));
     lines.push(Line::from(Span::styled(
-        format!("Description: {}", comp.description),
+        format!("Description: {}", sanitize_display_text(&comp.description)),
         base,
     )));
 
@@ -339,7 +369,11 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         )));
         for child in sub_components {
             lines.push(Line::from(Span::styled(
-                format!("  {} ({})", child.name, child.id),
+                format!(
+                    "  {} ({})",
+                    sanitize_display_text(&child.name),
+                    sanitize_display_text(&child.id)
+                ),
                 base,
             )));
         }
@@ -353,14 +387,18 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         if conn.from == comp.id {
             has_connections = true;
             lines.push(Line::from(Span::styled(
-                format!("  -> {} [{:?}]", conn.to, conn.kind),
+                format!("  -> {} [{:?}]", sanitize_display_text(&conn.to), conn.kind),
                 base,
             )));
         }
         if conn.to == comp.id {
             has_connections = true;
             lines.push(Line::from(Span::styled(
-                format!("  <- {} [{:?}]", conn.from, conn.kind),
+                format!(
+                    "  <- {} [{:?}]",
+                    sanitize_display_text(&conn.from),
+                    conn.kind
+                ),
                 base,
             )));
         }
@@ -381,7 +419,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
                 "[local]"
             };
             lines.push(Line::from(Span::styled(
-                format!("  {state} {}", feature.title),
+                format!("  {state} {}", sanitize_display_text(&feature.title)),
                 base,
             )));
         }
@@ -394,7 +432,12 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         for task in &comp.external_tasks {
             lines.push(Line::from(Span::styled(
-                format!("  [{:?}] {} {}", task.status, task.external_id, task.title),
+                format!(
+                    "  [{:?}] {} {}",
+                    task.status,
+                    sanitize_display_text(&task.external_id),
+                    sanitize_display_text(&task.title)
+                ),
                 base,
             )));
         }
@@ -406,10 +449,9 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled("  (none)", muted)));
     } else {
         for md_line in comp.markdown_body.lines() {
-            lines.push(Line::from(Span::styled(
-                md_line.to_string(),
-                style::markdown_line_style(&app.theme, md_line),
-            )));
+            let clean_line = sanitize_display_text(md_line);
+            let line_style = style::markdown_line_style(&app.theme, &clean_line);
+            lines.push(Line::from(Span::styled(clean_line, line_style)));
         }
     }
 
@@ -537,8 +579,9 @@ fn modal_field_line(label: &str, value: &str, active: bool, theme: &Theme) -> Li
     } else {
         style::base_style(theme)
     };
+    let safe_value = sanitize_display_text(value);
     Line::from(Span::styled(
-        format!("{prefix}{label}: {value}"),
+        format!("{prefix}{label}: {safe_value}"),
         field_style,
     ))
 }
@@ -563,7 +606,10 @@ fn render_modal(
     let error_text = match modal {
         ModalState::NewComponent(form) => {
             if let Some(pid) = &form.parent_id {
-                lines.push(Line::from(Span::styled(format!("  Parent: {pid}"), muted)));
+                lines.push(Line::from(Span::styled(
+                    format!("  Parent: {}", sanitize_display_text(pid)),
+                    muted,
+                )));
             }
             lines.push(modal_field_line(
                 "ID",
@@ -587,7 +633,7 @@ fn render_modal(
         }
         ModalState::EditComponent(form) => {
             lines.push(Line::from(Span::styled(
-                format!("  ID: {}", form.component_id),
+                format!("  ID: {}", sanitize_display_text(&form.component_id)),
                 muted,
             )));
             lines.push(modal_field_line(
@@ -638,7 +684,11 @@ fn render_modal(
             lines.push(Line::from(Span::styled(
                 format!(
                     "  Edge: {}",
-                    edge_relationship_preview(&form.from, &form.to, form.selected_kind())
+                    sanitize_display_text(&edge_relationship_preview(
+                        &form.from,
+                        &form.to,
+                        form.selected_kind()
+                    ))
                 ),
                 muted,
             )));
@@ -778,7 +828,7 @@ fn render_modal(
                         base
                     };
                     lines.push(Line::from(Span::styled(
-                        format!("{prefix}{theme_name}{suffix}"),
+                        format!("{prefix}{}{suffix}", sanitize_display_text(theme_name)),
                         row_style,
                     )));
                 }
@@ -793,7 +843,11 @@ fn render_modal(
                     affected_connections,
                 } => {
                     lines.push(Line::from(Span::styled(
-                        format!("  Delete component '{name}' ({id})?"),
+                        format!(
+                            "  Delete component '{}' ({})?",
+                            sanitize_display_text(name),
+                            sanitize_display_text(id)
+                        ),
                         base.add_modifier(Modifier::BOLD),
                     )));
                     if *affected_connections > 0 {
@@ -812,7 +866,11 @@ fn render_modal(
                 }
                 ConfirmDeleteTarget::Connection { from, to } => {
                     lines.push(Line::from(Span::styled(
-                        format!("  Delete connection '{from} -> {to}'?"),
+                        format!(
+                            "  Delete connection '{} -> {}'?",
+                            sanitize_display_text(from),
+                            sanitize_display_text(to)
+                        ),
                         base.add_modifier(Modifier::BOLD),
                     )));
                 }
@@ -824,7 +882,7 @@ fn render_modal(
     if let Some(err) = error_text {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            format!("  Error: {err}"),
+            format!("  Error: {}", sanitize_display_text(err)),
             error_style,
         )));
     }
@@ -1552,5 +1610,47 @@ mod tests {
             vis_cols >= 4 && vis_rows >= 4,
             "expected >= (4, 4) Compact grid capacity at 114x26, got ({vis_cols}, {vis_rows})"
         );
+    }
+
+    #[test]
+    fn render_strips_control_chars_from_untrusted_text() {
+        use crate::model::FeatureItem;
+
+        let mut app = make_test_app();
+        app.project.config.name = "Rocket\x1b[31m\r\x07\t\u{009b}".to_string();
+        app.status_message = "Ready\x1b[31m\r\x07\t\u{009b}".to_string();
+        app.project.components[0].name = "SafeTitle\x1b[31m\r\x07\t\u{009b}".to_string();
+        app.project.components[0].description = "Desc\x1b[31m\r\x07\t\u{009b}".to_string();
+        app.project.components[0].tags = vec!["tag\x07\t1".to_string()];
+        app.project.components[0].features = vec![FeatureItem {
+            id: "feat_1".to_string(),
+            title: "Feature\x1b[31m\r\x07\t\u{009b}".to_string(),
+            pushed: false,
+            external_id: None,
+        }];
+        app.project.components[0].markdown_body =
+            "# Spec\x1b[31m\r\nLine 1\x07\twith\u{009b}tab\nLine 2 long markdown body with \x1b[31m and \x07 and \u{009b}"
+                .to_string();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let sym = buffer[(x, y)].symbol();
+                assert!(
+                    !sym.chars().any(char::is_control),
+                    "found control character in rendered cell ({x}, {y}): {sym:?}"
+                );
+                text.push_str(sym);
+            }
+            text.push('\n');
+        }
+
+        assert!(text.contains("Rocket"));
+        assert!(text.contains("SafeTitle"));
     }
 }
