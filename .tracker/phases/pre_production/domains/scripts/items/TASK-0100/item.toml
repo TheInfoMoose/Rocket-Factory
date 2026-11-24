@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0100"
 type = "task"
 title = "scripts"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "scripts"
 created_at = "2026-11-24T04:44:18Z"
-updated_at = "2026-11-24T04:44:18Z"
+updated_at = "2026-11-24T04:59:11Z"
 source_ref = "STEP 16A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 5
 iteration_count = 1
+last_timer_session = "TASK-0100@2026-11-24T04:54:11Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "dcc594d"
+summary = "STEP 16A: Harden `scripts/phased-step.sh` and `scripts/neon-dispatch` (`BUG-0047`–`BUG-0053`) (phased check PASS)"
