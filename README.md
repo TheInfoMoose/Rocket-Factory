@@ -1,6 +1,6 @@
-# Rocket Factory (`rf`)
+# Rocket Bench (`rktb`)
 
-Rocket Factory is a Rust terminal user interface (`ratatui`) and CLI tool for planning application architectures using `.rocket/` TOML metadata files, Markdown component specifications, and external command-based adapters.
+Rocket Bench is a Rust terminal user interface (`ratatui`) and CLI tool for planning application architectures using `.rocket/` TOML metadata files, Markdown component specifications, and external command-based adapters.
 
 ## Prerequisites
 
@@ -21,13 +21,13 @@ cargo install --git https://github.com/TheInfoMoose/Rocket-Factory.git --locked
 git clone https://github.com/TheInfoMoose/Rocket-Factory.git
 cd Rocket-Factory
 
-# Install `rf` into ~/.cargo/bin
+# Install `rktb` into ~/.cargo/bin
 cargo install --path . --locked
 ```
 
 #### Build a local release binary without installing
 
-To build `target/release/rf` without installing into `~/.cargo/bin`:
+To build `target/release/rktb` without installing into `~/.cargo/bin`:
 
 ```bash
 cargo build --release --locked
@@ -35,10 +35,10 @@ cargo build --release --locked
 
 ### Verify installation & PATH
 
-`cargo install` places the `rf` binary in `~/.cargo/bin`. Ensure `$HOME/.cargo/bin` is on your `PATH`, then verify the installation:
+`cargo install` places the `rktb` binary in `~/.cargo/bin`. Ensure `$HOME/.cargo/bin` is on your `PATH`, then verify the installation:
 
 ```bash
-rf --help
+rktb --help
 ```
 
 ## Quick Start
@@ -46,22 +46,22 @@ rf --help
 1. **Initialize a workspace** (creates `./my-project/.rocket/` automatically):
 
    ```bash
-   rf --path ./my-project init --name "my-project" --description "Service architecture blueprint"
+   rktb --path ./my-project init --name "my-project" --description "Service architecture blueprint"
    ```
 
    Or initialize inside an existing project directory (`--path` defaults to `.`):
 
    ```bash
-   rf init --name "my-project"
+   rktb init --name "my-project"
    ```
 
-2. **Launch the interactive TUI** (requires an initialized `.rocket/` workspace — run `rf init` first):
+2. **Launch the interactive TUI** (requires an initialized `.rocket/` workspace — run `rktb init` first):
 
    ```bash
-   rf --path ./my-project
+   rktb --path ./my-project
    ```
 
-   Or run `rf` directly inside the workspace directory.
+   Or run `rktb` directly inside the workspace directory.
 
 3. **Explore the TUI & verify via CLI**:
 
@@ -69,35 +69,35 @@ rf --help
    - Optionally run a CLI audit on the workspace:
 
      ```bash
-     rf --path ./my-project audit
+     rktb --path ./my-project audit
      ```
 
 ## CLI Reference
 
-Running `rf` without a subcommand opens the interactive TUI.
+Running `rktb` without a subcommand opens the interactive TUI.
 
 ### Global Flags
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `--path <DIR>` | `.` | Workspace root directory containing `.rocket/`. |
-| `--adapters-file <PATH>` | `~/.config/rocket-factory/adapters.toml` | Path to the external adapters configuration file. Falls back to `.rocket/adapters.toml` if `$HOME` is unset or empty. |
+| `--adapters-file <PATH>` | `~/.config/rocket-bench/adapters.toml` | Path to the external adapters configuration file. Falls back to `.rocket/adapters.toml` if `$HOME` is unset or empty. |
 
 ### Subcommands
 
 | Command | Description |
 | :--- | :--- |
-| `rf init --name <NAME> [--description <DESC>]` | Initializes `.rocket/project.toml` and `.rocket/components/` in the workspace root. Fails if `.rocket/project.toml` already exists. `--description` defaults to `""`. |
-| `rf audit [--strict]` | Audits the workspace and prints `[ERROR]` and `[WARN]` findings (or `No audit findings.`). With `--strict`, exits with status `1` if any `[ERROR]` finding is present. |
-| `rf export --format <manifest\|roadmap\|json> [--component <ID>]` | Exports workspace data to stdout: `manifest` exports a single component's TOML manifest (requires `--component <ID>`), `roadmap` exports a Markdown roadmap, and `json` exports the full project as JSON. |
-| `rf push [--component <ID>] [--adapter <NAME>]` | Pushes component(s) via `push_component_cmd` and unpushed features via `push_feature_cmd`. Targets a single component if `--component` is given, otherwise all components. Uses `--adapter` if given, otherwise `active_adapters` from `.rocket/project.toml`. Persists updated `pushed` and `external_id` fields on features. |
-| `rf pull [--adapter <NAME>]` | Pulls external task status via `pull_status_cmd` from `--adapter` or all `active_adapters`, reconciles `external_tasks` and feature links, and saves updated component files. |
+| `rktb init --name <NAME> [--description <DESC>]` | Initializes `.rocket/project.toml` and `.rocket/components/` in the workspace root. Fails if `.rocket/project.toml` already exists. `--description` defaults to `""`. |
+| `rktb audit [--strict]` | Audits the workspace and prints `[ERROR]` and `[WARN]` findings (or `No audit findings.`). With `--strict`, exits with status `1` if any `[ERROR]` finding is present. |
+| `rktb export --format <manifest\|roadmap\|json> [--component <ID>]` | Exports workspace data to stdout: `manifest` exports a single component's TOML manifest (requires `--component <ID>`), `roadmap` exports a Markdown roadmap, and `json` exports the full project as JSON. |
+| `rktb push [--component <ID>] [--adapter <NAME>]` | Pushes component(s) via `push_component_cmd` and unpushed features via `push_feature_cmd`. Targets a single component if `--component` is given, otherwise all components. Uses `--adapter` if given, otherwise `active_adapters` from `.rocket/project.toml`. Persists updated `pushed` and `external_id` fields on features. |
+| `rktb pull [--adapter <NAME>]` | Pulls external task status via `pull_status_cmd` from `--adapter` or all `active_adapters`, reconciles `external_tasks` and feature links, and saves updated component files. |
 
 ### Environment Variables
 
 | Variable | Behavior |
 | :--- | :--- |
-| `RF_POLL_INTERVAL_SECS` | Positive integer interval in seconds for automatic `pull` sync in the TUI when `active_adapters` is non-empty and no modal is open. Disabled when unset, invalid, or `0`. |
+| `RKTB_POLL_INTERVAL_SECS` | Positive integer interval in seconds for automatic `pull` sync in the TUI when `active_adapters` is non-empty and no modal is open. Disabled when unset, invalid, or `0`. |
 | `EDITOR` | External editor command launched when pressing `v` in the TUI to edit `.rocket/components/<id>.md`. Split on ASCII whitespace into program and arguments; falls back to `vi` when unset or blank. |
 
 ## TUI Keyboard Reference
@@ -179,17 +179,17 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 
 ### Theme Search Order
 
-When loading a theme named `<name>`, Rocket Factory searches in the following order:
+When loading a theme named `<name>`, Rocket Bench searches in the following order:
 
 1. `<workspace>/.rocket/themes/<name>.ron`
-2. `~/.config/rocket-factory/themes/<name>.ron`
+2. `~/.config/rocket-bench/themes/<name>.ron`
 3. Built-in `crt_amber` (fallback when `<name>` is `"crt_amber"` and no override file exists)
 
 Theme names may only contain ASCII alphanumerics, `_`, and `-`. Symlinks resolving outside the theme directory are rejected.
 
 ### Custom `.ron` Theme Example
 
-Create `.rocket/themes/custom_amber.ron` (or `~/.config/rocket-factory/themes/custom_amber.ron`) with all 16 RGB palette fields:
+Create `.rocket/themes/custom_amber.ron` (or `~/.config/rocket-bench/themes/custom_amber.ron`) with all 16 RGB palette fields:
 
 ```ron
 (
@@ -217,11 +217,11 @@ Create `.rocket/themes/custom_amber.ron` (or `~/.config/rocket-factory/themes/cu
 
 ## External Adapters (`adapters.toml`)
 
-Rocket Factory integrates with external tools by spawning configured commands and exchanging payloads over `stdin` and `stdout`.
+Rocket Bench integrates with external tools by spawning configured commands and exchanging payloads over `stdin` and `stdout`.
 
 ### Configuration Path and Schema
 
-By default, adapters are loaded from `~/.config/rocket-factory/adapters.toml` (overridable via `--adapters-file <PATH>`). Enable adapters for a workspace by listing their `name` values under `active_adapters` in `.rocket/project.toml`.
+By default, adapters are loaded from `~/.config/rocket-bench/adapters.toml` (overridable via `--adapters-file <PATH>`). Enable adapters for a workspace by listing their `name` values under `active_adapters` in `.rocket/project.toml`.
 
 ```toml
 [[adapters]]
@@ -248,8 +248,8 @@ Each command is executed with the workspace root as its working directory. Non-z
 #### `push_component_cmd`
 
 - **stdin**: Formatted according to the adapter's `export_format`:
-  - `toml_manifest`: Single component TOML manifest (same as `rf export --format manifest --component <id>`).
-  - `markdown_roadmap`: Full project Markdown roadmap (same as `rf export --format roadmap`).
+  - `toml_manifest`: Single component TOML manifest (same as `rktb export --format manifest --component <id>`).
+  - `markdown_roadmap`: Full project Markdown roadmap (same as `rktb export --format roadmap`).
   - `json`: Pretty-printed JSON representation of the target `Component`.
 - **stdout**: Empty output, or a `PushResponse` JSON object (both fields optional):
 
@@ -289,7 +289,7 @@ When multiple active adapters define `push_feature_cmd`, each unpushed feature i
 
 #### `pull_status_cmd`
 
-- **stdin**: Full `Project` serialized as JSON (same as `rf export --format json`).
+- **stdin**: Full `Project` serialized as JSON (same as `rktb export --format json`).
 - **stdout**: `PullStatusResponse` JSON object:
 
 ```json

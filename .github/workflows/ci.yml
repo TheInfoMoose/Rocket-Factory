@@ -59,19 +59,19 @@ jobs:
       - name: Build release binary
         run: |
           cargo build --release --locked
-          test -x target/release/rf
+          test -x target/release/rktb
 
       - name: Install from git checkout
         run: |
-          cargo install --git "file://${GITHUB_WORKSPACE}" --rev "$(git rev-parse HEAD)" --locked --root "${RUNNER_TEMP}/rf-install"
+          cargo install --git "file://${GITHUB_WORKSPACE}" --rev "$(git rev-parse HEAD)" --locked --root "${RUNNER_TEMP}/rktb-install"
 
-      - name: Smoke-test installed rf binary
+      - name: Smoke-test installed rktb binary
         run: |
-          RF_BIN="${RUNNER_TEMP}/rf-install/bin/rf"
+          RKTB_BIN="${RUNNER_TEMP}/rktb-install/bin/rktb"
           WS="${RUNNER_TEMP}/smoke-ws"
           mkdir -p "$WS"
-          "$RF_BIN" --help
-          "$RF_BIN" --path "$WS" init --name "smoke-test" --description "Linux CI smoke test"
-          "$RF_BIN" --path "$WS" audit --strict
-          "$RF_BIN" --path "$WS" export --format json
-          "$RF_BIN" --path "$WS" export --format roadmap
+          "$RKTB_BIN" --help
+          "$RKTB_BIN" --path "$WS" init --name "smoke-test" --description "Linux CI smoke test"
+          "$RKTB_BIN" --path "$WS" audit --strict
+          "$RKTB_BIN" --path "$WS" export --format json
+          "$RKTB_BIN" --path "$WS" export --format roadmap
