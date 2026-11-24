@@ -11,15 +11,15 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::storage::{save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR};
 use crate::tui::app::{App, SyncRequest};
 use crate::tui::ui;
 
 pub type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
-fn terminal_io_err(source: io::Error) -> RfError {
-    RfError::Io {
+fn terminal_io_err(source: io::Error) -> RbError {
+    RbError::Io {
         path: PathBuf::from("<terminal>"),
         source,
     }
@@ -44,7 +44,7 @@ pub fn install_panic_hook() {
     }));
 }
 
-pub fn enter_terminal() -> RfResult<TuiTerminal> {
+pub fn enter_terminal() -> RbResult<TuiTerminal> {
     enable_raw_mode().map_err(terminal_io_err)?;
     if let Err(err) = execute!(io::stdout(), EnterAlternateScreen) {
         let _ = disable_raw_mode();
@@ -58,7 +58,7 @@ pub fn enter_terminal() -> RfResult<TuiTerminal> {
     })
 }
 
-pub fn restore_terminal(terminal: &mut TuiTerminal) -> RfResult<()> {
+pub fn restore_terminal(terminal: &mut TuiTerminal) -> RbResult<()> {
     disable_raw_mode().map_err(terminal_io_err)?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen).map_err(terminal_io_err)?;
     terminal.show_cursor().map_err(terminal_io_err)?;
@@ -76,7 +76,7 @@ fn parse_editor_command(editor_value: Option<&str>) -> (String, Vec<String>) {
     ("vi".to_string(), Vec::new())
 }
 
-pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RfResult<()> {
+pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RbResult<()> {
     restore_terminal(terminal)?;
 
     let editor_env = std::env::var("EDITOR").ok();
@@ -88,13 +88,13 @@ pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RfRes
     execute!(terminal.backend_mut(), EnterAlternateScreen).map_err(terminal_io_err)?;
     terminal.clear().map_err(terminal_io_err)?;
 
-    let status = status_res.map_err(|source| RfError::Io {
+    let status = status_res.map_err(|source| RbError::Io {
         path: file_path.to_path_buf(),
         source,
     })?;
 
     if !status.success() {
-        return Err(RfError::Io {
+        return Err(RbError::Io {
             path: file_path.to_path_buf(),
             source: io::Error::other(format!("editor '{program}' exited with status {status}")),
         });
@@ -105,7 +105,7 @@ pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RfRes
 
 fn process_pending_editor_with<F>(app: &mut App, mut run_editor: F)
 where
-    F: FnMut(&Path) -> RfResult<()>,
+    F: FnMut(&Path) -> RbResult<()>,
 {
     let Some(comp_id) = app.pending_editor_component.take() else {
         return;
@@ -180,7 +180,7 @@ fn process_pending_sync(app: &mut App, adapters_path: &Path) {
     }
 }
 
-fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RfResult<App> {
+fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RbResult<App> {
     let project = crate::storage::load_project(root)?;
     let theme = crate::theme::resolve_theme(&project.config.theme, theme_dirs)?;
     let mut app = App::new(root.to_path_buf(), project, theme);
@@ -193,7 +193,7 @@ pub fn run_tui(
     theme_dirs: &[PathBuf],
     adapters_path: &Path,
     poll_interval: Option<Duration>,
-) -> RfResult<()> {
+) -> RbResult<()> {
     let mut app = build_tui_app(root, theme_dirs)?;
 
     if !app.project.config.active_adapters.is_empty() {
@@ -215,7 +215,7 @@ fn run_event_loop(
     app: &mut App,
     adapters_path: &Path,
     poll_interval: Option<Duration>,
-) -> RfResult<()> {
+) -> RbResult<()> {
     let mut last_poll = Instant::now();
 
     loop {
@@ -364,7 +364,7 @@ mod tests {
                 std::fs::canonicalize(&expected_md).expect("canonical md")
             );
             std::fs::write(path, "# Updated Blueprint\n\nNew details.\n").map_err(|source| {
-                RfError::Io {
+                RbError::Io {
                     path: path.to_path_buf(),
                     source,
                 }
@@ -442,7 +442,7 @@ mod tests {
         app.pending_editor_component = Some("auth_svc".to_string());
 
         process_pending_editor_with(&mut app, |path| {
-            Err(RfError::Io {
+            Err(RbError::Io {
                 path: path.to_path_buf(),
                 source: io::Error::other("simulated editor failure"),
             })

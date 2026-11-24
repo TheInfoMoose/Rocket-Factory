@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::export::{export_component_manifest_toml, export_project_json, export_roadmap_markdown};
 use crate::model::{Component, ExternalTaskRef, FeatureItem, Project};
 
@@ -78,21 +78,21 @@ pub struct FeaturePushSummary {
     pub modified: bool,
 }
 
-pub fn load_adapters_file(path: &Path) -> RfResult<AdaptersFile> {
+pub fn load_adapters_file(path: &Path) -> RbResult<AdaptersFile> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(AdaptersFile::default());
         }
         Err(source) => {
-            return Err(RfError::Io {
+            return Err(RbError::Io {
                 path: path.to_path_buf(),
                 source,
             });
         }
     };
 
-    toml::from_str(&content).map_err(|source| RfError::TomlParse {
+    toml::from_str(&content).map_err(|source| RbError::TomlParse {
         path: path.to_path_buf(),
         source,
     })
@@ -101,14 +101,14 @@ pub fn load_adapters_file(path: &Path) -> RfResult<AdaptersFile> {
 pub fn resolve_active_adapters<'a>(
     file: &'a AdaptersFile,
     active_names: &[String],
-) -> RfResult<Vec<&'a AdapterConfig>> {
+) -> RbResult<Vec<&'a AdapterConfig>> {
     let mut resolved = Vec::with_capacity(active_names.len());
     for name in active_names {
         let adapter = file
             .adapters
             .iter()
             .find(|adapter| adapter.name == *name)
-            .ok_or_else(|| RfError::NotFound(format!("adapter '{name}'")))?;
+            .ok_or_else(|| RbError::NotFound(format!("adapter '{name}'")))?;
         resolved.push(adapter);
     }
     Ok(resolved)
@@ -147,7 +147,7 @@ fn run_command_with_stdin(
     spec: &CommandSpec,
     workdir: &Path,
     stdin_payload: &str,
-) -> RfResult<String> {
+) -> RbResult<String> {
     let mut child = Command::new(&spec.program)
         .args(&spec.args)
         .current_dir(workdir)
@@ -156,13 +156,13 @@ fn run_command_with_stdin(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
-            RfError::Adapter(format!("failed to spawn command '{}': {err}", spec.program))
+            RbError::Adapter(format!("failed to spawn command '{}': {err}", spec.program))
         })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(err) = stdin.write_all(stdin_payload.as_bytes()) {
             if err.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(RfError::Adapter(format!(
+                return Err(RbError::Adapter(format!(
                     "failed to write stdin to '{}': {err}",
                     spec.program
                 )));
@@ -171,14 +171,14 @@ fn run_command_with_stdin(
     }
 
     let output = child.wait_with_output().map_err(|err| {
-        RfError::Adapter(format!(
+        RbError::Adapter(format!(
             "failed to wait for command '{}': {err}",
             spec.program
         ))
     })?;
 
     if !output.status.success() {
-        return Err(RfError::Adapter(format!(
+        return Err(RbError::Adapter(format!(
             "command '{}' exited with {}: {}",
             spec.program,
             output.status,
@@ -189,7 +189,7 @@ fn run_command_with_stdin(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn parse_push_response(adapter_name: &str, stdout: &str) -> RfResult<PushResponse> {
+fn parse_push_response(adapter_name: &str, stdout: &str) -> RbResult<PushResponse> {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
         Ok(PushResponse {
@@ -198,7 +198,7 @@ fn parse_push_response(adapter_name: &str, stdout: &str) -> RfResult<PushRespons
         })
     } else {
         serde_json::from_str(trimmed).map_err(|err| {
-            RfError::Adapter(format!(
+            RbError::Adapter(format!(
                 "failed to parse push response from adapter '{adapter_name}': {err}"
             ))
         })
@@ -210,9 +210,9 @@ pub fn run_push_component(
     workdir: &Path,
     project: &Project,
     component_id: &str,
-) -> RfResult<PushResponse> {
+) -> RbResult<PushResponse> {
     let spec = adapter.push_component_cmd.as_ref().ok_or_else(|| {
-        RfError::Adapter(format!(
+        RbError::Adapter(format!(
             "adapter '{}' has no push_component_cmd",
             adapter.name
         ))
@@ -224,7 +224,7 @@ pub fn run_push_component(
         ExportFormat::Json => {
             let component = project
                 .component(component_id)
-                .ok_or_else(|| RfError::NotFound(component_id.to_string()))?;
+                .ok_or_else(|| RbError::NotFound(component_id.to_string()))?;
             serde_json::to_string_pretty(component)?
         }
     };
@@ -238,9 +238,9 @@ pub fn run_push_feature(
     workdir: &Path,
     component_id: &str,
     feature: &FeatureItem,
-) -> RfResult<PushResponse> {
+) -> RbResult<PushResponse> {
     let spec = adapter.push_feature_cmd.as_ref().ok_or_else(|| {
-        RfError::Adapter(format!(
+        RbError::Adapter(format!(
             "adapter '{}' has no push_feature_cmd",
             adapter.name
         ))
@@ -259,7 +259,7 @@ pub fn push_unpushed_features(
     adapters: &[&AdapterConfig],
     workdir: &Path,
     component: &mut Component,
-) -> RfResult<FeaturePushSummary> {
+) -> RbResult<FeaturePushSummary> {
     let feature_adapters: Vec<&AdapterConfig> = adapters
         .iter()
         .copied()
@@ -315,16 +315,16 @@ pub fn run_pull_status(
     adapter: &AdapterConfig,
     workdir: &Path,
     project: &Project,
-) -> RfResult<PullStatusResponse> {
+) -> RbResult<PullStatusResponse> {
     let spec = adapter.pull_status_cmd.as_ref().ok_or_else(|| {
-        RfError::Adapter(format!("adapter '{}' has no pull_status_cmd", adapter.name))
+        RbError::Adapter(format!("adapter '{}' has no pull_status_cmd", adapter.name))
     })?;
 
     let payload = export_project_json(project)?;
     let stdout = run_command_with_stdin(spec, workdir, &payload)?;
 
     serde_json::from_str(stdout.trim()).map_err(|err| {
-        RfError::Adapter(format!(
+        RbError::Adapter(format!(
             "failed to parse pull status response from adapter '{}': {err}",
             adapter.name
         ))
@@ -365,7 +365,7 @@ export_format = "json"
         assert_eq!(active[0].name, "tracker_b");
 
         let err = resolve_active_adapters(&file, &["unknown".to_string()]);
-        assert!(matches!(err, Err(RfError::NotFound(_))));
+        assert!(matches!(err, Err(RbError::NotFound(_))));
     }
 
     #[test]
@@ -527,7 +527,7 @@ export_format = "json"
 
         assert!(matches!(
             run_pull_status(&adapter, dir.path(), &project),
-            Err(RfError::Adapter(msg)) if msg.contains("boom")
+            Err(RbError::Adapter(msg)) if msg.contains("boom")
         ));
     }
 
@@ -622,7 +622,7 @@ export_format = "json"
         let err = push_unpushed_features(&[&adapter_ok, &adapter_fail], dir.path(), comp);
         assert!(matches!(
             err,
-            Err(RfError::Adapter(msg)) if msg.contains("second failed")
+            Err(RbError::Adapter(msg)) if msg.contains("second failed")
         ));
         assert!(!comp.features[0].pushed);
         assert!(comp.features[0].external_id.is_none());

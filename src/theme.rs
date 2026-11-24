@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbColor {
@@ -60,25 +60,25 @@ pub const DEFAULT_CRT_AMBER_RON: &str = r#"(
     ),
 )"#;
 
-pub fn default_theme() -> RfResult<Theme> {
-    ron::from_str(DEFAULT_CRT_AMBER_RON).map_err(|source| RfError::RonParse {
+pub fn default_theme() -> RbResult<Theme> {
+    ron::from_str(DEFAULT_CRT_AMBER_RON).map_err(|source| RbError::RonParse {
         path: PathBuf::from("<embedded:crt_amber>"),
         source,
     })
 }
 
-pub fn load_theme_file(path: &Path) -> RfResult<Theme> {
-    let content = std::fs::read_to_string(path).map_err(|source| RfError::Io {
+pub fn load_theme_file(path: &Path) -> RbResult<Theme> {
+    let content = std::fs::read_to_string(path).map_err(|source| RbError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    ron::from_str(&content).map_err(|source| RfError::RonParse {
+    ron::from_str(&content).map_err(|source| RbError::RonParse {
         path: path.to_path_buf(),
         source,
     })
 }
 
-pub fn validate_theme_name(name: &str) -> RfResult<()> {
+pub fn validate_theme_name(name: &str) -> RbResult<()> {
     if name.is_empty()
         || name.contains('/')
         || name.contains('\\')
@@ -87,12 +87,12 @@ pub fn validate_theme_name(name: &str) -> RfResult<()> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
-        return Err(RfError::PathEscape(PathBuf::from(name)));
+        return Err(RbError::PathEscape(PathBuf::from(name)));
     }
     Ok(())
 }
 
-pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RfResult<Theme> {
+pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RbResult<Theme> {
     validate_theme_name(theme_name)?;
 
     let filename = format!("{theme_name}.ron");
@@ -102,17 +102,17 @@ pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RfResult<Them
         }
         let candidate = dir.join(&filename);
         if candidate.is_file() {
-            let canon_dir = std::fs::canonicalize(dir).map_err(|source| RfError::Io {
+            let canon_dir = std::fs::canonicalize(dir).map_err(|source| RbError::Io {
                 path: dir.to_path_buf(),
                 source,
             })?;
             let canon_candidate =
-                std::fs::canonicalize(&candidate).map_err(|source| RfError::Io {
+                std::fs::canonicalize(&candidate).map_err(|source| RbError::Io {
                     path: candidate.clone(),
                     source,
                 })?;
             if !canon_candidate.starts_with(&canon_dir) {
-                return Err(RfError::PathEscape(candidate));
+                return Err(RbError::PathEscape(candidate));
             }
             return load_theme_file(&canon_candidate);
         }
@@ -120,7 +120,7 @@ pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RfResult<Them
     if theme_name == "crt_amber" {
         return default_theme();
     }
-    Err(RfError::NotFound(format!("theme '{theme_name}'")))
+    Err(RbError::NotFound(format!("theme '{theme_name}'")))
 }
 
 pub fn list_available_themes(search_dirs: &[PathBuf]) -> Vec<String> {
@@ -201,7 +201,7 @@ mod tests {
         for bad_name in ["../secret", "a/b", "a\\b", "", "foo.bar", "bad name"] {
             let err = resolve_theme(bad_name, &search_dirs).unwrap_err();
             assert!(
-                matches!(err, RfError::PathEscape(_)),
+                matches!(err, RbError::PathEscape(_)),
                 "expected PathEscape for '{bad_name}', got {err:?}"
             );
             assert!(validate_theme_name(bad_name).is_err());
@@ -225,7 +225,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside_file, &link_path).unwrap();
 
         let err = resolve_theme("escape", &[search_dir.path().to_path_buf()]).unwrap_err();
-        assert!(matches!(err, RfError::PathEscape(_)));
+        assert!(matches!(err, RbError::PathEscape(_)));
 
         let available = list_available_themes(&[search_dir.path().to_path_buf()]);
         assert_eq!(available, vec!["crt_amber".to_string()]);

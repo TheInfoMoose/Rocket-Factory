@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
-pub enum RfError {
+pub enum RbError {
     #[error("I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -45,4 +45,4 @@ pub enum RfError {
     Adapter(String),
 }
 
-pub type RfResult<T> = std::result::Result<T, RfError>;
+pub type RbResult<T> = std::result::Result<T, RbError>;

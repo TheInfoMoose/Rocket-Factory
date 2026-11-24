@@ -2,14 +2,14 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::model::{Component, GridConfig, Project, ProjectConfig};
 
 pub const ROCKET_DIR: &str = ".rocket";
 pub const PROJECT_FILE: &str = "project.toml";
 pub const COMPONENTS_DIR: &str = "components";
 
-pub fn validate_component_id(id: &str) -> RfResult<()> {
+pub fn validate_component_id(id: &str) -> RbResult<()> {
     if id.is_empty()
         || id.len() > 64
         || id.starts_with('-')
@@ -17,20 +17,20 @@ pub fn validate_component_id(id: &str) -> RfResult<()> {
             .bytes()
             .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'))
     {
-        return Err(RfError::InvalidComponentId(id.to_string()));
+        return Err(RbError::InvalidComponentId(id.to_string()));
     }
     Ok(())
 }
 
-fn atomic_write(path: &Path, contents: &str) -> RfResult<()> {
-    let parent = path.parent().ok_or_else(|| RfError::Io {
+fn atomic_write(path: &Path, contents: &str) -> RbResult<()> {
+    let parent = path.parent().ok_or_else(|| RbError::Io {
         path: path.to_path_buf(),
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent"),
     })?;
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| RfError::Io {
+        .ok_or_else(|| RbError::Io {
             path: path.to_path_buf(),
             source: std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -50,7 +50,7 @@ fn atomic_write(path: &Path, contents: &str) -> RfResult<()> {
 
     if let Err(source) = write_result {
         let _ = fs::remove_file(&tmp_path);
-        return Err(RfError::Io {
+        return Err(RbError::Io {
             path: tmp_path,
             source,
         });
@@ -58,7 +58,7 @@ fn atomic_write(path: &Path, contents: &str) -> RfResult<()> {
 
     if let Err(source) = fs::rename(&tmp_path, path) {
         let _ = fs::remove_file(&tmp_path);
-        return Err(RfError::Io {
+        return Err(RbError::Io {
             path: path.to_path_buf(),
             source,
         });
@@ -67,36 +67,36 @@ fn atomic_write(path: &Path, contents: &str) -> RfResult<()> {
     Ok(())
 }
 
-fn ensure_contained(base: &Path, candidate: &Path) -> RfResult<PathBuf> {
-    let canon_base = fs::canonicalize(base).map_err(|source| RfError::Io {
+fn ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf> {
+    let canon_base = fs::canonicalize(base).map_err(|source| RbError::Io {
         path: base.to_path_buf(),
         source,
     })?;
 
     let parent = candidate
         .parent()
-        .ok_or_else(|| RfError::PathEscape(candidate.to_path_buf()))?;
-    let canon_parent = fs::canonicalize(parent).map_err(|source| RfError::Io {
+        .ok_or_else(|| RbError::PathEscape(candidate.to_path_buf()))?;
+    let canon_parent = fs::canonicalize(parent).map_err(|source| RbError::Io {
         path: parent.to_path_buf(),
         source,
     })?;
 
     if !canon_parent.starts_with(&canon_base) {
-        return Err(RfError::PathEscape(candidate.to_path_buf()));
+        return Err(RbError::PathEscape(candidate.to_path_buf()));
     }
 
     let file_name = candidate
         .file_name()
-        .ok_or_else(|| RfError::PathEscape(candidate.to_path_buf()))?;
+        .ok_or_else(|| RbError::PathEscape(candidate.to_path_buf()))?;
     let resolved = canon_parent.join(file_name);
 
     if resolved.exists() {
-        let canon_target = fs::canonicalize(&resolved).map_err(|source| RfError::Io {
+        let canon_target = fs::canonicalize(&resolved).map_err(|source| RbError::Io {
             path: resolved,
             source,
         })?;
         if !canon_target.starts_with(&canon_base) {
-            return Err(RfError::PathEscape(candidate.to_path_buf()));
+            return Err(RbError::PathEscape(candidate.to_path_buf()));
         }
         return Ok(canon_target);
     }
@@ -104,16 +104,16 @@ fn ensure_contained(base: &Path, candidate: &Path) -> RfResult<PathBuf> {
     Ok(resolved)
 }
 
-pub fn init_workspace(root: &Path, name: &str, description: &str) -> RfResult<Project> {
+pub fn init_workspace(root: &Path, name: &str, description: &str) -> RbResult<Project> {
     let rocket_dir = root.join(ROCKET_DIR);
     let project_path = rocket_dir.join(PROJECT_FILE);
 
     if project_path.exists() {
-        return Err(RfError::AlreadyExists(project_path.display().to_string()));
+        return Err(RbError::AlreadyExists(project_path.display().to_string()));
     }
 
     let components_dir = rocket_dir.join(COMPONENTS_DIR);
-    fs::create_dir_all(&components_dir).map_err(|source| RfError::Io {
+    fs::create_dir_all(&components_dir).map_err(|source| RbError::Io {
         path: components_dir,
         source,
     })?;
@@ -135,7 +135,7 @@ pub fn init_workspace(root: &Path, name: &str, description: &str) -> RfResult<Pr
     })
 }
 
-pub fn save_project_config(root: &Path, config: &ProjectConfig) -> RfResult<()> {
+pub fn save_project_config(root: &Path, config: &ProjectConfig) -> RbResult<()> {
     let rocket_dir = root.join(ROCKET_DIR);
     let project_path = rocket_dir.join(PROJECT_FILE);
     let safe_path = ensure_contained(&rocket_dir, &project_path)?;
@@ -143,7 +143,7 @@ pub fn save_project_config(root: &Path, config: &ProjectConfig) -> RfResult<()> 
     atomic_write(&safe_path, &serialized)
 }
 
-pub fn save_component(root: &Path, component: &Component) -> RfResult<()> {
+pub fn save_component(root: &Path, component: &Component) -> RbResult<()> {
     validate_component_id(&component.id)?;
 
     let components_dir = root.join(ROCKET_DIR).join(COMPONENTS_DIR);
@@ -162,7 +162,7 @@ pub fn save_component(root: &Path, component: &Component) -> RfResult<()> {
     Ok(())
 }
 
-pub fn delete_component(root: &Path, id: &str) -> RfResult<()> {
+pub fn delete_component(root: &Path, id: &str) -> RbResult<()> {
     validate_component_id(id)?;
 
     let components_dir = root.join(ROCKET_DIR).join(COMPONENTS_DIR);
@@ -172,10 +172,10 @@ pub fn delete_component(root: &Path, id: &str) -> RfResult<()> {
     match fs::remove_file(&toml_path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(RfError::NotFound(id.to_string()));
+            return Err(RbError::NotFound(id.to_string()));
         }
         Err(source) => {
-            return Err(RfError::Io {
+            return Err(RbError::Io {
                 path: toml_path,
                 source,
             });
@@ -186,7 +186,7 @@ pub fn delete_component(root: &Path, id: &str) -> RfResult<()> {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => {
-            return Err(RfError::Io {
+            return Err(RbError::Io {
                 path: md_path,
                 source,
             });
@@ -196,17 +196,17 @@ pub fn delete_component(root: &Path, id: &str) -> RfResult<()> {
     Ok(())
 }
 
-pub fn load_project(root: &Path) -> RfResult<Project> {
+pub fn load_project(root: &Path) -> RbResult<Project> {
     let rocket_dir = root.join(ROCKET_DIR);
     let project_path = rocket_dir.join(PROJECT_FILE);
 
     let project_raw = match fs::read_to_string(&project_path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(RfError::NotFound(project_path.display().to_string()));
+            return Err(RbError::NotFound(project_path.display().to_string()));
         }
         Err(source) => {
-            return Err(RfError::Io {
+            return Err(RbError::Io {
                 path: project_path,
                 source,
             });
@@ -214,7 +214,7 @@ pub fn load_project(root: &Path) -> RfResult<Project> {
     };
 
     let config: ProjectConfig =
-        toml::from_str(&project_raw).map_err(|source| RfError::TomlParse {
+        toml::from_str(&project_raw).map_err(|source| RbError::TomlParse {
             path: project_path,
             source,
         })?;
@@ -229,7 +229,7 @@ pub fn load_project(root: &Path) -> RfResult<Project> {
             });
         }
         Err(source) => {
-            return Err(RfError::Io {
+            return Err(RbError::Io {
                 path: components_dir,
                 source,
             });
@@ -238,7 +238,7 @@ pub fn load_project(root: &Path) -> RfResult<Project> {
 
     let mut toml_files: Vec<(std::ffi::OsString, PathBuf)> = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|source| RfError::Io {
+        let entry = entry.map_err(|source| RbError::Io {
             path: components_dir.clone(),
             source,
         })?;
@@ -251,12 +251,12 @@ pub fn load_project(root: &Path) -> RfResult<Project> {
 
     let mut components = Vec::with_capacity(toml_files.len());
     for (_, path) in toml_files {
-        let raw = fs::read_to_string(&path).map_err(|source| RfError::Io {
+        let raw = fs::read_to_string(&path).map_err(|source| RbError::Io {
             path: path.clone(),
             source,
         })?;
         let mut component: Component =
-            toml::from_str(&raw).map_err(|source| RfError::TomlParse {
+            toml::from_str(&raw).map_err(|source| RbError::TomlParse {
                 path: path.clone(),
                 source,
             })?;
@@ -270,7 +270,7 @@ pub fn load_project(root: &Path) -> RfResult<Project> {
             Ok(body) => body,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(source) => {
-                return Err(RfError::Io {
+                return Err(RbError::Io {
                     path: md_path,
                     source,
                 });
@@ -342,7 +342,7 @@ mod tests {
         assert!(load_project(dir.path()).unwrap().components.is_empty());
         assert!(matches!(
             delete_component(dir.path(), "stream_1"),
-            Err(RfError::NotFound(_))
+            Err(RbError::NotFound(_))
         ));
     }
 }

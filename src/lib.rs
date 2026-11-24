@@ -9,4 +9,4 @@ pub mod storage;
 pub mod theme;
 pub mod tui;
 
-pub use error::{RfError, RfResult};
+pub use error::{RbError, RbResult};

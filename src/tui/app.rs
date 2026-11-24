@@ -9,7 +9,7 @@ use crate::adapter::{
 };
 use crate::archetype::{scaffold_component, scaffold_sub_component};
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::model::{
     CardStatus, Component, ComponentKind, Connection, EdgeKind, FeatureItem, GridConfig, GridPos,
     Project,
@@ -129,25 +129,25 @@ impl App {
         self.status_message = format!("Zoom: {}", self.viewport.zoom.label());
     }
 
-    pub fn reload_component_markdown(&mut self, component_id: &str) -> RfResult<()> {
+    pub fn reload_component_markdown(&mut self, component_id: &str) -> RbResult<()> {
         validate_component_id(component_id)?;
 
         let components_dir = self.root.join(ROCKET_DIR).join(COMPONENTS_DIR);
         let md_path = components_dir.join(format!("{component_id}.md"));
 
-        let canon_dir = std::fs::canonicalize(&components_dir).map_err(|source| RfError::Io {
+        let canon_dir = std::fs::canonicalize(&components_dir).map_err(|source| RbError::Io {
             path: components_dir,
             source,
         })?;
-        let canon_md = std::fs::canonicalize(&md_path).map_err(|source| RfError::Io {
+        let canon_md = std::fs::canonicalize(&md_path).map_err(|source| RbError::Io {
             path: md_path,
             source,
         })?;
         if !canon_md.starts_with(&canon_dir) {
-            return Err(RfError::PathEscape(canon_md));
+            return Err(RbError::PathEscape(canon_md));
         }
 
-        let body = std::fs::read_to_string(&canon_md).map_err(|source| RfError::Io {
+        let body = std::fs::read_to_string(&canon_md).map_err(|source| RbError::Io {
             path: canon_md,
             source,
         })?;
@@ -155,7 +155,7 @@ impl App {
         let comp = self
             .project
             .component_mut(component_id)
-            .ok_or_else(|| RfError::NotFound(component_id.to_string()))?;
+            .ok_or_else(|| RbError::NotFound(component_id.to_string()))?;
         let comp_name = comp.name.clone();
         comp.markdown_body = body;
 
@@ -164,7 +164,7 @@ impl App {
         Ok(())
     }
 
-    pub fn sync_pull(&mut self, adapters_path: &Path) -> RfResult<String> {
+    pub fn sync_pull(&mut self, adapters_path: &Path) -> RbResult<String> {
         if self.project.config.active_adapters.is_empty() {
             let msg = "No active adapters configured".to_string();
             self.status_message = msg.clone();
@@ -219,7 +219,7 @@ impl App {
         Ok(summary_msg)
     }
 
-    pub fn sync_push_selected(&mut self, adapters_path: &Path) -> RfResult<String> {
+    pub fn sync_push_selected(&mut self, adapters_path: &Path) -> RbResult<String> {
         let Some(comp_id) = self.selected_component().map(|c| c.id.clone()) else {
             let msg = "No component selected to push".to_string();
             self.status_message = msg.clone();

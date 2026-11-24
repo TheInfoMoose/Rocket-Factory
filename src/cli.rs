@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::adapter;
 use crate::audit::{self, FindingSeverity};
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::export;
 use crate::storage;
 
@@ -73,7 +73,7 @@ pub fn default_adapters_path() -> PathBuf {
     }
 }
 
-pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> RfResult<CliOutput> {
+pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> RbResult<CliOutput> {
     match command {
         Command::Init { name, description } => {
             storage::init_workspace(root, &name, &description)?;
@@ -115,7 +115,7 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
             let stdout = match format {
                 ExportKind::Manifest => {
                     let id = component.ok_or_else(|| {
-                        RfError::NotFound(
+                        RbError::NotFound(
                             "export --format manifest requires --component <id>".into(),
                         )
                     })?;
@@ -143,7 +143,7 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
             let target_ids: Vec<String> = match component {
                 Some(id) => {
                     if project.component(&id).is_none() {
-                        return Err(RfError::NotFound(format!("component '{id}'")));
+                        return Err(RbError::NotFound(format!("component '{id}'")));
                     }
                     vec![id]
                 }

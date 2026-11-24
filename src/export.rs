@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use serde::Serialize;
 
-use crate::error::{RfError, RfResult};
+use crate::error::{RbError, RbResult};
 use crate::model::{ComponentKind, EdgeKind, Project};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -42,10 +42,10 @@ pub fn map_component_type(kind: ComponentKind) -> &'static str {
     }
 }
 
-pub fn export_component_manifest_toml(project: &Project, component_id: &str) -> RfResult<String> {
+pub fn export_component_manifest_toml(project: &Project, component_id: &str) -> RbResult<String> {
     let component = project
         .component(component_id)
-        .ok_or_else(|| RfError::NotFound(format!("component `{component_id}`")))?;
+        .ok_or_else(|| RbError::NotFound(format!("component `{component_id}`")))?;
 
     let dependencies = project
         .config
@@ -113,7 +113,7 @@ pub fn export_roadmap_markdown(project: &Project) -> String {
     out
 }
 
-pub fn export_project_json(project: &Project) -> RfResult<String> {
+pub fn export_project_json(project: &Project) -> RbResult<String> {
     Ok(serde_json::to_string_pretty(project)?)
 }
 
