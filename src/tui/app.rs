@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::adapter::{
-    load_adapters_file, push_unpushed_features, reconcile_status, resolve_active_adapters,
-    run_pull_status, run_push_component,
-};
+use crate::adapter::{sync_pull_project, sync_push_project};
 use crate::archetype::{scaffold_component, scaffold_sub_component};
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
 use crate::error::{RbError, RbResult};
@@ -171,47 +168,16 @@ impl App {
             return Ok(msg);
         }
 
-        let adapters_file = load_adapters_file(adapters_path)?;
-        let active_adapters =
-            resolve_active_adapters(&adapters_file, &self.project.config.active_adapters)?;
-
-        let mut candidate = self.project.clone();
-        let mut components_updated = 0usize;
-        let mut tasks_synced = 0usize;
-        let mut features_linked = 0usize;
-        let mut updated_ids: Vec<String> = Vec::new();
-
-        for active in &active_adapters {
-            if active.pull_status_cmd.is_some() {
-                let resp = run_pull_status(active, &self.root, &candidate)?;
-                let summary = reconcile_status(&mut candidate, &resp);
-                components_updated += summary.components_updated;
-                tasks_synced += summary.tasks_synced;
-                features_linked += summary.features_linked;
-
-                for entry in &resp.components {
-                    if candidate.component(&entry.component_id).is_some()
-                        && !updated_ids.contains(&entry.component_id)
-                    {
-                        updated_ids.push(entry.component_id.clone());
-                    }
-                }
-            }
-        }
-
-        for comp_id in &updated_ids {
-            if let Some(comp) = candidate.component(comp_id) {
-                save_component(&self.root, comp)?;
-            }
-        }
-
-        self.project = candidate;
+        let report = sync_pull_project(&mut self.project, &self.root, adapters_path, None)?;
         self.refresh_audit();
         self.clamp_selection();
 
         let summary_msg = format!(
-            "Synced {} adapter(s): {components_updated} component(s) updated, {tasks_synced} task(s) synced, {features_linked} feature(s) linked",
-            active_adapters.len()
+            "Synced {} adapter(s): {} component(s) updated, {} task(s) synced, {} feature(s) linked",
+            report.adapters_count,
+            report.components_updated,
+            report.tasks_synced,
+            report.features_linked
         );
         self.status_message = summary_msg.clone();
         Ok(summary_msg)
@@ -230,44 +196,23 @@ impl App {
             return Ok(msg);
         }
 
-        validate_component_id(&comp_id)?;
-
-        let adapters_file = load_adapters_file(adapters_path)?;
-        let active_adapters =
-            resolve_active_adapters(&adapters_file, &self.project.config.active_adapters)?;
-
-        let mut candidate = self.project.clone();
-        let mut components_pushed = 0usize;
-        let mut features_pushed = 0usize;
-        let mut modified = false;
-
-        for active in &active_adapters {
-            if active.push_component_cmd.is_some() {
-                run_push_component(active, &self.root, &candidate, &comp_id)?;
-                components_pushed += 1;
-            }
-        }
-
-        if let Some(comp) = candidate.component_mut(&comp_id) {
-            let summary = push_unpushed_features(&active_adapters, &self.root, comp)?;
-            features_pushed += summary.features_pushed;
-            modified = summary.modified;
-        }
-
-        if modified {
-            if let Some(comp) = candidate.component(&comp_id) {
-                save_component(&self.root, comp)?;
-            }
-        }
-
-        self.project = candidate;
+        let report = sync_push_project(
+            &mut self.project,
+            &self.root,
+            adapters_path,
+            std::slice::from_ref(&comp_id),
+            None,
+        )?;
         self.refresh_audit();
         self.clamp_selection();
 
-        let summary_msg = format!(
-            "Pushed {comp_id}: {components_pushed} component(s), {features_pushed} feature(s) across {} adapter(s)",
-            active_adapters.len()
+        let mut summary_msg = format!(
+            "Pushed {comp_id}: {} component(s), {} feature(s) across {} adapter(s)",
+            report.components_pushed, report.features_pushed, report.adapters_count
         );
+        if let Some(details) = report.format_responses() {
+            summary_msg.push_str(&format!(" [{details}]"));
+        }
         self.status_message = summary_msg.clone();
         Ok(summary_msg)
     }

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{RbError, RbResult};
 use crate::export::{export_component_manifest_toml, export_project_json, export_roadmap_markdown};
 use crate::model::{Component, ExternalTaskRef, FeatureItem, Project};
+use crate::storage::{save_component, validate_component_id};
 
 pub const DEFAULT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 pub const MAX_COMMAND_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
@@ -83,6 +85,42 @@ pub struct FeaturePushSummary {
     pub modified: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PullSyncReport {
+    pub adapters_count: usize,
+    pub components_updated: usize,
+    pub tasks_synced: usize,
+    pub features_linked: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PushSyncReport {
+    pub adapters_count: usize,
+    pub components_pushed: usize,
+    pub features_pushed: usize,
+    pub responses: Vec<PushResponse>,
+}
+
+impl PushSyncReport {
+    pub fn format_responses(&self) -> Option<String> {
+        let parts: Vec<String> = self
+            .responses
+            .iter()
+            .filter_map(|resp| match (&resp.external_id, &resp.message) {
+                (Some(id), Some(msg)) if !msg.is_empty() => Some(format!("{id}: {msg}")),
+                (Some(id), _) => Some(id.clone()),
+                (None, Some(msg)) if !msg.is_empty() => Some(msg.clone()),
+                _ => None,
+            })
+            .collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        }
+    }
+}
+
 pub fn load_adapters_file(path: &Path) -> RbResult<AdaptersFile> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -121,20 +159,41 @@ pub fn resolve_active_adapters<'a>(
 
 pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) -> ReconcileSummary {
     let mut summary = ReconcileSummary::default();
+    let mut updated_components: HashSet<String> = HashSet::new();
 
     for entry in &response.components {
         let Some(component) = project.component_mut(&entry.component_id) else {
             continue;
         };
 
-        component.external_tasks = entry.tasks.clone();
-        summary.components_updated += 1;
+        updated_components.insert(entry.component_id.clone());
+
+        for incoming in &entry.tasks {
+            if let Some(existing) = component
+                .external_tasks
+                .iter_mut()
+                .find(|task| task.external_id == incoming.external_id)
+            {
+                *existing = incoming.clone();
+            } else {
+                component.external_tasks.push(incoming.clone());
+            }
+        }
         summary.tasks_synced += entry.tasks.len();
 
         for feature in &mut component.features {
             let matched_task = match feature.external_id.as_deref() {
                 Some(ext_id) => entry.tasks.iter().find(|task| task.external_id == ext_id),
-                None => entry.tasks.iter().find(|task| task.title == feature.title),
+                None => {
+                    let mut matches = entry
+                        .tasks
+                        .iter()
+                        .filter(|task| task.title == feature.title);
+                    match (matches.next(), matches.next()) {
+                        (Some(only), None) => Some(only),
+                        _ => None,
+                    }
+                }
             };
 
             if let Some(task) = matched_task {
@@ -145,6 +204,7 @@ pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) ->
         }
     }
 
+    summary.components_updated = updated_components.len();
     summary
 }
 
@@ -343,7 +403,12 @@ fn run_command_with_limits(
             )));
         }
 
-        Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
+        String::from_utf8(stdout_bytes).map_err(|err| {
+            RbError::Adapter(format!(
+                "command '{}' emitted invalid UTF-8 on stdout: {err}",
+                spec.program
+            ))
+        })
     })
 }
 
@@ -390,15 +455,14 @@ pub fn run_push_component(
         ))
     })?;
 
+    let component = project
+        .component(component_id)
+        .ok_or_else(|| RbError::NotFound(component_id.to_string()))?;
+
     let payload = match adapter.export_format {
         ExportFormat::TomlManifest => export_component_manifest_toml(project, component_id)?,
         ExportFormat::MarkdownRoadmap => export_roadmap_markdown(project),
-        ExportFormat::Json => {
-            let component = project
-                .component(component_id)
-                .ok_or_else(|| RbError::NotFound(component_id.to_string()))?;
-            serde_json::to_string_pretty(component)?
-        }
+        ExportFormat::Json => serde_json::to_string_pretty(component)?,
     };
 
     let stdout = run_command_with_stdin(spec, workdir, &payload)?;
@@ -427,10 +491,12 @@ pub fn run_push_feature(
     parse_push_response(&adapter.name, &stdout)
 }
 
-pub fn push_unpushed_features(
+fn push_unpushed_features_with_responses(
     adapters: &[&AdapterConfig],
     workdir: &Path,
     component: &mut Component,
+    responses: &mut Vec<PushResponse>,
+    modified_out: &mut bool,
 ) -> RbResult<FeaturePushSummary> {
     let feature_adapters: Vec<&AdapterConfig> = adapters
         .iter()
@@ -452,28 +518,28 @@ pub fn push_unpushed_features(
     }
 
     let mut features_pushed = 0usize;
-    let mut recorded_external_ids: Vec<Option<String>> = vec![None; unpushed_indices.len()];
+    let mut modified = false;
 
-    for (slot, &feat_idx) in unpushed_indices.iter().enumerate() {
+    for &feat_idx in &unpushed_indices {
+        let mut recorded_external_id: Option<String> = None;
         if let Some(feature) = component.features.get(feat_idx) {
             for active in &feature_adapters {
                 let resp = run_push_feature(active, workdir, &component.id, feature)?;
                 features_pushed += 1;
-                if recorded_external_ids[slot].is_none() {
-                    recorded_external_ids[slot] = resp.external_id;
+                if recorded_external_id.is_none() {
+                    recorded_external_id = resp.external_id.clone();
                 }
+                responses.push(resp);
             }
         }
-    }
 
-    let mut modified = false;
-    for (&feat_idx, ext_id) in unpushed_indices.iter().zip(recorded_external_ids) {
         if let Some(feature) = component.features.get_mut(feat_idx) {
             feature.pushed = true;
-            if let Some(ext_id) = ext_id {
+            if let Some(ext_id) = recorded_external_id {
                 feature.external_id = Some(ext_id);
             }
             modified = true;
+            *modified_out = true;
         }
     }
 
@@ -483,23 +549,212 @@ pub fn push_unpushed_features(
     })
 }
 
-pub fn run_pull_status(
+pub fn push_unpushed_features(
+    adapters: &[&AdapterConfig],
+    workdir: &Path,
+    component: &mut Component,
+) -> RbResult<FeaturePushSummary> {
+    let mut responses = Vec::new();
+    let mut modified = false;
+    push_unpushed_features_with_responses(
+        adapters,
+        workdir,
+        component,
+        &mut responses,
+        &mut modified,
+    )
+}
+
+fn run_pull_status_with_payload(
     adapter: &AdapterConfig,
     workdir: &Path,
-    project: &Project,
+    payload: &str,
 ) -> RbResult<PullStatusResponse> {
     let spec = adapter.pull_status_cmd.as_ref().ok_or_else(|| {
         RbError::Adapter(format!("adapter '{}' has no pull_status_cmd", adapter.name))
     })?;
 
-    let payload = export_project_json(project)?;
-    let stdout = run_command_with_stdin(spec, workdir, &payload)?;
+    let stdout = run_command_with_stdin(spec, workdir, payload)?;
 
     serde_json::from_str(stdout.trim()).map_err(|err| {
         RbError::Adapter(format!(
             "failed to parse pull status response from adapter '{}': {err}",
             adapter.name
         ))
+    })
+}
+
+pub fn run_pull_status(
+    adapter: &AdapterConfig,
+    workdir: &Path,
+    project: &Project,
+) -> RbResult<PullStatusResponse> {
+    let payload = export_project_json(project)?;
+    run_pull_status_with_payload(adapter, workdir, &payload)
+}
+
+pub fn sync_pull_project(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    adapter_filter: Option<&str>,
+) -> RbResult<PullSyncReport> {
+    if adapters_path.as_os_str().is_empty() {
+        return Err(RbError::InvalidArgument(
+            "no adapters file configured; set HOME or pass --adapters-file".into(),
+        ));
+    }
+
+    let adapters_file = load_adapters_file(adapters_path)?;
+    let adapter_names: Vec<String> = match adapter_filter {
+        Some(name) => vec![name.to_string()],
+        None => project.config.active_adapters.clone(),
+    };
+    let active_adapters = resolve_active_adapters(&adapters_file, &adapter_names)?;
+
+    let pull_adapters: Vec<&AdapterConfig> = active_adapters
+        .iter()
+        .copied()
+        .filter(|active| active.pull_status_cmd.is_some())
+        .collect();
+
+    if pull_adapters.is_empty() {
+        return Ok(PullSyncReport {
+            adapters_count: active_adapters.len(),
+            ..PullSyncReport::default()
+        });
+    }
+
+    let payload = export_project_json(project)?;
+    let mut responses = Vec::with_capacity(pull_adapters.len());
+    for active in &pull_adapters {
+        responses.push(run_pull_status_with_payload(active, root, &payload)?);
+    }
+
+    let mut updated_ids: HashSet<String> = HashSet::new();
+    let mut updated_indices: Vec<usize> = Vec::new();
+    for resp in &responses {
+        for entry in &resp.components {
+            if let Some(idx) = project
+                .components
+                .iter()
+                .position(|comp| comp.id == entry.component_id)
+            {
+                if updated_ids.insert(entry.component_id.clone()) {
+                    updated_indices.push(idx);
+                }
+            }
+        }
+    }
+
+    let backups: Vec<(usize, Vec<ExternalTaskRef>, Vec<FeatureItem>)> = updated_indices
+        .iter()
+        .map(|&idx| {
+            let comp = &project.components[idx];
+            (idx, comp.external_tasks.clone(), comp.features.clone())
+        })
+        .collect();
+
+    let mut tasks_synced = 0usize;
+    let mut features_linked = 0usize;
+    for resp in &responses {
+        let summary = reconcile_status(project, resp);
+        tasks_synced += summary.tasks_synced;
+        features_linked += summary.features_linked;
+    }
+
+    for (pos, &idx) in updated_indices.iter().enumerate() {
+        if let Err(err) = save_component(root, &project.components[idx]) {
+            for (restore_idx, prev_tasks, prev_features) in backups.into_iter().skip(pos) {
+                project.components[restore_idx].external_tasks = prev_tasks;
+                project.components[restore_idx].features = prev_features;
+            }
+            return Err(err);
+        }
+    }
+
+    Ok(PullSyncReport {
+        adapters_count: active_adapters.len(),
+        components_updated: updated_ids.len(),
+        tasks_synced,
+        features_linked,
+    })
+}
+
+pub fn sync_push_project(
+    project: &mut Project,
+    root: &Path,
+    adapters_path: &Path,
+    component_ids: &[String],
+    adapter_filter: Option<&str>,
+) -> RbResult<PushSyncReport> {
+    if adapters_path.as_os_str().is_empty() {
+        return Err(RbError::InvalidArgument(
+            "no adapters file configured; set HOME or pass --adapters-file".into(),
+        ));
+    }
+
+    let adapters_file = load_adapters_file(adapters_path)?;
+    let adapter_names: Vec<String> = match adapter_filter {
+        Some(name) => vec![name.to_string()],
+        None => project.config.active_adapters.clone(),
+    };
+    let active_adapters = resolve_active_adapters(&adapters_file, &adapter_names)?;
+
+    for comp_id in component_ids {
+        validate_component_id(comp_id)?;
+        if project.component(comp_id).is_none() {
+            return Err(RbError::NotFound(format!("component '{comp_id}'")));
+        }
+    }
+
+    let mut components_pushed = 0usize;
+    let mut features_pushed = 0usize;
+    let mut responses = Vec::new();
+
+    for comp_id in component_ids {
+        for active in &active_adapters {
+            if active.push_component_cmd.is_some() {
+                let resp = run_push_component(active, root, project, comp_id)?;
+                responses.push(resp);
+                components_pushed += 1;
+            }
+        }
+
+        if let Some(comp) = project.component_mut(comp_id) {
+            let mut modified = false;
+            match push_unpushed_features_with_responses(
+                &active_adapters,
+                root,
+                comp,
+                &mut responses,
+                &mut modified,
+            ) {
+                Ok(summary) => {
+                    features_pushed += summary.features_pushed;
+                    if summary.modified {
+                        save_component(root, comp)?;
+                    }
+                }
+                Err(err) => {
+                    if modified {
+                        if let Err(save_err) = save_component(root, comp) {
+                            return Err(RbError::Adapter(format!(
+                                "{err}; additionally failed to persist partial push progress: {save_err}"
+                            )));
+                        }
+                    }
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    Ok(PushSyncReport {
+        adapters_count: active_adapters.len(),
+        components_pushed,
+        features_pushed,
+        responses,
     })
 }
 
@@ -858,5 +1113,214 @@ export_format = "json"
             err,
             Err(RbError::Adapter(msg)) if msg.contains("output exceeded")
         ));
+    }
+
+    #[test]
+    fn reconcile_status_merges_multi_adapter_tasks_without_clobbering() {
+        let mut project = sample_project();
+        project
+            .component_mut("view_box")
+            .unwrap()
+            .features
+            .push(FeatureItem {
+                id: "f2".to_string(),
+                title: "Ambiguous title".to_string(),
+                pushed: false,
+                external_id: None,
+            });
+
+        let response_a = PullStatusResponse {
+            components: vec![
+                PulledComponentStatus {
+                    component_id: "view_box".to_string(),
+                    tasks: vec![ExternalTaskRef {
+                        external_id: "A-1".to_string(),
+                        title: "Draw box".to_string(),
+                        status: TaskStatus::InProgress,
+                    }],
+                },
+                PulledComponentStatus {
+                    component_id: "view_box".to_string(),
+                    tasks: vec![
+                        ExternalTaskRef {
+                            external_id: "A-2".to_string(),
+                            title: "Ambiguous title".to_string(),
+                            status: TaskStatus::Pending,
+                        },
+                        ExternalTaskRef {
+                            external_id: "A-3".to_string(),
+                            title: "Ambiguous title".to_string(),
+                            status: TaskStatus::Pending,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let summary_a = reconcile_status(&mut project, &response_a);
+        assert_eq!(summary_a.components_updated, 1);
+        assert_eq!(summary_a.tasks_synced, 3);
+        assert_eq!(summary_a.features_linked, 1);
+
+        let response_b = PullStatusResponse {
+            components: vec![PulledComponentStatus {
+                component_id: "view_box".to_string(),
+                tasks: vec![
+                    ExternalTaskRef {
+                        external_id: "A-1".to_string(),
+                        title: "Draw box".to_string(),
+                        status: TaskStatus::Complete,
+                    },
+                    ExternalTaskRef {
+                        external_id: "B-1".to_string(),
+                        title: "Secondary tracker task".to_string(),
+                        status: TaskStatus::Blocked,
+                    },
+                ],
+            }],
+        };
+
+        let summary_b = reconcile_status(&mut project, &response_b);
+        assert_eq!(summary_b.components_updated, 1);
+        assert_eq!(summary_b.tasks_synced, 2);
+
+        let comp = project.component("view_box").unwrap();
+        assert_eq!(comp.external_tasks.len(), 4);
+        assert_eq!(
+            comp.external_tasks
+                .iter()
+                .find(|t| t.external_id == "A-1")
+                .unwrap()
+                .status,
+            TaskStatus::Complete
+        );
+        assert!(comp.external_tasks.iter().any(|t| t.external_id == "B-1"));
+        assert!(comp.features[0].pushed);
+        assert_eq!(comp.features[0].external_id.as_deref(), Some("A-1"));
+        assert!(!comp.features[1].pushed);
+        assert!(comp.features[1].external_id.is_none());
+    }
+
+    #[test]
+    fn push_unpushed_features_records_partial_progress_on_failure() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("push.log");
+        let mut project = sample_project();
+        let comp = project.component_mut("view_box").unwrap();
+        comp.features.push(FeatureItem {
+            id: "f2".to_string(),
+            title: "Render border".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+
+        let adapter_no_id = AdapterConfig {
+            name: "tracker_empty".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec!["-c".into(), "cat >/dev/null".into()],
+            }),
+            pull_status_cmd: None,
+        };
+
+        let adapter_flaky = AdapterConfig {
+            name: "tracker_flaky".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    format!(
+                        "payload=$(cat); printf '%s\\n' \"$payload\" >> '{}'; case \"$payload\" in *'\"f2\"'*) echo f2 failed >&2; exit 2 ;; *) printf '{{\"external_id\":\"F-1\"}}' ;; esac",
+                        log_path.display()
+                    ),
+                ],
+            }),
+            pull_status_cmd: None,
+        };
+
+        let err = push_unpushed_features(&[&adapter_no_id, &adapter_flaky], dir.path(), comp);
+        assert!(matches!(
+            err,
+            Err(RbError::Adapter(msg)) if msg.contains("f2 failed")
+        ));
+
+        // Feature #1 was pushed and retains secondary adapter's external_id
+        assert!(comp.features[0].pushed);
+        assert_eq!(comp.features[0].external_id.as_deref(), Some("F-1"));
+        assert!(!comp.features[1].pushed);
+        assert!(comp.features[1].external_id.is_none());
+
+        // Retry with succeeding adapter skips feature #1 and pushes only feature #2
+        let retry_log = dir.path().join("retry.log");
+        let adapter_ok = AdapterConfig {
+            name: "tracker_ok".to_string(),
+            export_format: ExportFormat::Json,
+            push_component_cmd: None,
+            push_feature_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    format!(
+                        "cat >> '{}' && printf '{{\"external_id\":\"F-2\"}}'",
+                        retry_log.display()
+                    ),
+                ],
+            }),
+            pull_status_cmd: None,
+        };
+
+        let summary = push_unpushed_features(&[&adapter_ok], dir.path(), comp).unwrap();
+        assert_eq!(summary.features_pushed, 1);
+        assert!(summary.modified);
+        assert!(comp.features[1].pushed);
+        assert_eq!(comp.features[1].external_id.as_deref(), Some("F-2"));
+
+        let retry_payload = std::fs::read_to_string(&retry_log).unwrap();
+        assert!(!retry_payload.contains("\"f1\""));
+        assert!(retry_payload.contains("\"f2\""));
+    }
+
+    #[test]
+    fn run_command_rejects_invalid_utf8_stdout() {
+        let dir = tempdir().unwrap();
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "printf '\\377\\376'".into()],
+        };
+
+        let err = run_command_with_limits(
+            &spec,
+            dir.path(),
+            "",
+            Duration::from_secs(5),
+            MAX_COMMAND_OUTPUT_BYTES,
+        );
+        assert!(matches!(
+            err,
+            Err(RbError::Adapter(msg)) if msg.contains("invalid UTF-8")
+        ));
+    }
+
+    #[test]
+    fn run_push_component_markdown_roadmap_requires_existing_component() {
+        let dir = tempdir().unwrap();
+        let project = sample_project();
+        let adapter = AdapterConfig {
+            name: "roadmap_tracker".to_string(),
+            export_format: ExportFormat::MarkdownRoadmap,
+            push_component_cmd: Some(CommandSpec {
+                program: "sh".into(),
+                args: vec!["-c".into(), "cat >/dev/null".into()],
+            }),
+            push_feature_cmd: None,
+            pull_status_cmd: None,
+        };
+
+        let err = run_push_component(&adapter, dir.path(), &project, "missing_comp");
+        assert!(matches!(err, Err(RbError::NotFound(_))));
     }
 }

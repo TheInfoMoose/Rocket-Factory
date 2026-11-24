@@ -148,96 +148,46 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
         }
         Command::Push { component, adapter } => {
             let mut project = storage::load_project(root)?;
-            if adapters_path.as_os_str().is_empty() {
-                return Err(RbError::InvalidArgument(
-                    "no adapters file configured; set HOME or pass --adapters-file".into(),
-                ));
-            }
-            let adapters_file = adapter::load_adapters_file(adapters_path)?;
-
-            let adapter_names: Vec<String> = match adapter {
-                Some(name) => vec![name],
-                None => project.config.active_adapters.clone(),
-            };
-            let active_adapters = adapter::resolve_active_adapters(&adapters_file, &adapter_names)?;
-
             let target_ids: Vec<String> = match component {
-                Some(id) => {
-                    if project.component(&id).is_none() {
-                        return Err(RbError::NotFound(format!("component '{id}'")));
-                    }
-                    vec![id]
-                }
+                Some(id) => vec![id],
                 None => project.components.iter().map(|c| c.id.clone()).collect(),
             };
 
-            let mut components_pushed = 0usize;
-            let mut features_pushed = 0usize;
+            let report = adapter::sync_push_project(
+                &mut project,
+                root,
+                adapters_path,
+                &target_ids,
+                adapter.as_deref(),
+            )?;
 
-            for comp_id in &target_ids {
-                for active in &active_adapters {
-                    if active.push_component_cmd.is_some() {
-                        adapter::run_push_component(active, root, &project, comp_id)?;
-                        components_pushed += 1;
-                    }
-                }
-
-                if let Some(comp) = project.component_mut(comp_id) {
-                    let summary = adapter::push_unpushed_features(&active_adapters, root, comp)?;
-                    features_pushed += summary.features_pushed;
-                    if summary.modified {
-                        storage::save_component(root, comp)?;
-                    }
-                }
+            let mut stdout = format!(
+                "Pushed {} component(s) and {} feature(s) across {} adapter(s).\n",
+                report.components_pushed, report.features_pushed, report.adapters_count
+            );
+            if let Some(details) = report.format_responses() {
+                stdout.push_str("Adapter responses: ");
+                stdout.push_str(&details);
+                stdout.push('\n');
             }
 
             Ok(CliOutput {
-                stdout: format!(
-                    "Pushed {components_pushed} component(s) and {features_pushed} feature(s) across {} adapter(s).\n",
-                    active_adapters.len()
-                ),
+                stdout,
                 exit_code: 0,
             })
         }
         Command::Pull { adapter } => {
             let mut project = storage::load_project(root)?;
-            if adapters_path.as_os_str().is_empty() {
-                return Err(RbError::InvalidArgument(
-                    "no adapters file configured; set HOME or pass --adapters-file".into(),
-                ));
-            }
-            let adapters_file = adapter::load_adapters_file(adapters_path)?;
-
-            let adapter_names: Vec<String> = match adapter {
-                Some(name) => vec![name],
-                None => project.config.active_adapters.clone(),
-            };
-            let active_adapters = adapter::resolve_active_adapters(&adapters_file, &adapter_names)?;
-
-            let mut components_updated = 0usize;
-            let mut tasks_synced = 0usize;
-            let mut features_linked = 0usize;
-
-            for active in &active_adapters {
-                if active.pull_status_cmd.is_some() {
-                    let resp = adapter::run_pull_status(active, root, &project)?;
-                    let summary = adapter::reconcile_status(&mut project, &resp);
-                    components_updated += summary.components_updated;
-                    tasks_synced += summary.tasks_synced;
-                    features_linked += summary.features_linked;
-
-                    for entry in &resp.components {
-                        if let Some(comp) = project.component(&entry.component_id) {
-                            storage::save_component(root, comp)?;
-                        }
-                    }
-                }
-            }
+            let report =
+                adapter::sync_pull_project(&mut project, root, adapters_path, adapter.as_deref())?;
 
             Ok(CliOutput {
                 stdout: format!(
-                    "Pulled status from {} adapter(s): {components_updated} component(s) updated, {tasks_synced} task(s) synced, {features_linked} feature(s) linked.\n",
-                    active_adapters.len()
+                    "Pulled status from {} adapter(s): {} component(s) updated, {} task(s) synced, {} feature(s) linked.\n",
+                    report.adapters_count,
+                    report.components_updated,
+                    report.tasks_synced,
+                    report.features_linked
                 ),
                 exit_code: 0,
             })
