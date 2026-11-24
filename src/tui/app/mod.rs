@@ -623,6 +623,17 @@ mod tests {
         assert_eq!(app.mode, InputMode::Connect);
         assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
 
+        // Action key 'v' is ignored while in Connect mode
+        app.handle_key(key(KeyCode::Char('v')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
+        assert!(app.pending_editor_component.is_none());
+
+        // Returning to Navigate via Esc allows 'v' to queue $EDITOR
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.connect_source_id.is_none());
+
         app.handle_key(key(KeyCode::Char('v')));
         assert_eq!(app.mode, InputMode::Navigate);
         assert!(app.connect_source_id.is_none());
@@ -634,6 +645,15 @@ mod tests {
         let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
         app.handle_key(key(KeyCode::Char('c')));
         assert_eq!(app.mode, InputMode::Connect);
+
+        // Sync key 'r' is ignored while in Connect mode
+        app.handle_key(key(KeyCode::Char('r')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(app.pending_sync, None);
+
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.connect_source_id.is_none());
 
         app.handle_key(key(KeyCode::Char('r')));
         assert_eq!(app.mode, InputMode::Navigate);
@@ -990,12 +1010,25 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         let theme = default_theme().expect("default theme");
         let mut app = App::new(dir.path().to_path_buf(), project, theme);
 
-        // Selected is alpha (index 0). 'D' prefers outgoing alpha -> beta; cancel with Esc.
+        // Selected is alpha (index 0). 'D' presents all incident edges (outgoing alpha -> beta first, then incoming beta -> alpha); cancel with Esc.
         app.handle_key(key(KeyCode::Char('D')));
         assert_eq!(app.mode, InputMode::Modal);
         assert_eq!(
             app.modal,
-            Some(ModalState::confirm_delete_connection("alpha", "beta"))
+            Some(ModalState::confirm_delete_connections(vec![
+                Connection {
+                    from: "alpha".to_string(),
+                    to: "beta".to_string(),
+                    kind: EdgeKind::DependsOn,
+                    label: None,
+                },
+                Connection {
+                    from: "beta".to_string(),
+                    to: "alpha".to_string(),
+                    kind: EdgeKind::Invokes,
+                    label: None,
+                },
+            ]))
         );
         app.handle_key(key(KeyCode::Esc));
         assert_eq!(app.mode, InputMode::Navigate);
@@ -1019,7 +1052,12 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         app.handle_key(key(KeyCode::Char('D')));
         assert_eq!(
             app.modal,
-            Some(ModalState::confirm_delete_connection("beta", "alpha"))
+            Some(ModalState::confirm_delete_connections(vec![Connection {
+                from: "beta".to_string(),
+                to: "alpha".to_string(),
+                kind: EdgeKind::Invokes,
+                label: None,
+            }]))
         );
         app.handle_key(key(KeyCode::Enter));
         assert_eq!(app.mode, InputMode::Navigate);
@@ -1160,8 +1198,8 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
 
     #[test]
     fn app_noop_delete_in_connect_mode_preserves_connect_source() {
-        // 1. In InputMode::Connect with connect_source_id = Some("alpha") and no connections on
-        //    "alpha", pressing 'D' keeps Connect mode and connect_source_id untouched.
+        // 1. In InputMode::Connect with connect_source_id = Some("alpha"), pressing 'D' or 'd'
+        //    is ignored and keeps Connect mode and connect_source_id untouched.
         let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
         app.mode = InputMode::Connect;
         app.connect_source_id = Some("alpha".to_string());
@@ -1170,10 +1208,11 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         assert_eq!(app.mode, InputMode::Connect);
         assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
         assert!(app.modal.is_none());
-        assert_eq!(
-            app.status_message,
-            "No connection on selected component to delete"
-        );
+
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.mode, InputMode::Connect);
+        assert_eq!(app.connect_source_id.as_deref(), Some("alpha"));
+        assert!(app.modal.is_none());
 
         // 2. With an empty component list in InputMode::Connect and connect_source_id = Some("alpha"),
         //    pressing 'd' keeps Connect mode and connect_source_id untouched.
@@ -1185,9 +1224,12 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         assert_eq!(empty_app.mode, InputMode::Connect);
         assert_eq!(empty_app.connect_source_id.as_deref(), Some("alpha"));
         assert!(empty_app.modal.is_none());
-        assert_eq!(empty_app.status_message, "No component selected to delete");
 
-        // 3. Pressing 'd' when a component IS selected clears connect_source_id and enters Modal.
+        // 3. Returning to Navigate via Esc allows 'd' to open ConfirmDelete modal.
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.connect_source_id.is_none());
+
         app.handle_key(key(KeyCode::Char('d')));
         assert_eq!(app.mode, InputMode::Modal);
         assert!(app.connect_source_id.is_none());
@@ -2338,5 +2380,134 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
                 .as_deref(),
             Some("parent_svc")
         );
+    }
+
+    #[test]
+    fn multi_edge_edit_and_delete_select_non_first_edge() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Multi Edge", "Cycle edit and delete edges")
+            .expect("init workspace");
+
+        let mut alpha = make_component("alpha");
+        alpha.position = GridPos { col: 0, row: 0 };
+        let mut beta = make_component("beta");
+        beta.position = GridPos { col: 1, row: 0 };
+        let mut gamma = make_component("gamma");
+        gamma.position = GridPos { col: 2, row: 0 };
+        save_component(dir.path(), &alpha).expect("save alpha");
+        save_component(dir.path(), &beta).expect("save beta");
+        save_component(dir.path(), &gamma).expect("save gamma");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections = vec![
+            Connection {
+                from: "alpha".to_string(),
+                to: "beta".to_string(),
+                kind: EdgeKind::DependsOn,
+                label: Some("orig".to_string()),
+            },
+            Connection {
+                from: "alpha".to_string(),
+                to: "gamma".to_string(),
+                kind: EdgeKind::DataFlow,
+                label: None,
+            },
+        ];
+        save_project_config(dir.path(), &project.config).expect("save config");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Selected is alpha (index 0). Press E, cycle to alpha -> gamma via ], set label, submit.
+        assert_eq!(app.selected_component().expect("alpha").id, "alpha");
+        app.handle_key(key(KeyCode::Char('E')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Char(']')));
+        app.handle_key(key(KeyCode::Tab)); // move to Label field
+        for ch in "stream".chars() {
+            app.handle_key(key(KeyCode::Char(ch)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.config.connections.len(), 2);
+        assert_eq!(app.project.config.connections[0].to, "beta");
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::DependsOn);
+        assert_eq!(
+            app.project.config.connections[0].label.as_deref(),
+            Some("orig")
+        );
+        assert_eq!(app.project.config.connections[1].to, "gamma");
+        assert_eq!(app.project.config.connections[1].kind, EdgeKind::DataFlow);
+        assert_eq!(
+            app.project.config.connections[1].label.as_deref(),
+            Some("stream")
+        );
+
+        // Press D, cycle to alpha -> gamma via Down, confirm with y -> alpha -> gamma deleted, alpha -> beta remains.
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Char('y')));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.modal.is_none());
+        assert_eq!(app.project.config.connections.len(), 1);
+        assert_eq!(app.project.config.connections[0].from, "alpha");
+        assert_eq!(app.project.config.connections[0].to, "beta");
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::DependsOn);
+    }
+
+    #[test]
+    fn action_keys_are_ignored_in_move_card_and_connect_modes() {
+        let mut app = make_app(vec![make_component("alpha"), make_component("beta")]);
+        app.project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DependsOn,
+            label: None,
+        });
+
+        let guarded_keys = ['n', 'e', 'E', 'd', 'D', 'v', 'r', 'p', 't', 'f', '?'];
+
+        // MoveCard mode
+        app.handle_key(key(KeyCode::Char('m')));
+        assert_eq!(app.mode, InputMode::MoveCard);
+        for ch in guarded_keys {
+            app.handle_key(key(KeyCode::Char(ch)));
+            assert_eq!(
+                app.mode,
+                InputMode::MoveCard,
+                "key '{ch}' should not leave MoveCard mode"
+            );
+            assert!(
+                app.modal.is_none(),
+                "key '{ch}' should not open modal in MoveCard mode"
+            );
+        }
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
+
+        // Connect mode
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.mode, InputMode::Connect);
+        for ch in guarded_keys {
+            app.handle_key(key(KeyCode::Char(ch)));
+            assert_eq!(
+                app.mode,
+                InputMode::Connect,
+                "key '{ch}' should not leave Connect mode"
+            );
+            assert!(
+                app.modal.is_none(),
+                "key '{ch}' should not open modal in Connect mode"
+            );
+        }
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.mode, InputMode::Navigate);
     }
 }

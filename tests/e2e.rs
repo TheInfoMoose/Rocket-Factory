@@ -1015,6 +1015,8 @@ fn e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics() {
 
     select_component_by_id(&mut app, "frontend");
     app.handle_key(key(KeyCode::Char('E')));
+    // frontend has two outgoing edges: frontend -> nav_header (Contains), frontend -> widget_lib (DependsOn)
+    app.handle_key(key(KeyCode::Char(']')));
     // EDGE_KINDS: DependsOn(0) -> DataFlow(1) -> Renders(2) -> Invokes(3) -> Contains(4)
     for _ in 0..4 {
         app.handle_key(key(KeyCode::Right));
@@ -1035,6 +1037,7 @@ fn e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics() {
     // 5. Drive `E` again on `frontend` to change Contains back to DependsOn and verify detachment
     select_component_by_id(&mut app, "frontend");
     app.handle_key(key(KeyCode::Char('E')));
+    app.handle_key(key(KeyCode::Char(']')));
     for _ in 0..4 {
         app.handle_key(key(KeyCode::Left));
     }

@@ -482,19 +482,27 @@ impl App {
             ModalAction::UpdateConnection {
                 from,
                 to,
+                original_kind,
                 kind,
                 label,
             } => {
                 let mut candidate_config = self.project.config.clone();
-                let Some(conn) = candidate_config
+                let pos = candidate_config
                     .connections
-                    .iter_mut()
-                    .find(|c| c.from == from && c.to == to)
-                else {
+                    .iter()
+                    .position(|c| c.from == from && c.to == to && c.kind == original_kind)
+                    .or_else(|| {
+                        candidate_config
+                            .connections
+                            .iter()
+                            .position(|c| c.from == from && c.to == to)
+                    });
+                let Some(pos) = pos else {
                     self.mode = InputMode::Navigate;
                     self.status_message = format!("Connection {from} -> {to} not found");
                     return;
                 };
+                let conn = &mut candidate_config.connections[pos];
 
                 let prev_kind = conn.kind;
                 if kind == EdgeKind::Contains && self.is_descendant_of(&from, &to) {
@@ -748,12 +756,12 @@ impl App {
                 self.mode = InputMode::Navigate;
                 self.status_message = format!("Deleted component {id}");
             }
-            ModalAction::DeleteConnection { from, to } => {
+            ModalAction::DeleteConnection { from, to, kind } => {
                 let mut candidate_config = self.project.config.clone();
                 let Some(pos) = candidate_config
                     .connections
                     .iter()
-                    .position(|c| c.from == from && c.to == to)
+                    .position(|c| c.from == from && c.to == to && kind.is_none_or(|k| c.kind == k))
                 else {
                     self.mode = InputMode::Navigate;
                     self.status_message = format!("Connection {from} -> {to} not found");
@@ -844,8 +852,8 @@ impl App {
             KeyCode::BackTab => self.cycle_focus_prev(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_in(),
             KeyCode::Char('-') => self.zoom_out(),
-            KeyCode::Char('f') => self.toggle_gaps_filter(),
-            KeyCode::Char('n') => {
+            KeyCode::Char('f') if self.mode == InputMode::Navigate => self.toggle_gaps_filter(),
+            KeyCode::Char('n') if self.mode == InputMode::Navigate => {
                 self.connect_source_id = None;
                 self.modal = Some(ModalState::new_component());
                 self.mode = InputMode::Modal;
@@ -863,7 +871,7 @@ impl App {
                     self.status_message = "No parent component selected".to_string();
                 }
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('e') if self.mode == InputMode::Navigate => {
                 if let Some(comp) = self.selected_component() {
                     let name = comp.name.clone();
                     self.modal = Some(ModalState::edit_component(comp));
@@ -874,27 +882,34 @@ impl App {
                     self.status_message = "No component selected to edit".to_string();
                 }
             }
-            KeyCode::Char('E') => {
+            KeyCode::Char('E') if self.mode == InputMode::Navigate => {
                 if let Some(comp) = self.selected_component() {
                     let comp_id = comp.id.clone();
                     let comp_name = comp.name.clone();
-                    if let Some(conn) = self
+                    let outgoing: Vec<Connection> = self
                         .project
                         .config
                         .connections
                         .iter()
-                        .rfind(|c| c.from == comp_id)
-                    {
-                        self.modal = Some(ModalState::edit_connection(
-                            &conn.from,
-                            &conn.to,
-                            conn.kind,
-                            conn.label.as_deref(),
-                        ));
+                        .filter(|c| c.from == comp_id)
+                        .cloned()
+                        .collect();
+                    if let Some(first) = outgoing.first() {
+                        let status = format!("Editing connection {} -> {}", first.from, first.to);
+                        let modal = if outgoing.len() > 1 {
+                            ModalState::edit_connections(outgoing)
+                        } else {
+                            ModalState::edit_connection(
+                                &first.from,
+                                &first.to,
+                                first.kind,
+                                first.label.as_deref(),
+                            )
+                        };
+                        self.modal = Some(modal);
                         self.connect_source_id = None;
                         self.mode = InputMode::Modal;
-                        self.status_message =
-                            format!("Editing connection {} -> {}", conn.from, conn.to);
+                        self.status_message = status;
                     } else {
                         self.status_message =
                             format!("No outgoing connection from {comp_name} to edit");
@@ -903,7 +918,7 @@ impl App {
                     self.status_message = "No component selected".to_string();
                 }
             }
-            KeyCode::Char('d') => {
+            KeyCode::Char('d') if self.mode == InputMode::Navigate => {
                 if let Some(comp) = self.selected_component() {
                     let comp_id = comp.id.clone();
                     let comp_name = comp.name.clone();
@@ -926,31 +941,31 @@ impl App {
                     self.status_message = "No component selected to delete".to_string();
                 }
             }
-            KeyCode::Char('D') => {
+            KeyCode::Char('D') if self.mode == InputMode::Navigate => {
                 if let Some(comp_id) = self.selected_component().map(|c| c.id.clone()) {
-                    let target_conn = self
+                    let mut incident: Vec<Connection> = self
                         .project
                         .config
                         .connections
                         .iter()
-                        .find(|conn| conn.from == comp_id)
-                        .or_else(|| {
-                            self.project
-                                .config
-                                .connections
-                                .iter()
-                                .find(|conn| conn.to == comp_id)
-                        });
-                    if let Some(conn) = target_conn {
-                        let from = conn.from.clone();
-                        let to = conn.to.clone();
-                        self.modal = Some(ModalState::confirm_delete_connection(
-                            from.clone(),
-                            to.clone(),
-                        ));
+                        .filter(|conn| conn.from == comp_id)
+                        .cloned()
+                        .collect();
+                    incident.extend(
+                        self.project
+                            .config
+                            .connections
+                            .iter()
+                            .filter(|conn| conn.to == comp_id && conn.from != comp_id)
+                            .cloned(),
+                    );
+                    if let Some(first) = incident.first() {
+                        let status =
+                            format!("Confirm delete connection {} -> {}", first.from, first.to);
+                        self.modal = Some(ModalState::confirm_delete_connections(incident));
                         self.connect_source_id = None;
                         self.mode = InputMode::Modal;
-                        self.status_message = format!("Confirm delete connection {from} -> {to}");
+                        self.status_message = status;
                     } else {
                         self.status_message =
                             "No connection on selected component to delete".to_string();
@@ -970,7 +985,7 @@ impl App {
                     self.status_message = "Mode: Move Card".to_string();
                 }
             }
-            KeyCode::Char('c') => {
+            KeyCode::Char('c') if self.mode == InputMode::Navigate => {
                 if let Some(comp) = self.selected_component() {
                     let id = comp.id.clone();
                     let name = comp.name.clone();
@@ -983,7 +998,7 @@ impl App {
                     self.status_message = "No component selected to connect".to_string();
                 }
             }
-            KeyCode::Char('v') => {
+            KeyCode::Char('v') if self.mode == InputMode::Navigate => {
                 if let Some(comp) = self.selected_component() {
                     let id = comp.id.clone();
                     let name = comp.name.clone();
@@ -995,13 +1010,13 @@ impl App {
                     self.status_message = "No component selected to open in $EDITOR".to_string();
                 }
             }
-            KeyCode::Char('r') | KeyCode::Char('S') => {
+            KeyCode::Char('r') | KeyCode::Char('S') if self.mode == InputMode::Navigate => {
                 self.connect_source_id = None;
                 self.mode = InputMode::Navigate;
                 self.pending_sync = Some(SyncRequest::Pull);
                 self.status_message = "Syncing status from active adapters...".to_string();
             }
-            KeyCode::Char('p') => {
+            KeyCode::Char('p') if self.mode == InputMode::Navigate => {
                 self.connect_source_id = None;
                 self.mode = InputMode::Navigate;
                 if let Some(comp) = self.selected_component() {
@@ -1012,13 +1027,13 @@ impl App {
                     self.status_message = "No component selected to push".to_string();
                 }
             }
-            KeyCode::Char('?') => {
+            KeyCode::Char('?') if self.mode == InputMode::Navigate => {
                 self.connect_source_id = None;
                 self.modal = Some(ModalState::help());
                 self.mode = InputMode::Modal;
                 self.status_message = "Keyboard Help".to_string();
             }
-            KeyCode::Char('t') => {
+            KeyCode::Char('t') if self.mode == InputMode::Navigate => {
                 self.connect_source_id = None;
                 let themes = crate::theme::list_available_themes(&self.theme_dirs);
                 self.modal = Some(ModalState::theme_switcher(

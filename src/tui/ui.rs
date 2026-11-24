@@ -585,6 +585,31 @@ fn wrapped_line_count(lines: &[Line<'_>], inner_width: u16) -> u16 {
     u16::try_from(total).unwrap_or(u16::MAX)
 }
 
+fn truncate_text(text: &str, max_width: usize) -> String {
+    if Line::from(text).width() <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+    let target = max_width - 1;
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let ch_w = Line::from(ch.to_string()).width();
+        if used + ch_w > target {
+            break;
+        }
+        out.push(ch);
+        used += ch_w;
+    }
+    out.push('…');
+    out
+}
+
 fn modal_field_line(label: &str, value: &str, active: bool, theme: &Theme) -> Line<'static> {
     let prefix = if active { "> " } else { "  " };
     let field_style = if active {
@@ -694,15 +719,33 @@ fn render_modal(
             form.error.as_deref()
         }
         ModalState::EditConnection(form) => {
+            let max_text_w = usize::from(area.width.saturating_sub(4)).clamp(20, 74);
+            if form.candidates.len() > 1 {
+                let counter = format!(
+                    "({}/{})",
+                    form.selected_candidate + 1,
+                    form.candidates.len()
+                );
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "  Connection {counter} [{}]",
+                        edge_kind_label(form.original_kind)
+                    ),
+                    heading_style,
+                )));
+            }
+            let preview = sanitize_display_text(&edge_relationship_preview(
+                &form.from,
+                &form.to,
+                form.selected_kind(),
+            ));
+            let edge_prefix = "  Edge: ";
+            let truncated_preview = truncate_text(
+                &preview,
+                max_text_w.saturating_sub(edge_prefix.chars().count()),
+            );
             lines.push(Line::from(Span::styled(
-                format!(
-                    "  Edge: {}",
-                    sanitize_display_text(&edge_relationship_preview(
-                        &form.from,
-                        &form.to,
-                        form.selected_kind()
-                    ))
-                ),
+                format!("{edge_prefix}{truncated_preview}"),
                 muted,
             )));
             lines.push(modal_field_line(
@@ -711,9 +754,14 @@ fn render_modal(
                 form.active_field == 0,
                 theme,
             ));
+            let label_prefix_w = "> Label: ".chars().count();
+            let truncated_label = truncate_text(
+                &sanitize_display_text(&form.label),
+                max_text_w.saturating_sub(label_prefix_w),
+            );
             lines.push(modal_field_line(
                 "Label",
-                &form.label,
+                &truncated_label,
                 form.active_field == 1,
                 theme,
             ));
@@ -877,13 +925,32 @@ fn render_modal(
                         )));
                     }
                 }
-                ConfirmDeleteTarget::Connection { from, to } => {
+                ConfirmDeleteTarget::Connection {
+                    from,
+                    to,
+                    kind,
+                    candidates,
+                    selected_candidate,
+                } => {
+                    let max_text_w = usize::from(area.width.saturating_sub(4)).clamp(20, 74);
+                    if candidates.len() > 1 {
+                        let counter = format!("({}/{})", selected_candidate + 1, candidates.len());
+                        let kind_tag = kind
+                            .map(|k| format!(" [{}]", edge_kind_label(k)))
+                            .unwrap_or_default();
+                        lines.push(Line::from(Span::styled(
+                            format!("  Connection {counter}{kind_tag}"),
+                            heading_style,
+                        )));
+                    }
+                    let prompt = format!(
+                        "Delete connection '{} -> {}'?",
+                        sanitize_display_text(from),
+                        sanitize_display_text(to)
+                    );
+                    let truncated_prompt = truncate_text(&prompt, max_text_w.saturating_sub(2));
                     lines.push(Line::from(Span::styled(
-                        format!(
-                            "  Delete connection '{} -> {}'?",
-                            sanitize_display_text(from),
-                            sanitize_display_text(to)
-                        ),
+                        format!("  {truncated_prompt}"),
                         base.add_modifier(Modifier::BOLD),
                     )));
                 }
@@ -903,7 +970,15 @@ fn render_modal(
     let footer_hint = match modal {
         ModalState::Help => "  [Esc/?/Enter/q] Close",
         ModalState::ThemeSwitcher(_) => "  [↑/↓] Select  [Enter] Apply  [Esc] Cancel",
-        ModalState::ConfirmDelete(_) => "  [Enter/y] Confirm Delete  [Esc/n] Cancel",
+        ModalState::ConfirmDelete(form) => match &form.target {
+            ConfirmDeleteTarget::Connection { candidates, .. } if candidates.len() > 1 => {
+                "  [↑/↓] Select  [Enter/y] Confirm Delete  [Esc/n] Cancel"
+            }
+            _ => "  [Enter/y] Confirm Delete  [Esc/n] Cancel",
+        },
+        ModalState::EditConnection(form) if form.candidates.len() > 1 => {
+            "  [[/]] Edge  [Tab] Field  [←/→] Kind  [Enter] Save  [Esc] Cancel"
+        }
         ModalState::NewComponent(_)
         | ModalState::EditComponent(_)
         | ModalState::EditConnection(_) => "  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel",
@@ -1770,5 +1845,78 @@ mod tests {
         app.clamp_selection();
         assert_eq!(app.selected_index, 0);
         assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn render_multi_edge_modals_fit_at_80x24_with_long_names() {
+        use crate::model::{Connection, EdgeKind};
+
+        let long_a = "a".repeat(60);
+        let long_b = "b".repeat(60);
+        let long_c = "c".repeat(60);
+        let long_d = "d".repeat(60);
+        let candidates = vec![
+            Connection {
+                from: long_a.clone(),
+                to: long_b,
+                kind: EdgeKind::DependsOn,
+                label: Some("x".repeat(60)),
+            },
+            Connection {
+                from: long_a.clone(),
+                to: long_c,
+                kind: EdgeKind::DataFlow,
+                label: Some("y".repeat(60)),
+            },
+            Connection {
+                from: long_a,
+                to: long_d,
+                kind: EdgeKind::Invokes,
+                label: None,
+            },
+        ];
+
+        let mut app = make_test_app();
+        app.modal = Some(ModalState::edit_connections(candidates.clone()));
+        let backend_edit = TestBackend::new(80, 24);
+        let mut terminal_edit = Terminal::new(backend_edit).unwrap();
+        terminal_edit.draw(|frame| render(frame, &mut app)).unwrap();
+        let buf_edit = terminal_edit.backend().buffer();
+        let mut edit_text = String::new();
+        for y in 0..buf_edit.area.height {
+            for x in 0..buf_edit.area.width {
+                edit_text.push_str(buf_edit[(x, y)].symbol());
+            }
+            edit_text.push('\n');
+        }
+        assert!(
+            edit_text.contains("(1/3)"),
+            "expected (1/3) counter in EditConnection modal at 80x24:\n{edit_text}"
+        );
+        assert!(
+            edit_text.contains("[/]"),
+            "expected [/] cycling hint in EditConnection modal at 80x24:\n{edit_text}"
+        );
+
+        app.modal = Some(ModalState::confirm_delete_connections(candidates));
+        let backend_del = TestBackend::new(80, 24);
+        let mut terminal_del = Terminal::new(backend_del).unwrap();
+        terminal_del.draw(|frame| render(frame, &mut app)).unwrap();
+        let buf_del = terminal_del.backend().buffer();
+        let mut del_text = String::new();
+        for y in 0..buf_del.area.height {
+            for x in 0..buf_del.area.width {
+                del_text.push_str(buf_del[(x, y)].symbol());
+            }
+            del_text.push('\n');
+        }
+        assert!(
+            del_text.contains("(1/3)"),
+            "expected (1/3) counter in ConfirmDelete modal at 80x24:\n{del_text}"
+        );
+        assert!(
+            del_text.contains("↑/↓"),
+            "expected ↑/↓ cycling hint in ConfirmDelete modal at 80x24:\n{del_text}"
+        );
     }
 }

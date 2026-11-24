@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::archetype::{archetype_for, ArchetypeSpec, ARCHETYPES};
-use crate::model::{Component, ComponentKind, EdgeKind};
+use crate::model::{Component, ComponentKind, Connection, EdgeKind};
 use crate::storage::validate_component_id;
 
 pub const EDGE_KINDS: &[EdgeKind] = &[
@@ -105,8 +105,11 @@ impl EditComponentForm {
 pub struct EditConnectionForm {
     pub from: String,
     pub to: String,
+    pub original_kind: EdgeKind,
     pub kind_index: usize,
     pub label: String,
+    pub candidates: Vec<Connection>,
+    pub selected_candidate: usize,
     pub active_field: usize,
     pub error: Option<String>,
 }
@@ -119,6 +122,18 @@ impl EditConnectionForm {
             .get(self.kind_index)
             .copied()
             .unwrap_or(EdgeKind::DependsOn)
+    }
+
+    fn select_candidate(&mut self, index: usize) {
+        if let Some(conn) = self.candidates.get(index) {
+            self.selected_candidate = index;
+            self.from = conn.from.clone();
+            self.to = conn.to.clone();
+            self.original_kind = conn.kind;
+            self.kind_index = EDGE_KINDS.iter().position(|&k| k == conn.kind).unwrap_or(0);
+            self.label = conn.label.clone().unwrap_or_default();
+            self.error = None;
+        }
     }
 
     fn active_text_mut(&mut self) -> Option<&mut String> {
@@ -152,6 +167,9 @@ pub enum ConfirmDeleteTarget {
     Connection {
         from: String,
         to: String,
+        kind: Option<EdgeKind>,
+        candidates: Vec<Connection>,
+        selected_candidate: usize,
     },
 }
 
@@ -194,6 +212,7 @@ pub enum ModalAction {
     UpdateConnection {
         from: String,
         to: String,
+        original_kind: EdgeKind,
         kind: EdgeKind,
         label: Option<String>,
     },
@@ -206,6 +225,7 @@ pub enum ModalAction {
     DeleteConnection {
         from: String,
         to: String,
+        kind: Option<EdgeKind>,
     },
 }
 
@@ -273,12 +293,45 @@ impl ModalState {
     }
 
     pub fn edit_connection(from: &str, to: &str, kind: EdgeKind, label: Option<&str>) -> Self {
-        let kind_index = EDGE_KINDS.iter().position(|&k| k == kind).unwrap_or(0);
-        Self::EditConnection(EditConnectionForm {
+        Self::edit_connections(vec![Connection {
             from: from.to_string(),
             to: to.to_string(),
+            kind,
+            label: label.map(str::to_string),
+        }])
+    }
+
+    pub fn edit_connections(connections: Vec<Connection>) -> Self {
+        let (from, to, original_kind, kind_index, label) = if let Some(first) = connections.first()
+        {
+            let idx = EDGE_KINDS
+                .iter()
+                .position(|&k| k == first.kind)
+                .unwrap_or(0);
+            (
+                first.from.clone(),
+                first.to.clone(),
+                first.kind,
+                idx,
+                first.label.clone().unwrap_or_default(),
+            )
+        } else {
+            (
+                String::new(),
+                String::new(),
+                EdgeKind::DependsOn,
+                0,
+                String::new(),
+            )
+        };
+        Self::EditConnection(EditConnectionForm {
+            from,
+            to,
+            original_kind,
             kind_index,
-            label: label.unwrap_or_default().to_string(),
+            label,
+            candidates: connections,
+            selected_candidate: 0,
             active_field: 0,
             error: None,
         })
@@ -317,6 +370,27 @@ impl ModalState {
             target: ConfirmDeleteTarget::Connection {
                 from: from.into(),
                 to: to.into(),
+                kind: None,
+                candidates: Vec::new(),
+                selected_candidate: 0,
+            },
+            error: None,
+        })
+    }
+
+    pub fn confirm_delete_connections(connections: Vec<Connection>) -> Self {
+        let (from, to, kind) = if let Some(first) = connections.first() {
+            (first.from.clone(), first.to.clone(), Some(first.kind))
+        } else {
+            (String::new(), String::new(), None)
+        };
+        Self::ConfirmDelete(ConfirmDeleteForm {
+            target: ConfirmDeleteTarget::Connection {
+                from,
+                to,
+                kind,
+                candidates: connections,
+                selected_candidate: 0,
             },
             error: None,
         })
@@ -520,6 +594,16 @@ fn handle_edit_component_key(form: &mut EditComponentForm, key: KeyEvent) -> Mod
 
 fn handle_edit_connection_key(form: &mut EditConnectionForm, key: KeyEvent) -> ModalAction {
     match key.code {
+        KeyCode::Char('[') | KeyCode::PageUp if form.candidates.len() > 1 => {
+            let next = cycle_prev(form.selected_candidate, form.candidates.len());
+            form.select_candidate(next);
+            ModalAction::None
+        }
+        KeyCode::Char(']') | KeyCode::PageDown if form.candidates.len() > 1 => {
+            let next = cycle_next(form.selected_candidate, form.candidates.len());
+            form.select_candidate(next);
+            ModalAction::None
+        }
         KeyCode::Tab | KeyCode::Down => {
             form.active_field = cycle_next(form.active_field, EditConnectionForm::FIELD_COUNT);
             ModalAction::None
@@ -556,6 +640,7 @@ fn handle_edit_connection_key(form: &mut EditConnectionForm, key: KeyEvent) -> M
             ModalAction::UpdateConnection {
                 from: form.from.clone(),
                 to: form.to.clone(),
+                original_kind: form.original_kind,
                 kind: form.selected_kind(),
                 label,
             }
@@ -603,16 +688,63 @@ fn handle_theme_switcher_key(form: &mut ThemeSwitcherForm, key: KeyEvent) -> Mod
 
 fn handle_confirm_delete_key(form: &mut ConfirmDeleteForm, key: KeyEvent) -> ModalAction {
     match key.code {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Left | KeyCode::Char('[') => {
+            if let ConfirmDeleteTarget::Connection {
+                from,
+                to,
+                kind,
+                candidates,
+                selected_candidate,
+            } = &mut form.target
+            {
+                if candidates.len() > 1 {
+                    let next = cycle_prev(*selected_candidate, candidates.len());
+                    *selected_candidate = next;
+                    if let Some(conn) = candidates.get(next) {
+                        *from = conn.from.clone();
+                        *to = conn.to.clone();
+                        *kind = Some(conn.kind);
+                        form.error = None;
+                    }
+                }
+            }
+            ModalAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Right | KeyCode::Char(']') => {
+            if let ConfirmDeleteTarget::Connection {
+                from,
+                to,
+                kind,
+                candidates,
+                selected_candidate,
+            } = &mut form.target
+            {
+                if candidates.len() > 1 {
+                    let next = cycle_next(*selected_candidate, candidates.len());
+                    *selected_candidate = next;
+                    if let Some(conn) = candidates.get(next) {
+                        *from = conn.from.clone();
+                        *to = conn.to.clone();
+                        *kind = Some(conn.kind);
+                        form.error = None;
+                    }
+                }
+            }
+            ModalAction::None
+        }
         KeyCode::Enter | KeyCode::Char('y' | 'Y') => {
             form.error = None;
             match &form.target {
                 ConfirmDeleteTarget::Component { id, .. } => {
                     ModalAction::DeleteComponent { id: id.clone() }
                 }
-                ConfirmDeleteTarget::Connection { from, to } => ModalAction::DeleteConnection {
-                    from: from.clone(),
-                    to: to.clone(),
-                },
+                ConfirmDeleteTarget::Connection { from, to, kind, .. } => {
+                    ModalAction::DeleteConnection {
+                        from: from.clone(),
+                        to: to.clone(),
+                        kind: *kind,
+                    }
+                }
             }
         }
         KeyCode::Esc | KeyCode::Char('n' | 'N') => ModalAction::Cancel,
@@ -834,6 +966,7 @@ mod tests {
             ModalAction::UpdateConnection {
                 from: "stream_core".to_string(),
                 to: "ui_view".to_string(),
+                original_kind: EdgeKind::DependsOn,
                 kind: EdgeKind::DataFlow,
                 label: Some("events".to_string()),
             }
@@ -968,6 +1101,7 @@ mod tests {
             ModalAction::DeleteConnection {
                 from: "view_box".to_string(),
                 to: "data_stream".to_string(),
+                kind: None,
             }
         );
         assert_eq!(
@@ -975,6 +1109,7 @@ mod tests {
             ModalAction::DeleteConnection {
                 from: "view_box".to_string(),
                 to: "data_stream".to_string(),
+                kind: None,
             }
         );
         assert_eq!(
