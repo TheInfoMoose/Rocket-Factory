@@ -182,49 +182,49 @@ created_at = "2026-11-23T15:51:28Z"
 [[items.bugs]]
 id = "BUG-0026"
 title = "[BUG-03] UpdateComponent partial disk write lacks rollback"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:30Z"
 
 [[items.bugs]]
 id = "BUG-0027"
 title = "[BUG-04] UpdateComponent omits clamp_selection() under GapsOnly"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:31Z"
 
 [[items.bugs]]
 id = "BUG-0028"
 title = "[BUG-05] Disconnected parent_id cycle hides components from list and canvas"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:32Z"
 
 [[items.bugs]]
 id = "BUG-0029"
 title = "[BUG-06] confirm_connect ignores EdgeKind and deleting Contains leaves parent_id"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:34Z"
 
 [[items.bugs]]
 id = "BUG-0030"
 title = "[BUG-07] Unicode display width ignored in canvas.rs"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:35Z"
 
 [[items.bugs]]
 id = "BUG-0031"
 title = "[BUG-08] Overlapping edges/labels overwrite each other and blocked lx drops labels"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:36Z"
 
 [[items.bugs]]
 id = "BUG-0032"
 title = "[BUG-09] run_tui error masking and suspend_for_editor partial restore failure"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:50Z"
 
@@ -280,28 +280,28 @@ created_at = "2026-11-23T15:51:59Z"
 [[items.bugs]]
 id = "BUG-0040"
 title = "[BUG-17] Unclamped detail_scroll and stale offset on selection change"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:00Z"
 
 [[items.bugs]]
 id = "BUG-0041"
 title = "[BUG-18] E/D single-edge limit and inconsistent InputMode guards"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:01Z"
 
 [[items.bugs]]
 id = "BUG-0042"
 title = "[BUG-19] Non-atomic multi-file saves in collision shifting and child detachment"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:02Z"
 
 [[items.bugs]]
 id = "BUG-0043"
 title = "[BUG-20] Touching/overlapping card routing reversal and unchecked u16 + 1"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:03Z"
 
@@ -329,23 +329,44 @@ created_at = "2026-11-23T15:52:07Z"
 [[items.bugs]]
 id = "BUG-0054"
 title = "sync_pull_project / reconcile_status never prunes deleted external tasks"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T18:57:21Z"
 
 [[items.bugs]]
 id = "BUG-0055"
 title = "TUI sub-component creation triggers immediate HierarchyDrift audit warnings"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T18:57:22Z"
 
 [[items.bugs]]
 id = "BUG-0056"
 title = "audit_project skips grid-bounds checks for sub-components and misses cross-parent grid overlaps"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T18:57:22Z"
+
+[[items.bugs]]
+id = "BUG-0057"
+title = "Background async sync overwrites concurrent foreground disk edits with stale snapshot"
+status = "pending"
+severity = "high"
+created_at = "2026-11-24T21:22:28Z"
+
+[[items.bugs]]
+id = "BUG-0058"
+title = "EditConnectionForm '[' / ']' candidate cycling intercepts Label text input"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T21:22:28Z"
+
+[[items.bugs]]
+id = "BUG-0059"
+title = "step_event_loop blocks up to 100ms after draining SyncOutcome before redrawing"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T21:22:28Z"
 
 [[items.features]]
 id = "FEAT-0001"
@@ -903,14 +924,14 @@ created_at = "2026-11-23T15:52:41Z"
 [[items.tasks]]
 id = "TASK-0074"
 title = "[PERF-01] Move synchronous adapter subprocesses off UI thread via mpsc channel"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:43Z"
 
 [[items.tasks]]
 id = "TASK-0075"
 title = "[PERF-02] Eliminate redundant per-frame allocations and O(N^2) traversals in TUI render"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:44Z"
 
@@ -924,7 +945,7 @@ created_at = "2026-11-23T15:52:46Z"
 [[items.tasks]]
 id = "TASK-0077"
 title = "[PERF-04] Replace unconditional 10 Hz idle redraw with dirty flag and event draining"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:47Z"
 
@@ -1211,6 +1232,13 @@ created_at = "2026-11-24T19:11:20Z"
 [[items.tasks]]
 id = "TASK-0119"
 title = "Update tests/e2e.rs for multi-edge E modal candidate ordering"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-24T19:38:40Z"
+
+[[items.tasks]]
+id = "TASK-0120"
+title = "Add missing delete_component_rolls_back_detached_children_on_failure test from STEP 18C"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T21:22:28Z"

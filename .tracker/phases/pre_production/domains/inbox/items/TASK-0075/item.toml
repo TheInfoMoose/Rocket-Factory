@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0075"
 type = "task"
 title = "[PERF-02] Eliminate redundant per-frame allocations and O(N^2) traversals in TUI render"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:52:44Z"
-updated_at = "2026-11-23T15:52:44Z"
+updated_at = "2026-11-24T21:37:40Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "6fc49e4"
+summary = "Closed via neb CLI"
