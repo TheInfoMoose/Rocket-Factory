@@ -5,6 +5,7 @@ mod sync;
 
 pub(crate) use state::SyncRequest;
 pub use state::{App, FocusColumn, InputMode, ListFilter};
+pub(crate) use sync::{apply_sync_outcome, run_sync_job, SyncOutcome};
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
@@ -15,7 +16,7 @@ use crate::error::{RbError, RbResult};
 use crate::storage::{
     ensure_contained, save_component, validate_component_id, COMPONENTS_DIR, ROCKET_DIR,
 };
-use crate::tui::app::{App, SyncRequest};
+use crate::tui::app::{apply_sync_outcome, run_sync_job, App, SyncOutcome, SyncRequest};
 use crate::tui::ui;
 
 pub(crate) type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
@@ -61,10 +62,38 @@ pub(crate) fn enter_terminal() -> RbResult<TuiTerminal> {
 }
 
 pub(crate) fn restore_terminal(terminal: &mut TuiTerminal) -> RbResult<()> {
-    disable_raw_mode().map_err(terminal_io_err)?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).map_err(terminal_io_err)?;
-    terminal.show_cursor().map_err(terminal_io_err)?;
-    Ok(())
+    let mut first_err: Option<RbError> = None;
+    if let Err(err) = disable_raw_mode() {
+        first_err = Some(terminal_io_err(err));
+    }
+    if let Err(err) = execute!(terminal.backend_mut(), LeaveAlternateScreen) {
+        if first_err.is_none() {
+            first_err = Some(terminal_io_err(err));
+        }
+    }
+    if let Err(err) = terminal.show_cursor() {
+        if first_err.is_none() {
+            first_err = Some(terminal_io_err(err));
+        }
+    }
+    match first_err {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
+fn combine_tui_results(loop_result: RbResult<()>, restore_result: RbResult<()>) -> RbResult<()> {
+    match (loop_result, restore_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(loop_err), Ok(())) => Err(loop_err),
+        (Ok(()), Err(restore_err)) => Err(restore_err),
+        (Err(loop_err), Err(restore_err)) => Err(RbError::Io {
+            path: PathBuf::from("<terminal>"),
+            source: io::Error::other(format!(
+                "TUI loop failed ({loop_err}); terminal restore also failed ({restore_err})"
+            )),
+        }),
+    }
 }
 
 fn parse_editor_command(editor_value: Option<&str>) -> (String, Vec<String>) {
@@ -167,8 +196,15 @@ pub fn suspend_for_editor(terminal: &mut TuiTerminal, file_path: &Path) -> RbRes
     let status_res = Command::new(&program).args(&args).arg(file_path).status();
 
     enable_raw_mode().map_err(terminal_io_err)?;
-    execute!(terminal.backend_mut(), EnterAlternateScreen).map_err(terminal_io_err)?;
-    terminal.clear().map_err(terminal_io_err)?;
+    if let Err(err) = execute!(terminal.backend_mut(), EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(terminal_io_err(err));
+    }
+    if let Err(err) = terminal.clear() {
+        let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+        return Err(terminal_io_err(err));
+    }
 
     let status = status_res.map_err(|source| RbError::Io {
         path: file_path.to_path_buf(),
@@ -245,25 +281,73 @@ pub(crate) fn should_startup_pull(
     auto_pull && !active_adapters.is_empty() && adapters_path.is_some()
 }
 
-fn process_pending_sync(app: &mut App, adapters_path: Option<&Path>) {
-    let Some(request) = app.pending_sync.take() else {
-        return;
-    };
+fn spawn_sync_request(
+    app: &mut App,
+    request: SyncRequest,
+    adapters_path: Option<&Path>,
+    is_auto: bool,
+    tx: &mpsc::Sender<SyncOutcome>,
+) -> bool {
+    if app.sync_in_flight {
+        app.status_message = "Adapter sync already in progress".to_string();
+        return false;
+    }
 
     let Some(path) = adapters_path else {
         app.status_message =
             "No adapters file configured (set HOME or pass --adapters-file)".to_string();
-        return;
+        return false;
     };
 
-    let result = match request {
-        SyncRequest::Pull => app.sync_pull(path),
-        SyncRequest::PushSelected => app.sync_push_selected(path),
-    };
-
-    if let Err(err) = result {
-        app.status_message = format!("Adapter sync failed: {err}");
+    if app.project.config.active_adapters.is_empty() {
+        if !is_auto {
+            app.status_message = "No active adapters configured".to_string();
+        }
+        return false;
     }
+
+    let target_comp_id = match request {
+        SyncRequest::Pull => None,
+        SyncRequest::PushSelected => match app.selected_component().map(|c| c.id.clone()) {
+            Some(id) => Some(id),
+            None => {
+                app.status_message = "No component selected to push".to_string();
+                return false;
+            }
+        },
+    };
+
+    app.sync_in_flight = true;
+    let project_snapshot = app.project.clone();
+    let root = app.root.clone();
+    let adapters_path = path.to_path_buf();
+    let tx = tx.clone();
+
+    std::thread::spawn(move || {
+        let outcome = run_sync_job(
+            project_snapshot,
+            &root,
+            &adapters_path,
+            request,
+            target_comp_id.as_deref(),
+            is_auto,
+        );
+        let _ = tx.send(outcome);
+    });
+
+    true
+}
+
+fn process_pending_sync(
+    app: &mut App,
+    adapters_path: Option<&Path>,
+    tx: &mpsc::Sender<SyncOutcome>,
+) -> bool {
+    let Some(request) = app.pending_sync.take() else {
+        return false;
+    };
+    spawn_sync_request(app, request, adapters_path, false, tx);
+    true
 }
 
 fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RbResult<App> {
@@ -300,7 +384,91 @@ pub fn run_tui(
     let loop_result = run_event_loop(&mut terminal, &mut app, adapters_path, poll_interval);
     let restore_result = restore_terminal(&mut terminal);
 
-    loop_result.and(restore_result)
+    combine_tui_results(loop_result, restore_result)
+}
+
+struct EventLoopStepCtx<'a> {
+    adapters_path: Option<&'a Path>,
+    poll_interval: Option<Duration>,
+    last_poll: &'a mut Instant,
+    sync_tx: &'a mpsc::Sender<SyncOutcome>,
+    sync_rx: &'a mpsc::Receiver<SyncOutcome>,
+}
+
+fn handle_event(app: &mut App, ev: Event) -> bool {
+    match ev {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            app.handle_key(key);
+            true
+        }
+        Event::Resize(_, _) => true,
+        _ => false,
+    }
+}
+
+fn step_event_loop<FNext, FEditor>(
+    app: &mut App,
+    ctx: &mut EventLoopStepCtx<'_>,
+    mut next_event: FNext,
+    mut run_editor: FEditor,
+) -> RbResult<bool>
+where
+    FNext: FnMut(Duration) -> RbResult<Option<Event>>,
+    FEditor: FnMut(&Path) -> RbResult<()>,
+{
+    let mut dirty = false;
+
+    while let Ok(outcome) = ctx.sync_rx.try_recv() {
+        apply_sync_outcome(app, outcome);
+        dirty = true;
+    }
+
+    if let Some(first) = next_event(Duration::from_millis(100))? {
+        if handle_event(app, first) {
+            dirty = true;
+        }
+        while !app.should_quit && app.pending_editor_component.is_none() {
+            let Some(next) = next_event(Duration::ZERO)? else {
+                break;
+            };
+            if handle_event(app, next) {
+                dirty = true;
+            }
+        }
+    }
+
+    if app.should_quit {
+        return Ok(dirty);
+    }
+
+    if app.pending_editor_component.is_some() {
+        process_pending_editor_with(app, |path| run_editor(path));
+        dirty = true;
+    }
+
+    if process_pending_sync(app, ctx.adapters_path, ctx.sync_tx) {
+        dirty = true;
+    }
+
+    while let Ok(outcome) = ctx.sync_rx.try_recv() {
+        apply_sync_outcome(app, outcome);
+        dirty = true;
+    }
+
+    if let (Some(interval), Some(path)) = (ctx.poll_interval, ctx.adapters_path) {
+        if !app.project.config.active_adapters.is_empty()
+            && app.modal.is_none()
+            && !app.sync_in_flight
+            && ctx.last_poll.elapsed() >= interval
+        {
+            if spawn_sync_request(app, SyncRequest::Pull, Some(path), true, ctx.sync_tx) {
+                dirty = true;
+            }
+            *ctx.last_poll = Instant::now();
+        }
+    }
+
+    Ok(dirty)
 }
 
 fn run_event_loop(
@@ -310,40 +478,45 @@ fn run_event_loop(
     poll_interval: Option<Duration>,
 ) -> RbResult<()> {
     let mut last_poll = Instant::now();
+    let (sync_tx, sync_rx) = mpsc::channel();
+    let mut dirty = true;
 
     loop {
-        terminal
-            .draw(|f| ui::render(f, app))
-            .map_err(terminal_io_err)?;
-
-        if app.should_quit {
-            break;
-        }
-
-        if event::poll(Duration::from_millis(100)).map_err(terminal_io_err)? {
-            if let Event::Key(key) = event::read().map_err(terminal_io_err)? {
-                if key.kind == KeyEventKind::Press {
-                    app.handle_key(key);
-                    process_pending_editor_with(app, |path| suspend_for_editor(terminal, path));
-                    process_pending_sync(app, adapters_path);
-                }
-            }
+        if dirty {
+            terminal
+                .draw(|f| ui::render(f, app))
+                .map_err(terminal_io_err)?;
+            dirty = false;
         }
 
         if app.should_quit {
             break;
         }
 
-        if let (Some(interval), Some(path)) = (poll_interval, adapters_path) {
-            if !app.project.config.active_adapters.is_empty()
-                && app.modal.is_none()
-                && last_poll.elapsed() >= interval
-            {
-                if let Err(err) = app.sync_pull(path) {
-                    app.status_message = format!("Auto-sync failed: {err}");
+        let mut ctx = EventLoopStepCtx {
+            adapters_path,
+            poll_interval,
+            last_poll: &mut last_poll,
+            sync_tx: &sync_tx,
+            sync_rx: &sync_rx,
+        };
+        if step_event_loop(
+            app,
+            &mut ctx,
+            |timeout| {
+                if event::poll(timeout).map_err(terminal_io_err)? {
+                    event::read().map(Some).map_err(terminal_io_err)
+                } else {
+                    Ok(None)
                 }
-                last_poll = Instant::now();
-            }
+            },
+            |path| suspend_for_editor(terminal, path),
+        )? {
+            dirty = true;
+        }
+
+        if app.should_quit {
+            break;
         }
     }
     Ok(())
@@ -620,10 +793,18 @@ args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"ta
 "#;
         std::fs::write(&adapters_path, ok_toml).expect("write adapters.toml");
 
+        let (tx, rx) = mpsc::channel();
         app.pending_sync = Some(SyncRequest::Pull);
-        process_pending_sync(&mut app, Some(&adapters_path));
-
+        assert!(process_pending_sync(&mut app, Some(&adapters_path), &tx));
         assert!(app.pending_sync.is_none());
+        assert!(app.sync_in_flight);
+
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive pull outcome");
+        apply_sync_outcome(&mut app, outcome);
+
+        assert!(!app.sync_in_flight);
         let comp = app.project.component("auth_svc").expect("component exists");
         assert_eq!(comp.external_tasks.len(), 1);
         assert_eq!(comp.external_tasks[0].external_id, "TASK-9");
@@ -642,9 +823,16 @@ args = ["-c", "echo simulated adapter failure >&2; exit 1"]
         std::fs::write(&adapters_path, fail_toml).expect("write failing adapters.toml");
 
         app.pending_sync = Some(SyncRequest::Pull);
-        process_pending_sync(&mut app, Some(&adapters_path));
-
+        assert!(process_pending_sync(&mut app, Some(&adapters_path), &tx));
         assert!(app.pending_sync.is_none());
+        assert!(app.sync_in_flight);
+
+        let fail_outcome = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive fail outcome");
+        apply_sync_outcome(&mut app, fail_outcome);
+
+        assert!(!app.sync_in_flight);
         assert!(app.status_message.contains("Adapter sync failed"));
         assert!(app.status_message.contains("simulated adapter failure"));
     }
@@ -661,13 +849,170 @@ args = ["-c", "echo simulated adapter failure >&2; exit 1"]
         assert!(should_startup_pull(true, &active, Some(path)));
 
         let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        let (tx, _rx) = mpsc::channel();
         app.pending_sync = Some(SyncRequest::Pull);
-        process_pending_sync(&mut app, None);
+        assert!(process_pending_sync(&mut app, None, &tx));
 
         assert!(app.pending_sync.is_none());
+        assert!(!app.sync_in_flight);
         assert_eq!(
             app.status_message,
             "No adapters file configured (set HOME or pass --adapters-file)"
         );
+    }
+
+    #[test]
+    fn combine_tui_results_preserves_both_loop_and_restore_errors() {
+        assert!(combine_tui_results(Ok(()), Ok(())).is_ok());
+
+        let only_loop = combine_tui_results(
+            Err(RbError::Io {
+                path: PathBuf::from("<terminal>"),
+                source: io::Error::other("loop read failed"),
+            }),
+            Ok(()),
+        )
+        .expect_err("loop error returned");
+        assert!(only_loop.to_string().contains("loop read failed"));
+
+        let only_restore = combine_tui_results(
+            Ok(()),
+            Err(RbError::Io {
+                path: PathBuf::from("<terminal>"),
+                source: io::Error::other("restore raw mode failed"),
+            }),
+        )
+        .expect_err("restore error returned");
+        assert!(only_restore.to_string().contains("restore raw mode failed"));
+
+        let both = combine_tui_results(
+            Err(RbError::Io {
+                path: PathBuf::from("<terminal>"),
+                source: io::Error::other("loop draw crashed"),
+            }),
+            Err(RbError::Io {
+                path: PathBuf::from("<terminal>"),
+                source: io::Error::other("leave alt screen failed"),
+            }),
+        )
+        .expect_err("combined error returned");
+        let msg = both.to_string();
+        assert!(msg.contains("loop draw crashed"), "missing loop err: {msg}");
+        assert!(
+            msg.contains("leave alt screen failed"),
+            "missing restore err: {msg}"
+        );
+    }
+
+    #[test]
+    fn async_sync_channel_applies_pull_outcome_without_blocking() {
+        let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'sleep 0.1; printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"tasks\":[{\"external_id\":\"TASK-77\",\"title\":\"Async pulled\",\"status\":\"in_progress\"}]}]}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        let (tx, rx) = mpsc::channel();
+        app.pending_sync = Some(SyncRequest::Pull);
+        assert!(process_pending_sync(&mut app, Some(&adapters_path), &tx));
+        assert!(app.sync_in_flight);
+
+        // Concurrent second sync request is rejected without spawning another worker
+        app.pending_sync = Some(SyncRequest::Pull);
+        assert!(process_pending_sync(&mut app, Some(&adapters_path), &tx));
+        assert!(app.sync_in_flight);
+        assert_eq!(app.status_message, "Adapter sync already in progress");
+
+        // Unrelated in-memory UI edit while sync is in flight
+        if let Some(comp) = app.project.component_mut("auth_svc") {
+            comp.description = "Edited while sync in flight".to_string();
+        }
+
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive async pull outcome");
+        apply_sync_outcome(&mut app, outcome);
+
+        assert!(!app.sync_in_flight);
+        let comp = app.project.component("auth_svc").expect("component exists");
+        assert_eq!(comp.external_tasks.len(), 1);
+        assert_eq!(comp.external_tasks[0].external_id, "TASK-77");
+        assert_eq!(comp.description, "Edited while sync in flight");
+        assert!(app.status_message.contains("1 component(s) updated"));
+    }
+
+    #[test]
+    fn event_loop_dirty_flag_skips_idle_redraws_and_drains_burst_events() {
+        use std::collections::VecDeque;
+
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (_dir, mut app) = make_workspace_app(vec![
+            make_component("comp_0", ""),
+            make_component("comp_1", ""),
+            make_component("comp_2", ""),
+            make_component("comp_3", ""),
+        ]);
+
+        let (sync_tx, sync_rx) = mpsc::channel();
+        let mut last_poll = Instant::now();
+        let mut queue: VecDeque<Event> = VecDeque::new();
+
+        // 1. Idle timeout (empty poll) -> dirty stays false (no redraw)
+        let mut ctx = EventLoopStepCtx {
+            adapters_path: None,
+            poll_interval: None,
+            last_poll: &mut last_poll,
+            sync_tx: &sync_tx,
+            sync_rx: &sync_rx,
+        };
+        let dirty_idle = step_event_loop(
+            &mut app,
+            &mut ctx,
+            |_timeout| Ok(queue.pop_front()),
+            |_| Ok(()),
+        )
+        .expect("idle step succeeds");
+        assert!(!dirty_idle);
+        assert_eq!(app.selected_index, 0);
+
+        // 2. Burst of 3 queued key events -> all 3 processed in one batch with a single dirty = true
+        for _ in 0..3 {
+            queue.push_back(Event::Key(KeyEvent::new(
+                KeyCode::Char('j'),
+                KeyModifiers::NONE,
+            )));
+        }
+        let dirty_burst = step_event_loop(
+            &mut app,
+            &mut ctx,
+            |_timeout| Ok(queue.pop_front()),
+            |_| Ok(()),
+        )
+        .expect("burst step succeeds");
+        assert!(dirty_burst);
+        assert!(queue.is_empty());
+        assert_eq!(app.selected_index, 3);
+
+        // 3. Resize event -> dirty becomes true
+        queue.push_back(Event::Resize(120, 40));
+        let dirty_resize = step_event_loop(
+            &mut app,
+            &mut ctx,
+            |_timeout| Ok(queue.pop_front()),
+            |_| Ok(()),
+        )
+        .expect("resize step succeeds");
+        assert!(dirty_resize);
+        assert!(queue.is_empty());
     }
 }

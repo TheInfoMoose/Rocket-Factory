@@ -67,6 +67,7 @@ pub struct App {
     pub modal: Option<ModalState>,
     pub pending_editor_component: Option<String>,
     pub(crate) pending_sync: Option<SyncRequest>,
+    pub sync_in_flight: bool,
     pub expanded_components: HashSet<String>,
 }
 
@@ -95,6 +96,7 @@ impl App {
             modal: None,
             pending_editor_component: None,
             pending_sync: None,
+            sync_in_flight: false,
             expanded_components: HashSet::new(),
         }
     }
