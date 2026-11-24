@@ -165,14 +165,28 @@ where
     }
 }
 
-fn process_pending_sync(app: &mut App, adapters_path: &Path) {
+pub(crate) fn should_startup_pull(
+    auto_pull: bool,
+    active_adapters: &[String],
+    adapters_path: Option<&Path>,
+) -> bool {
+    auto_pull && !active_adapters.is_empty() && adapters_path.is_some()
+}
+
+fn process_pending_sync(app: &mut App, adapters_path: Option<&Path>) {
     let Some(request) = app.pending_sync.take() else {
         return;
     };
 
+    let Some(path) = adapters_path else {
+        app.status_message =
+            "No adapters file configured (set HOME or pass --adapters-file)".to_string();
+        return;
+    };
+
     let result = match request {
-        SyncRequest::Pull => app.sync_pull(adapters_path),
-        SyncRequest::PushSelected => app.sync_push_selected(adapters_path),
+        SyncRequest::Pull => app.sync_pull(path),
+        SyncRequest::PushSelected => app.sync_push_selected(path),
     };
 
     if let Err(err) = result {
@@ -191,14 +205,21 @@ fn build_tui_app(root: &Path, theme_dirs: &[PathBuf]) -> RbResult<App> {
 pub fn run_tui(
     root: &Path,
     theme_dirs: &[PathBuf],
-    adapters_path: &Path,
+    adapters_path: Option<&Path>,
     poll_interval: Option<Duration>,
+    auto_pull: bool,
 ) -> RbResult<()> {
     let mut app = build_tui_app(root, theme_dirs)?;
 
-    if !app.project.config.active_adapters.is_empty() {
-        if let Err(err) = app.sync_pull(adapters_path) {
-            app.status_message = format!("Initial adapter sync failed: {err}");
+    if should_startup_pull(
+        auto_pull,
+        &app.project.config.active_adapters,
+        adapters_path,
+    ) {
+        if let Some(path) = adapters_path {
+            if let Err(err) = app.sync_pull(path) {
+                app.status_message = format!("Initial adapter sync failed: {err}");
+            }
         }
     }
 
@@ -213,7 +234,7 @@ pub fn run_tui(
 fn run_event_loop(
     terminal: &mut TuiTerminal,
     app: &mut App,
-    adapters_path: &Path,
+    adapters_path: Option<&Path>,
     poll_interval: Option<Duration>,
 ) -> RbResult<()> {
     let mut last_poll = Instant::now();
@@ -241,12 +262,12 @@ fn run_event_loop(
             break;
         }
 
-        if let Some(interval) = poll_interval {
+        if let (Some(interval), Some(path)) = (poll_interval, adapters_path) {
             if !app.project.config.active_adapters.is_empty()
                 && app.modal.is_none()
                 && last_poll.elapsed() >= interval
             {
-                if let Err(err) = app.sync_pull(adapters_path) {
+                if let Err(err) = app.sync_pull(path) {
                     app.status_message = format!("Auto-sync failed: {err}");
                 }
                 last_poll = Instant::now();
@@ -479,7 +500,7 @@ args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"ta
         std::fs::write(&adapters_path, ok_toml).expect("write adapters.toml");
 
         app.pending_sync = Some(SyncRequest::Pull);
-        process_pending_sync(&mut app, &adapters_path);
+        process_pending_sync(&mut app, Some(&adapters_path));
 
         assert!(app.pending_sync.is_none());
         let comp = app.project.component("auth_svc").expect("component exists");
@@ -500,10 +521,32 @@ args = ["-c", "echo simulated adapter failure >&2; exit 1"]
         std::fs::write(&adapters_path, fail_toml).expect("write failing adapters.toml");
 
         app.pending_sync = Some(SyncRequest::Pull);
-        process_pending_sync(&mut app, &adapters_path);
+        process_pending_sync(&mut app, Some(&adapters_path));
 
         assert!(app.pending_sync.is_none());
         assert!(app.status_message.contains("Adapter sync failed"));
         assert!(app.status_message.contains("simulated adapter failure"));
+    }
+
+    #[test]
+    fn startup_pull_requires_auto_pull_flag_and_adapters_path() {
+        let active = vec!["mock_tracker".to_string()];
+        let empty: Vec<String> = Vec::new();
+        let path = Path::new("/home/testuser/.config/rocket-bench/adapters.toml");
+
+        assert!(!should_startup_pull(false, &active, Some(path)));
+        assert!(!should_startup_pull(true, &active, None));
+        assert!(!should_startup_pull(true, &empty, Some(path)));
+        assert!(should_startup_pull(true, &active, Some(path)));
+
+        let (_dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
+        app.pending_sync = Some(SyncRequest::Pull);
+        process_pending_sync(&mut app, None);
+
+        assert!(app.pending_sync.is_none());
+        assert_eq!(
+            app.status_message,
+            "No adapters file configured (set HOME or pass --adapters-file)"
+        );
     }
 }

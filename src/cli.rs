@@ -17,6 +17,8 @@ pub struct Cli {
     pub path: PathBuf,
     #[arg(long, global = true)]
     pub adapters_file: Option<PathBuf>,
+    #[arg(long, global = true, default_value_t = false)]
+    pub auto_pull: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -64,13 +66,13 @@ pub struct CliOutput {
     pub exit_code: i32,
 }
 
-pub fn default_adapters_path() -> PathBuf {
-    match std::env::var_os("HOME") {
-        Some(home) if !home.is_empty() => {
-            PathBuf::from(home).join(".config/rocket-bench/adapters.toml")
-        }
-        _ => PathBuf::from(".rocket/adapters.toml"),
-    }
+pub fn default_adapters_path_from_home(home: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    home.filter(|h| !h.is_empty())
+        .map(|h| PathBuf::from(h).join(".config/rocket-bench/adapters.toml"))
+}
+
+pub fn default_adapters_path() -> Option<PathBuf> {
+    default_adapters_path_from_home(std::env::var_os("HOME").as_deref())
 }
 
 pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> RbResult<CliOutput> {
@@ -132,6 +134,11 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
         }
         Command::Push { component, adapter } => {
             let mut project = storage::load_project(root)?;
+            if adapters_path.as_os_str().is_empty() {
+                return Err(RbError::NotFound(
+                    "no adapters file configured; set HOME or pass --adapters-file".into(),
+                ));
+            }
             let adapters_file = adapter::load_adapters_file(adapters_path)?;
 
             let adapter_names: Vec<String> = match adapter {
@@ -180,6 +187,11 @@ pub fn execute_command(root: &Path, adapters_path: &Path, command: Command) -> R
         }
         Command::Pull { adapter } => {
             let mut project = storage::load_project(root)?;
+            if adapters_path.as_os_str().is_empty() {
+                return Err(RbError::NotFound(
+                    "no adapters file configured; set HOME or pass --adapters-file".into(),
+                ));
+            }
             let adapters_file = adapter::load_adapters_file(adapters_path)?;
 
             let adapter_names: Vec<String> = match adapter {
@@ -408,12 +420,50 @@ mod tests {
             Some(home) if !home.is_empty() => {
                 assert_eq!(
                     path,
-                    PathBuf::from(home).join(".config/rocket-bench/adapters.toml")
+                    Some(PathBuf::from(home).join(".config/rocket-bench/adapters.toml"))
                 );
             }
             _ => {
-                assert_eq!(path, PathBuf::from(".rocket/adapters.toml"));
+                assert_eq!(path, None);
             }
+        }
+    }
+
+    #[test]
+    fn default_adapters_path_from_home_rejects_missing_or_empty_home() {
+        use std::ffi::OsStr;
+
+        assert_eq!(default_adapters_path_from_home(None), None);
+        assert_eq!(default_adapters_path_from_home(Some(OsStr::new(""))), None);
+        assert_eq!(
+            default_adapters_path_from_home(Some(OsStr::new("/home/testuser"))),
+            Some(PathBuf::from(
+                "/home/testuser/.config/rocket-bench/adapters.toml"
+            ))
+        );
+    }
+
+    #[test]
+    fn execute_command_pull_errors_when_adapters_path_empty() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        execute_command(
+            dir.path(),
+            Path::new(""),
+            Command::Init {
+                name: "apollo".into(),
+                description: "Plan".into(),
+            },
+        )
+        .expect("init workspace");
+
+        let err = execute_command(dir.path(), Path::new(""), Command::Pull { adapter: None })
+            .expect_err("pull without adapters path should fail");
+        match err {
+            RbError::NotFound(msg) => assert!(
+                msg.contains("--adapters-file"),
+                "expected --adapters-file in error message, got: {msg}"
+            ),
+            other => panic!("expected RbError::NotFound, got: {other:?}"),
         }
     }
 }
