@@ -1,8 +1,8 @@
 pub mod app;
 pub mod canvas;
-pub mod modal;
-pub mod style;
-pub mod terminal;
+pub(crate) mod modal;
+pub(crate) mod style;
+pub(crate) mod terminal;
 pub mod ui;
 
 pub use app::{App, FocusColumn, InputMode, ListFilter};

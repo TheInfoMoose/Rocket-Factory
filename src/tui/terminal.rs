@@ -16,7 +16,7 @@ use crate::storage::{save_component, validate_component_id, COMPONENTS_DIR, ROCK
 use crate::tui::app::{App, SyncRequest};
 use crate::tui::ui;
 
-pub type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
+pub(crate) type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
 fn terminal_io_err(source: io::Error) -> RbError {
     RbError::Io {
@@ -35,7 +35,7 @@ pub fn default_theme_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-pub fn install_panic_hook() {
+pub(crate) fn install_panic_hook() {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
@@ -44,7 +44,7 @@ pub fn install_panic_hook() {
     }));
 }
 
-pub fn enter_terminal() -> RbResult<TuiTerminal> {
+pub(crate) fn enter_terminal() -> RbResult<TuiTerminal> {
     enable_raw_mode().map_err(terminal_io_err)?;
     if let Err(err) = execute!(io::stdout(), EnterAlternateScreen) {
         let _ = disable_raw_mode();
@@ -58,7 +58,7 @@ pub fn enter_terminal() -> RbResult<TuiTerminal> {
     })
 }
 
-pub fn restore_terminal(terminal: &mut TuiTerminal) -> RbResult<()> {
+pub(crate) fn restore_terminal(terminal: &mut TuiTerminal) -> RbResult<()> {
     disable_raw_mode().map_err(terminal_io_err)?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen).map_err(terminal_io_err)?;
     terminal.show_cursor().map_err(terminal_io_err)?;

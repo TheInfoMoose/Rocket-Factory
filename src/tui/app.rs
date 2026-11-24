@@ -49,7 +49,7 @@ pub enum ListFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncRequest {
+pub(crate) enum SyncRequest {
     Pull,
     PushSelected,
 }
@@ -73,7 +73,7 @@ pub struct App {
     pub connect_source_id: Option<String>,
     pub modal: Option<ModalState>,
     pub pending_editor_component: Option<String>,
-    pub pending_sync: Option<SyncRequest>,
+    pub(crate) pending_sync: Option<SyncRequest>,
     pub expanded_components: HashSet<String>,
 }
 

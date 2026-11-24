@@ -16,8 +16,6 @@ pub const CARD_WIDTH: u16 = 22;
 pub const CARD_HEIGHT: u16 = 5;
 pub const GUTTER_X: u16 = 4;
 pub const GUTTER_Y: u16 = 2;
-pub const CELL_STRIDE_X: u16 = CARD_WIDTH + GUTTER_X;
-pub const CELL_STRIDE_Y: u16 = CARD_HEIGHT + GUTTER_Y;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CardMetrics {
@@ -199,10 +197,6 @@ pub fn visible_grid_capacity_for(inner: Rect, zoom: ZoomLevel) -> (u16, u16) {
         / metrics.stride_y())
     .max(1);
     (cols, rows)
-}
-
-pub fn visible_grid_capacity(inner: Rect) -> (u16, u16) {
-    visible_grid_capacity_for(inner, ZoomLevel::Normal)
 }
 
 pub fn ensure_visible(inner: Rect, viewport: &mut CanvasViewport, pos: GridPos) {

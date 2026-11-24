@@ -68,6 +68,8 @@ pub struct EditComponentForm {
     pub component_id: String,
     pub name: String,
     pub archetype_index: usize,
+    pub initial_archetype_index: usize,
+    pub original_kind: ComponentKind,
     pub description: String,
     pub relative_path: String,
     pub tags: String,
@@ -258,6 +260,8 @@ impl ModalState {
             component_id: comp.id.clone(),
             name: comp.name.clone(),
             archetype_index,
+            initial_archetype_index: archetype_index,
+            original_kind: comp.kind,
             description: comp.description.clone(),
             relative_path: comp.relative_path.clone().unwrap_or_default(),
             tags: comp.tags.join(", "),
@@ -485,11 +489,16 @@ fn handle_edit_component_key(form: &mut EditComponentForm, key: KeyEvent) -> Mod
             } else {
                 Some(trimmed_sub.to_string())
             };
+            let kind = if form.archetype_index == form.initial_archetype_index {
+                form.original_kind
+            } else {
+                form.selected_archetype().kind
+            };
             form.error = None;
             ModalAction::UpdateComponent {
                 component_id: form.component_id.clone(),
                 name: name.to_string(),
-                kind: form.selected_archetype().kind,
+                kind,
                 description,
                 relative_path,
                 tags,
@@ -723,7 +732,7 @@ mod tests {
             ModalAction::UpdateComponent {
                 component_id: "ui_view".to_string(),
                 name: "UI View".to_string(),
-                kind: ComponentKind::Interface,
+                kind: ComponentKind::UiView,
                 description: "Primary screen".to_string(),
                 relative_path: Some("src/tui/ui.rs".to_string()),
                 tags: vec!["ui".to_string(), "view".to_string()],
@@ -986,5 +995,83 @@ mod tests {
             panic!("expected NewComponent");
         };
         assert_eq!(form.id, "a");
+    }
+
+    #[test]
+    fn edit_component_preserves_legacy_kind_when_archetype_unchanged() {
+        let comp = Component {
+            id: "legacy_view".to_string(),
+            name: "Legacy View".to_string(),
+            kind: ComponentKind::UiView,
+            parent_id: None,
+            description: "Old UI component".to_string(),
+            relative_path: None,
+            position: GridPos { col: 0, row: 0 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let mut modal = ModalState::edit_component(&comp);
+        type_text(&mut modal, " v2");
+
+        let action = modal.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            action,
+            ModalAction::UpdateComponent {
+                component_id: "legacy_view".to_string(),
+                name: "Legacy View v2".to_string(),
+                kind: ComponentKind::UiView,
+                description: "Old UI component".to_string(),
+                relative_path: None,
+                tags: Vec::new(),
+                add_feature: None,
+                add_sub_component: None,
+            }
+        );
+    }
+
+    #[test]
+    fn edit_component_updates_kind_when_archetype_changed() {
+        let comp = Component {
+            id: "legacy_view".to_string(),
+            name: "Legacy View".to_string(),
+            kind: ComponentKind::UiView,
+            parent_id: None,
+            description: "Old UI component".to_string(),
+            relative_path: None,
+            position: GridPos { col: 0, row: 0 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let mut modal = ModalState::edit_component(&comp);
+        // Move to archetype field (field 1) and cycle right: Interface -> Logic
+        assert_eq!(modal.handle_key(key(KeyCode::Tab)), ModalAction::None);
+        assert_eq!(modal.handle_key(key(KeyCode::Right)), ModalAction::None);
+
+        let action = modal.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            action,
+            ModalAction::UpdateComponent {
+                component_id: "legacy_view".to_string(),
+                name: "Legacy View".to_string(),
+                kind: ComponentKind::Logic,
+                description: "Old UI component".to_string(),
+                relative_path: None,
+                tags: Vec::new(),
+                add_feature: None,
+                add_sub_component: None,
+            }
+        );
     }
 }
