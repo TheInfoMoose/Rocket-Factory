@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use ratatui::widgets::ListState;
+
 use crate::audit::{audit_project, compute_card_status, AuditFinding};
 use crate::model::{CardStatus, Component, Project};
 use crate::storage::validate_component_id;
@@ -53,7 +55,9 @@ pub struct App {
     pub mode: InputMode,
     pub filter: ListFilter,
     pub selected_index: usize,
+    pub list_state: ListState,
     pub detail_scroll: u16,
+    pub last_detail_max_scroll: Option<u16>,
     pub status_message: String,
     pub should_quit: bool,
     pub audit_findings: Vec<AuditFinding>,
@@ -79,7 +83,9 @@ impl App {
             mode: InputMode::Navigate,
             filter: ListFilter::All,
             selected_index: 0,
+            list_state: ListState::default(),
             detail_scroll: 0,
+            last_detail_max_scroll: None,
             status_message: "Ready".to_string(),
             should_quit: false,
             audit_findings,
@@ -155,6 +161,27 @@ impl App {
         }
     }
 
+    fn has_top_level_root(&self, idx: usize, existing_ids: &HashSet<&str>) -> bool {
+        let Some(mut current) = self.project.components.get(idx) else {
+            return false;
+        };
+        let mut seen = HashSet::new();
+        seen.insert(current.id.as_str());
+        while let Some(pid) = current.parent_id.as_deref() {
+            if !existing_ids.contains(pid) {
+                return true;
+            }
+            if !seen.insert(pid) {
+                return false;
+            }
+            match self.project.component(pid) {
+                Some(parent) => current = parent,
+                None => return true,
+            }
+        }
+        true
+    }
+
     pub fn visible_component_indices(&self) -> Vec<usize> {
         let existing_ids: HashSet<&str> = self
             .project
@@ -175,6 +202,12 @@ impl App {
             }
         }
 
+        for idx in 0..self.project.components.len() {
+            if !visited.contains(&idx) && !self.has_top_level_root(idx, &existing_ids) {
+                self.push_visible_component(idx, &mut out, &mut visited);
+            }
+        }
+
         out
     }
 
@@ -186,11 +219,22 @@ impl App {
     }
 
     pub fn clamp_selection(&mut self) {
-        let len = self.visible_component_indices().len();
-        if len == 0 {
+        let visible = self.visible_component_indices();
+        let before_id = visible
+            .get(self.selected_index)
+            .and_then(|&idx| self.project.components.get(idx))
+            .map(|c| c.id.as_str());
+        if visible.is_empty() {
             self.selected_index = 0;
         } else {
-            self.selected_index = self.selected_index.min(len - 1);
+            self.selected_index = self.selected_index.min(visible.len() - 1);
+        }
+        let after_id = visible
+            .get(self.selected_index)
+            .and_then(|&idx| self.project.components.get(idx))
+            .map(|c| c.id.as_str());
+        if visible.is_empty() || before_id != after_id {
+            self.detail_scroll = 0;
         }
     }
 

@@ -1924,4 +1924,55 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
             panic!("expected ConfirmDelete modal to remain open");
         }
     }
+
+    #[test]
+    fn update_component_clamps_selection_under_gaps_only() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Gaps Clamp", "GapsOnly update clamp test")
+            .expect("init workspace");
+
+        let mut a = make_component("alpha");
+        a.position = GridPos { col: 0, row: 0 };
+        let mut b = make_component("beta");
+        b.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &a).expect("save alpha");
+        save_component(dir.path(), &b).expect("save beta");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        app.filter = ListFilter::GapsOnly;
+        app.selected_index = 1;
+        assert_eq!(app.selected_component().unwrap().id, "beta");
+
+        app.handle_key(key(KeyCode::Char('e')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Tab)); // archetype
+        app.handle_key(key(KeyCode::Tab)); // description
+        app.handle_key(key(KeyCode::Tab)); // path
+        app.handle_key(key(KeyCode::Tab)); // tags
+        app.handle_key(key(KeyCode::Tab)); // add feature
+        type_keys(&mut app, "Initial feature");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert_eq!(app.selected_index, 0);
+        assert!(app.selected_component().is_some());
+        assert_eq!(app.selected_component().unwrap().id, "alpha");
+    }
+
+    #[test]
+    fn visible_component_indices_includes_disconnected_parent_cycle() {
+        let mut alpha = make_component("alpha");
+        alpha.parent_id = Some("beta".to_string());
+        let mut beta = make_component("beta");
+        beta.parent_id = Some("alpha".to_string());
+
+        let app = make_app(vec![alpha, beta]);
+        let visible = app.visible_component_indices();
+        assert_eq!(visible, vec![0, 1]);
+    }
 }

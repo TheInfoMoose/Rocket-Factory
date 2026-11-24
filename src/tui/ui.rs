@@ -205,7 +205,7 @@ fn format_component_list_label(
     format!("{prefix}{truncated_name}{suffix}")
 }
 
-fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
+fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let title = match app.filter {
         ListFilter::All => " Components ",
         ListFilter::GapsOnly => " Components [GAPS] ",
@@ -222,12 +222,16 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
 
     let visible = app.visible_component_indices();
     if visible.is_empty() {
+        app.list_state.select(None);
         let empty = Paragraph::new(" (no components) ")
             .style(style::muted_style(&app.theme))
             .block(block);
         frame.render_widget(empty, area);
         return;
     }
+
+    let selected = app.selected_index.min(visible.len() - 1);
+    app.list_state.select(Some(selected));
 
     let inner_width = usize::from(area.width.saturating_sub(2));
     let items: Vec<ListItem> = visible
@@ -263,7 +267,7 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
                 progress.total,
                 inner_width,
             );
-            let item_style = if row_idx == app.selected_index {
+            let item_style = if row_idx == selected {
                 style::selected_row_style(&app.theme)
             } else {
                 Style::default().fg(style::card_border_color(&app.theme, status))
@@ -275,10 +279,10 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &App) {
     let list = List::new(items)
         .block(block)
         .style(style::base_style(&app.theme));
-    frame.render_widget(list, area);
+    frame.render_stateful_widget(list, area, &mut app.list_state);
 }
 
-fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
+fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .title(" Component Details ")
         .borders(Borders::ALL)
@@ -289,6 +293,8 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
         .style(style::base_style(&app.theme));
 
     let Some(comp) = app.selected_component() else {
+        app.last_detail_max_scroll = Some(0);
+        app.detail_scroll = 0;
         let empty = Paragraph::new("Select a component to inspect details.")
             .style(style::muted_style(&app.theme))
             .wrap(Wrap { trim: false })
@@ -454,6 +460,13 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &App) {
             lines.push(Line::from(Span::styled(clean_line, line_style)));
         }
     }
+
+    let inner_width = area.width.saturating_sub(2);
+    let inner_height = usize::from(area.height.saturating_sub(2));
+    let total_lines = usize::from(wrapped_line_count(&lines, inner_width));
+    let max_scroll = u16::try_from(total_lines.saturating_sub(inner_height)).unwrap_or(u16::MAX);
+    app.last_detail_max_scroll = Some(max_scroll);
+    app.detail_scroll = app.detail_scroll.min(max_scroll);
 
     let detail = Paragraph::new(lines)
         .style(base)
@@ -1652,5 +1665,110 @@ mod tests {
 
         assert!(text.contains("Rocket"));
         assert!(text.contains("SafeTitle"));
+    }
+
+    #[test]
+    fn component_list_scrolls_selection_into_view_on_overflow() {
+        let mut app = make_test_app();
+        app.project.components.clear();
+        for idx in 0..20u16 {
+            app.project.components.push(Component {
+                id: format!("comp_{idx:02}"),
+                name: format!("C{idx:02}"),
+                kind: ComponentKind::Logic,
+                parent_id: None,
+                description: String::new(),
+                relative_path: None,
+                position: GridPos {
+                    col: idx % 8,
+                    row: idx / 8,
+                },
+                tags: Vec::new(),
+                tech_stack: Vec::new(),
+                files: Vec::new(),
+                flags: Vec::new(),
+                features: Vec::new(),
+                external_tasks: Vec::new(),
+                markdown_body: String::new(),
+            });
+        }
+        app.selected_index = 18;
+
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        assert!(
+            app.list_state.offset() > 0,
+            "expected list_state offset > 0 on overflow, got {}",
+            app.list_state.offset()
+        );
+
+        let buffer = terminal.backend().buffer();
+        let list_rect = column_layout(Rect::new(0, 3, 80, 8))[0];
+        let mut list_text = String::new();
+        for y in list_rect.y..list_rect.y.saturating_add(list_rect.height) {
+            for x in list_rect.x..list_rect.x.saturating_add(list_rect.width) {
+                list_text.push_str(buffer[(x, y)].symbol());
+            }
+            list_text.push('\n');
+        }
+        assert!(
+            list_text.contains("C18"),
+            "expected selected component C18 in left column:\n{list_text}"
+        );
+    }
+
+    #[test]
+    fn detail_scroll_clamps_to_wrapped_height_and_resets_on_clamp_selection() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = make_test_app();
+        app.project.components.truncate(1);
+        let parent_id = app.project.components[0].id.clone();
+        let long_md = (0..40)
+            .map(|i| format!("Line {i}: Detailed specification paragraph that wraps across narrow detail panel columns."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.project.components.push(Component {
+            id: "bus_worker".to_string(),
+            name: "Bus Worker".to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: Some(parent_id.clone()),
+            description: "Worker sub-component".to_string(),
+            relative_path: None,
+            position: GridPos { col: 1, row: 1 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: long_md,
+        });
+        app.expanded_components.insert(parent_id.clone());
+        app.selected_index = 1;
+        app.focus = FocusColumn::Detail;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+
+        let max_scroll = app
+            .last_detail_max_scroll
+            .expect("render sets last_detail_max_scroll");
+        assert!(max_scroll > 0 && max_scroll < 500);
+
+        for _ in 0..500 {
+            app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        }
+        assert_eq!(app.detail_scroll, max_scroll);
+        assert!(app.detail_scroll < 500);
+
+        // Collapse parent so clamp_selection changes the active component
+        app.expanded_components.remove(&parent_id);
+        app.clamp_selection();
+        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.detail_scroll, 0);
     }
 }

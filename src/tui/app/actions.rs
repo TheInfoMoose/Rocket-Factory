@@ -97,7 +97,13 @@ impl App {
         match self.focus {
             FocusColumn::Canvas => self.select_in_direction(dir),
             FocusColumn::Detail => match dir {
-                Direction::Down => self.detail_scroll = self.detail_scroll.saturating_add(1),
+                Direction::Down => {
+                    let next = self.detail_scroll.saturating_add(1);
+                    self.detail_scroll = match self.last_detail_max_scroll {
+                        Some(max) => next.min(max),
+                        None => next,
+                    };
+                }
                 Direction::Up => self.detail_scroll = self.detail_scroll.saturating_sub(1),
                 Direction::Left | Direction::Right => {}
             },
@@ -394,6 +400,7 @@ impl App {
                         return;
                     }
                 }
+                self.clamp_selection();
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
             }
