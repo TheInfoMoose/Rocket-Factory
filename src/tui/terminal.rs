@@ -1151,4 +1151,134 @@ args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"comp_a\",\"task
             "Synced 1 adapter(s): 0 component(s) updated"
         );
     }
+
+    #[test]
+    fn handle_event_filters_key_kind_and_accepts_resize() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers};
+
+        let (_dir, mut app) = make_workspace_app(vec![
+            make_component("comp_0", ""),
+            make_component("comp_1", ""),
+        ]);
+
+        let press =
+            KeyEvent::new_with_kind(KeyCode::Char('j'), KeyModifiers::NONE, KeyEventKind::Press);
+        assert!(handle_event(&mut app, Event::Key(press)));
+        assert_eq!(app.selected_index, 1);
+
+        let release = KeyEvent {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        };
+        assert!(!handle_event(&mut app, Event::Key(release)));
+        assert_eq!(app.selected_index, 1);
+
+        let repeat = KeyEvent {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Repeat,
+            state: KeyEventState::NONE,
+        };
+        assert!(!handle_event(&mut app, Event::Key(repeat)));
+        assert_eq!(app.selected_index, 1);
+
+        assert!(handle_event(&mut app, Event::Resize(100, 30)));
+        assert!(!handle_event(&mut app, Event::FocusGained));
+    }
+
+    #[test]
+    fn step_event_loop_triggers_auto_poll_and_editor_dispatch() {
+        let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Initial\n")]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"components\":[]}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        app.pending_editor_component = Some("auth_svc".to_string());
+
+        let (sync_tx, sync_rx) = mpsc::channel();
+        let poll_interval = Duration::from_millis(10);
+        let mut last_poll = match Instant::now().checked_sub(Duration::from_millis(50)) {
+            Some(past) => past,
+            None => {
+                let now = Instant::now();
+                std::thread::sleep(Duration::from_millis(15));
+                now
+            }
+        };
+
+        let mut ctx = EventLoopStepCtx {
+            adapters_path: Some(&adapters_path),
+            poll_interval: Some(poll_interval),
+            last_poll: &mut last_poll,
+            sync_tx: &sync_tx,
+            sync_rx: &sync_rx,
+        };
+
+        let mut editor_invoked = false;
+        let dirty = step_event_loop(
+            &mut app,
+            &mut ctx,
+            |_timeout| Ok(None),
+            |path| {
+                editor_invoked = true;
+                std::fs::write(path, "# Edited via loop\n").map_err(|source| RbError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            },
+        )
+        .expect("step_event_loop succeeds");
+
+        assert!(dirty);
+        assert!(editor_invoked);
+        assert!(app.pending_editor_component.is_none());
+        let comp = app.project.component("auth_svc").expect("component exists");
+        assert_eq!(comp.markdown_body, "# Edited via loop\n");
+        assert!(app.sync_in_flight);
+
+        // Drain the background sync thread before tempdir cleanup.
+        let outcome = sync_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive auto-poll outcome");
+        apply_sync_outcome(&mut app, outcome);
+        assert!(!app.sync_in_flight);
+    }
+
+    #[test]
+    fn build_tui_app_returns_not_found_on_uninitialized_dir_and_combine_results() {
+        let empty_dir = tempfile::tempdir().expect("tempdir");
+        let err = match build_tui_app(empty_dir.path(), &[]) {
+            Ok(_) => panic!("expected NotFound on uninitialized directory"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, RbError::NotFound(_)));
+
+        assert!(combine_tui_results(Ok(()), Ok(())).is_ok());
+        assert!(matches!(
+            combine_tui_results(
+                Err(RbError::NotFound("loop".to_string())),
+                Ok(()),
+            ),
+            Err(RbError::NotFound(msg)) if msg == "loop"
+        ));
+        assert!(matches!(
+            combine_tui_results(
+                Ok(()),
+                Err(RbError::NotFound("restore".to_string())),
+            ),
+            Err(RbError::NotFound(msg)) if msg == "restore"
+        ));
+    }
 }

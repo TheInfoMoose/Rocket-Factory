@@ -601,4 +601,126 @@ mod tests {
             Err(RbError::AlreadyExists(_))
         ));
     }
+
+    #[test]
+    fn storage_ensure_contained_and_error_paths() {
+        // 1. ensure_contained: valid existing file, non-existent file in base, .. traversal, and unix symlink escape
+        let outer = tempfile::tempdir().expect("create outer tempdir");
+        let base = outer.path().join("base");
+        fs::create_dir_all(&base).expect("create base dir");
+
+        let valid_file = base.join("valid.txt");
+        fs::write(&valid_file, "ok").expect("write valid file");
+        let resolved_valid = ensure_contained(&base, &valid_file).expect("valid file contained");
+        assert_eq!(
+            resolved_valid,
+            fs::canonicalize(&valid_file).expect("canonical valid file")
+        );
+
+        let missing_file = base.join("not_yet_created.txt");
+        let resolved_missing =
+            ensure_contained(&base, &missing_file).expect("missing file in base contained");
+        assert_eq!(
+            resolved_missing,
+            fs::canonicalize(&base)
+                .expect("canonical base")
+                .join("not_yet_created.txt")
+        );
+
+        let traversal = base.join("..").join("escaped.txt");
+        assert!(matches!(
+            ensure_contained(&base, &traversal),
+            Err(RbError::PathEscape(_))
+        ));
+
+        #[cfg(unix)]
+        {
+            let outside_target = outer.path().join("outside.txt");
+            fs::write(&outside_target, "secret").expect("write outside target");
+            let escape_link = base.join("escape_link.txt");
+            std::os::unix::fs::symlink(&outside_target, &escape_link)
+                .expect("create escaping symlink");
+            assert!(matches!(
+                ensure_contained(&base, &escape_link),
+                Err(RbError::PathEscape(_))
+            ));
+        }
+
+        // 2. init_workspace returns AlreadyExists when .rocket/project.toml already exists
+        let ws = tempfile::tempdir().expect("create workspace tempdir");
+        init_workspace(ws.path(), "demo-app", "Demo").expect("first init succeeds");
+        assert!(matches!(
+            init_workspace(ws.path(), "demo-app", "Demo"),
+            Err(RbError::AlreadyExists(_))
+        ));
+
+        // 3. load_project returns NotFound on missing workspace and missing project.toml
+        let uninit = tempfile::tempdir().expect("create uninit tempdir");
+        assert!(matches!(
+            load_project(uninit.path()),
+            Err(RbError::NotFound(_))
+        ));
+
+        let missing_proj = tempfile::tempdir().expect("create missing_proj tempdir");
+        fs::create_dir_all(missing_proj.path().join(ROCKET_DIR)).expect("create .rocket dir");
+        assert!(matches!(
+            load_project(missing_proj.path()),
+            Err(RbError::NotFound(_))
+        ));
+
+        // 4. load_project returns TomlParse on malformed project.toml and malformed component .toml
+        let bad_proj = tempfile::tempdir().expect("create bad_proj tempdir");
+        init_workspace(bad_proj.path(), "demo", "Demo").expect("init bad_proj");
+        fs::write(
+            bad_proj.path().join(ROCKET_DIR).join(PROJECT_FILE),
+            "name = [unterminated",
+        )
+        .expect("write malformed project.toml");
+        assert!(matches!(
+            load_project(bad_proj.path()),
+            Err(RbError::TomlParse { .. })
+        ));
+
+        let bad_comp = tempfile::tempdir().expect("create bad_comp tempdir");
+        init_workspace(bad_comp.path(), "demo", "Demo").expect("init bad_comp");
+        fs::write(
+            bad_comp
+                .path()
+                .join(ROCKET_DIR)
+                .join(COMPONENTS_DIR)
+                .join("broken.toml"),
+            "id = [unterminated",
+        )
+        .expect("write malformed component toml");
+        assert!(matches!(
+            load_project(bad_comp.path()),
+            Err(RbError::TomlParse { .. })
+        ));
+
+        // 5. load_project succeeds when components/ directory is absent
+        let no_comp_dir = tempfile::tempdir().expect("create no_comp_dir tempdir");
+        init_workspace(no_comp_dir.path(), "demo", "Demo").expect("init no_comp_dir");
+        fs::remove_dir(no_comp_dir.path().join(ROCKET_DIR).join(COMPONENTS_DIR))
+            .expect("remove components dir");
+        let loaded_empty = load_project(no_comp_dir.path()).expect("load without components dir");
+        assert!(loaded_empty.components.is_empty());
+
+        // 6. load_project succeeds when a component .md file is absent (defaults markdown_body to empty)
+        let no_md = tempfile::tempdir().expect("create no_md tempdir");
+        init_workspace(no_md.path(), "demo", "Demo").expect("init no_md");
+        let comp = make_component("api_gateway", "# Should be deleted\n");
+        save_component(no_md.path(), &comp).expect("save component");
+        fs::remove_file(
+            no_md
+                .path()
+                .join(ROCKET_DIR)
+                .join(COMPONENTS_DIR)
+                .join("api_gateway.md"),
+        )
+        .expect("remove component markdown");
+        let loaded_no_md = load_project(no_md.path()).expect("load without component md");
+        assert_eq!(loaded_no_md.components.len(), 1);
+        assert_eq!(loaded_no_md.components[0].id, "api_gateway");
+        assert!(loaded_no_md.components[0].markdown_body.is_empty());
+    }
 }
