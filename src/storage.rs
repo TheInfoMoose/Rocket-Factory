@@ -90,15 +90,32 @@ fn ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf> {
         .ok_or_else(|| RbError::PathEscape(candidate.to_path_buf()))?;
     let resolved = canon_parent.join(file_name);
 
-    if resolved.exists() {
-        let canon_target = fs::canonicalize(&resolved).map_err(|source| RbError::Io {
-            path: resolved,
-            source,
-        })?;
-        if !canon_target.starts_with(&canon_base) {
-            return Err(RbError::PathEscape(candidate.to_path_buf()));
+    match fs::symlink_metadata(&resolved) {
+        Ok(meta) => {
+            let canon_target = match fs::canonicalize(&resolved) {
+                Ok(target) => target,
+                Err(_) if meta.file_type().is_symlink() => {
+                    return Err(RbError::PathEscape(candidate.to_path_buf()));
+                }
+                Err(source) => {
+                    return Err(RbError::Io {
+                        path: resolved,
+                        source,
+                    });
+                }
+            };
+            if !canon_target.starts_with(&canon_base) {
+                return Err(RbError::PathEscape(candidate.to_path_buf()));
+            }
+            return Ok(canon_target);
         }
-        return Ok(canon_target);
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(RbError::Io {
+                path: resolved,
+                source,
+            });
+        }
     }
 
     Ok(resolved)
@@ -200,28 +217,58 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
     let rocket_dir = root.join(ROCKET_DIR);
     let project_path = rocket_dir.join(PROJECT_FILE);
 
-    let project_raw = match fs::read_to_string(&project_path) {
-        Ok(raw) => raw,
+    match fs::symlink_metadata(&rocket_dir) {
+        Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(RbError::NotFound(project_path.display().to_string()));
         }
         Err(source) => {
             return Err(RbError::Io {
-                path: project_path,
+                path: rocket_dir,
+                source,
+            });
+        }
+    }
+    let safe_rocket_dir = ensure_contained(root, &rocket_dir)?;
+
+    let safe_project_path =
+        ensure_contained(&safe_rocket_dir, &safe_rocket_dir.join(PROJECT_FILE))?;
+    let project_meta = match fs::metadata(&safe_project_path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(RbError::NotFound(project_path.display().to_string()));
+        }
+        Err(source) => {
+            return Err(RbError::Io {
+                path: safe_project_path,
                 source,
             });
         }
     };
+    if !project_meta.is_file() {
+        return Err(RbError::Io {
+            path: safe_project_path,
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "project.toml is not a regular file",
+            ),
+        });
+    }
+
+    let project_raw = fs::read_to_string(&safe_project_path).map_err(|source| RbError::Io {
+        path: safe_project_path.clone(),
+        source,
+    })?;
 
     let config: ProjectConfig =
         toml::from_str(&project_raw).map_err(|source| RbError::TomlParse {
-            path: project_path,
+            path: safe_project_path,
             source,
         })?;
 
-    let components_dir = rocket_dir.join(COMPONENTS_DIR);
-    let entries = match fs::read_dir(&components_dir) {
-        Ok(dir) => dir,
+    let components_dir = safe_rocket_dir.join(COMPONENTS_DIR);
+    match fs::symlink_metadata(&components_dir) {
+        Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Project {
                 config,
@@ -234,12 +281,17 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
                 source,
             });
         }
-    };
+    }
+    let safe_components_dir = ensure_contained(&safe_rocket_dir, &components_dir)?;
+    let entries = fs::read_dir(&safe_components_dir).map_err(|source| RbError::Io {
+        path: safe_components_dir.clone(),
+        source,
+    })?;
 
     let mut toml_files: Vec<(std::ffi::OsString, PathBuf)> = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| RbError::Io {
-            path: components_dir.clone(),
+            path: safe_components_dir.clone(),
             source,
         })?;
         let path = entry.path();
@@ -251,23 +303,46 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
 
     let mut components = Vec::with_capacity(toml_files.len());
     for (_, path) in toml_files {
-        let raw = fs::read_to_string(&path).map_err(|source| RbError::Io {
-            path: path.clone(),
+        let safe_path = ensure_contained(&safe_components_dir, &path)?;
+        let meta = fs::metadata(&safe_path).map_err(|source| RbError::Io {
+            path: safe_path.clone(),
+            source,
+        })?;
+        if !meta.is_file() {
+            continue;
+        }
+
+        let raw = fs::read_to_string(&safe_path).map_err(|source| RbError::Io {
+            path: safe_path.clone(),
             source,
         })?;
         let mut component: Component =
             toml::from_str(&raw).map_err(|source| RbError::TomlParse {
-                path: path.clone(),
+                path: safe_path,
                 source,
             })?;
 
         validate_component_id(&component.id)?;
         let md_path = ensure_contained(
-            &components_dir,
-            &components_dir.join(format!("{}.md", component.id)),
+            &safe_components_dir,
+            &safe_components_dir.join(format!("{}.md", component.id)),
         )?;
-        component.markdown_body = match fs::read_to_string(&md_path) {
-            Ok(body) => body,
+        component.markdown_body = match fs::metadata(&md_path) {
+            Ok(md_meta) => {
+                if !md_meta.is_file() {
+                    return Err(RbError::Io {
+                        path: md_path,
+                        source: std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "component markdown path is not a regular file",
+                        ),
+                    });
+                }
+                fs::read_to_string(&md_path).map_err(|source| RbError::Io {
+                    path: md_path,
+                    source,
+                })?
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(source) => {
                 return Err(RbError::Io {
@@ -344,5 +419,59 @@ mod tests {
             delete_component(dir.path(), "stream_1"),
             Err(RbError::NotFound(_))
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_load_project_rejects_symlinked_project_and_component_toml() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().expect("create outside tempdir");
+        let outside_project = outside.path().join("outside_project.toml");
+        fs::write(&outside_project, "name = \"outside\"\ndescription = \"\"\n")
+            .expect("write outside project");
+
+        // 1. Symlinked .rocket/project.toml pointing outside workspace -> PathEscape
+        let ws_proj = tempfile::tempdir().expect("create ws_proj");
+        init_workspace(ws_proj.path(), "demo", "Demo").expect("init workspace");
+        let proj_file = ws_proj.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        fs::remove_file(&proj_file).expect("remove original project.toml");
+        symlink(&outside_project, &proj_file).expect("symlink project.toml");
+        assert!(matches!(
+            load_project(ws_proj.path()),
+            Err(RbError::PathEscape(_))
+        ));
+
+        // 2. Symlinked .rocket/components/evil.toml pointing outside workspace -> PathEscape
+        let ws_comp = tempfile::tempdir().expect("create ws_comp");
+        init_workspace(ws_comp.path(), "demo", "Demo").expect("init workspace");
+        let outside_comp = outside.path().join("secret.toml");
+        let comp = make_component("evil", "");
+        fs::write(&outside_comp, toml::to_string_pretty(&comp).unwrap())
+            .expect("write outside component");
+        let comp_dir = ws_comp.path().join(ROCKET_DIR).join(COMPONENTS_DIR);
+        symlink(&outside_comp, comp_dir.join("evil.toml")).expect("symlink evil.toml");
+        assert!(matches!(
+            load_project(ws_comp.path()),
+            Err(RbError::PathEscape(_))
+        ));
+        fs::remove_file(comp_dir.join("evil.toml")).expect("remove evil.toml");
+
+        // 3. Dangling symlink .rocket/components/ghost.toml -> PathEscape
+        symlink(
+            outside.path().join("nonexistent.toml"),
+            comp_dir.join("ghost.toml"),
+        )
+        .expect("symlink ghost.toml");
+        assert!(matches!(
+            load_project(ws_comp.path()),
+            Err(RbError::PathEscape(_))
+        ));
+        fs::remove_file(comp_dir.join("ghost.toml")).expect("remove ghost.toml");
+
+        // 4. In-bounds directory .rocket/components/dir.toml -> skipped cleanly
+        fs::create_dir(comp_dir.join("dir.toml")).expect("create dir.toml");
+        let loaded = load_project(ws_comp.path()).expect("load project skips dir.toml");
+        assert!(loaded.components.is_empty());
     }
 }

@@ -60,6 +60,8 @@ pub const DEFAULT_CRT_AMBER_RON: &str = r#"(
     ),
 )"#;
 
+pub const MAX_THEME_FILE_BYTES: u64 = 256 * 1024;
+
 pub fn default_theme() -> RbResult<Theme> {
     ron::from_str(DEFAULT_CRT_AMBER_RON).map_err(|source| RbError::RonParse {
         path: PathBuf::from("<embedded:crt_amber>"),
@@ -68,9 +70,31 @@ pub fn default_theme() -> RbResult<Theme> {
 }
 
 pub fn load_theme_file(path: &Path) -> RbResult<Theme> {
-    let content = std::fs::read_to_string(path).map_err(|source| RbError::Io {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).map_err(|source| RbError::Io {
         path: path.to_path_buf(),
         source,
+    })?;
+    let mut bytes = Vec::new();
+    file.take(MAX_THEME_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| RbError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() as u64 > MAX_THEME_FILE_BYTES {
+        return Err(RbError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("theme file exceeds maximum size limit of {MAX_THEME_FILE_BYTES} bytes"),
+            ),
+        });
+    }
+    let content = String::from_utf8(bytes).map_err(|err| RbError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
     })?;
     ron::from_str(&content).map_err(|source| RbError::RonParse {
         path: path.to_path_buf(),
@@ -97,25 +121,49 @@ pub fn resolve_theme(theme_name: &str, search_dirs: &[PathBuf]) -> RbResult<Them
 
     let filename = format!("{theme_name}.ron");
     for dir in search_dirs {
-        if !dir.is_dir() {
+        let Ok(dir_meta) = std::fs::symlink_metadata(dir) else {
+            continue;
+        };
+        if dir_meta.file_type().is_symlink() {
+            return Err(RbError::PathEscape(dir.to_path_buf()));
+        }
+        if !dir_meta.is_dir() {
             continue;
         }
         let candidate = dir.join(&filename);
-        if candidate.is_file() {
-            let canon_dir = std::fs::canonicalize(dir).map_err(|source| RbError::Io {
-                path: dir.to_path_buf(),
-                source,
-            })?;
-            let canon_candidate =
-                std::fs::canonicalize(&candidate).map_err(|source| RbError::Io {
-                    path: candidate.clone(),
+        let cand_meta = match std::fs::symlink_metadata(&candidate) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(RbError::Io {
+                    path: candidate,
                     source,
-                })?;
-            if !canon_candidate.starts_with(&canon_dir) {
+                });
+            }
+        };
+        let canon_dir = std::fs::canonicalize(dir).map_err(|source| RbError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let canon_candidate = match std::fs::canonicalize(&candidate) {
+            Ok(path) => path,
+            Err(_) if cand_meta.file_type().is_symlink() => {
                 return Err(RbError::PathEscape(candidate));
             }
-            return load_theme_file(&canon_candidate);
+            Err(source) => {
+                return Err(RbError::Io {
+                    path: candidate,
+                    source,
+                });
+            }
+        };
+        if !canon_candidate.starts_with(&canon_dir) {
+            return Err(RbError::PathEscape(candidate));
         }
+        if !canon_candidate.is_file() {
+            continue;
+        }
+        return load_theme_file(&canon_candidate);
     }
     if theme_name == "crt_amber" {
         return default_theme();
@@ -128,12 +176,15 @@ pub fn list_available_themes(search_dirs: &[PathBuf]) -> Vec<String> {
     themes.insert("crt_amber".to_string());
 
     for dir in search_dirs {
+        let Ok(dir_meta) = std::fs::symlink_metadata(dir) else {
+            continue;
+        };
+        if dir_meta.file_type().is_symlink() || !dir_meta.is_dir() {
+            continue;
+        }
         let Ok(canon_dir) = std::fs::canonicalize(dir) else {
             continue;
         };
-        if !canon_dir.is_dir() {
-            continue;
-        }
         let Ok(entries) = std::fs::read_dir(&canon_dir) else {
             continue;
         };
@@ -262,5 +313,37 @@ mod tests {
                 "solarized".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn theme_load_rejects_oversized_ron_and_symlinked_search_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let oversized = dir.path().join("huge.ron");
+        let payload = vec![b' '; (MAX_THEME_FILE_BYTES as usize) + 1];
+        std::fs::write(&oversized, payload).unwrap();
+
+        let err = load_theme_file(&oversized).unwrap_err();
+        match err {
+            RbError::Io { source, .. } => {
+                assert_eq!(source.kind(), std::io::ErrorKind::InvalidData);
+            }
+            other => panic!("expected RbError::Io(InvalidData), got {other:?}"),
+        }
+
+        #[cfg(unix)]
+        {
+            let target_dir = tempfile::tempdir().unwrap();
+            let ocean_ron = DEFAULT_CRT_AMBER_RON.replace("\"crt_amber\"", "\"ocean\"");
+            std::fs::write(target_dir.path().join("ocean.ron"), ocean_ron).unwrap();
+
+            let link_dir = dir.path().join("themes_link");
+            std::os::unix::fs::symlink(target_dir.path(), &link_dir).unwrap();
+
+            let err = resolve_theme("ocean", std::slice::from_ref(&link_dir)).unwrap_err();
+            assert!(matches!(err, RbError::PathEscape(_)));
+
+            let available = list_available_themes(&[link_dir]);
+            assert_eq!(available, vec!["crt_amber".to_string()]);
+        }
     }
 }
