@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0096"
 type = "task"
 title = "core"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T20:12:06Z"
-updated_at = "2026-11-23T23:30:32Z"
+updated_at = "2026-11-24T03:06:46Z"
 source_ref = "STEP 15B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 405
 iteration_count = 1
+last_timer_session = "TASK-0096@2026-11-23T20:20:48Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "3167e10"
+summary = "STEP 15B: Rename Error Types `RfError` / `RfResult` to `RbError` / `RbResult` (`FEAT-0006`) (phased check PASS)"
