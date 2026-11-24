@@ -1975,4 +1975,368 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         let visible = app.visible_component_indices();
         assert_eq!(visible, vec![0, 1]);
     }
+
+    #[test]
+    fn find_proximity_grid_pos_terminates_at_u16_max() {
+        let mut edge = make_component("edge");
+        edge.position = GridPos {
+            col: u16::MAX,
+            row: 0,
+        };
+        let mut app = make_app(vec![edge]);
+        app.project.config.grid = GridConfig {
+            cols: u16::MAX,
+            rows: 1,
+        };
+
+        let pos = app.find_proximity_grid_pos(GridPos {
+            col: u16::MAX,
+            row: 0,
+        });
+        assert!(pos.is_some());
+        assert_ne!(
+            pos,
+            Some(GridPos {
+                col: u16::MAX,
+                row: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn sub_component_creation_adds_contains_edge_without_hierarchy_drift() {
+        use crate::audit::FindingKind;
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Hierarchy Sync", "Contains edge sync test")
+            .expect("init workspace");
+
+        let mut parent = make_component("core_svc");
+        parent.position = GridPos { col: 0, row: 0 };
+        save_component(dir.path(), &parent).expect("save parent");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // 1. Create sub-component via 'a' (ModalAction::CreateComponent { parent_id: Some(...) })
+        app.handle_key(key(KeyCode::Char('a')));
+        type_keys(&mut app, "sub_alpha");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Sub Alpha");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.project.config.connections.iter().any(|c| {
+            c.from == "core_svc" && c.to == "sub_alpha" && c.kind == EdgeKind::Contains
+        }));
+        assert!(
+            !app.audit_findings
+                .iter()
+                .any(|f| f.kind == FindingKind::HierarchyDrift),
+            "expected zero HierarchyDrift findings after 'a' sub-component creation, got: {:?}",
+            app.audit_findings
+        );
+
+        // 2. Select core_svc again and add sub-component via 'e' (ModalAction::UpdateComponent)
+        app.selected_index = 0;
+        assert_eq!(app.selected_component().expect("core_svc").id, "core_svc");
+        app.handle_key(key(KeyCode::Char('e')));
+        for _ in 0..6 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        type_keys(&mut app, "Sub Beta");
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        let sub_beta = app
+            .project
+            .components
+            .iter()
+            .find(|c| c.name == "Sub Beta")
+            .expect("sub_beta created");
+        let sub_beta_id = sub_beta.id.clone();
+        assert!(app.project.config.connections.iter().any(|c| {
+            c.from == "core_svc" && c.to == sub_beta_id && c.kind == EdgeKind::Contains
+        }));
+        assert!(
+            !app.audit_findings
+                .iter()
+                .any(|f| f.kind == FindingKind::HierarchyDrift),
+            "expected zero HierarchyDrift findings after UpdateComponent sub-component creation, got: {:?}",
+            app.audit_findings
+        );
+
+        // Verify persisted on disk
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert!(reloaded.config.connections.iter().any(|c| {
+            c.from == "core_svc" && c.to == "sub_alpha" && c.kind == EdgeKind::Contains
+        }));
+        assert!(reloaded.config.connections.iter().any(|c| {
+            c.from == "core_svc" && c.to == sub_beta_id && c.kind == EdgeKind::Contains
+        }));
+        let disk_findings = audit_project(&reloaded);
+        assert!(
+            !disk_findings
+                .iter()
+                .any(|f| f.kind == FindingKind::HierarchyDrift),
+            "expected zero HierarchyDrift on disk, got: {:?}",
+            disk_findings
+        );
+    }
+
+    #[test]
+    fn update_component_rolls_back_on_partial_disk_failure() {
+        use crate::storage::{init_workspace, load_project, save_component, PROJECT_FILE};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Update Rollback", "Partial disk failure test")
+            .expect("init workspace");
+
+        let mut parent = make_component("alpha");
+        parent.position = GridPos { col: 0, row: 0 };
+        parent.description = "Original description".to_string();
+        save_component(dir.path(), &parent).expect("save alpha");
+
+        let project = load_project(dir.path()).expect("load project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        let initial_project = app.project.clone();
+
+        // Force project.toml save failure by replacing project.toml with a directory
+        let project_toml = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        let saved_toml_bytes = std::fs::read(&project_toml).expect("read original project.toml");
+        std::fs::remove_file(&project_toml).expect("remove project.toml");
+        std::fs::create_dir(&project_toml).expect("replace project.toml with dir");
+
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Tab)); // archetype
+        app.handle_key(key(KeyCode::Tab)); // description
+        type_keys(&mut app, " mutated");
+        app.handle_key(key(KeyCode::Tab)); // path
+        app.handle_key(key(KeyCode::Tab)); // tags
+        app.handle_key(key(KeyCode::Tab)); // add feature
+        app.handle_key(key(KeyCode::Tab)); // add sub-component
+        type_keys(&mut app, "Worker");
+        app.handle_key(key(KeyCode::Enter));
+
+        // Modal stays open with error and in-memory project is unchanged
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::EditComponent(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected EditComponent modal to remain open");
+        }
+        assert_eq!(app.project, initial_project);
+
+        // Restore project.toml so we can reload and inspect disk state
+        std::fs::remove_dir(&project_toml).expect("remove blocking dir");
+        std::fs::write(&project_toml, saved_toml_bytes).expect("restore project.toml");
+
+        let reloaded = load_project(dir.path()).expect("reload project");
+        assert_eq!(reloaded.components.len(), 1);
+        assert_eq!(
+            reloaded
+                .component("alpha")
+                .expect("alpha on disk")
+                .description,
+            "Original description"
+        );
+        assert!(reloaded.component("alpha_worker").is_none());
+    }
+
+    #[test]
+    fn confirm_connect_only_toggles_depends_on() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Connect Toggle", "DependsOn only toggle test")
+            .expect("init workspace");
+
+        let mut a = make_component("alpha");
+        a.position = GridPos { col: 0, row: 0 };
+        let mut b = make_component("beta");
+        b.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &a).expect("save alpha");
+        save_component(dir.path(), &b).expect("save beta");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "alpha".to_string(),
+            to: "beta".to_string(),
+            kind: EdgeKind::DataFlow,
+            label: Some("stream".to_string()),
+        });
+        save_project_config(dir.path(), &project.config).expect("save DataFlow edge");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+        app.focus = FocusColumn::Canvas;
+
+        // First 'c' connect alpha -> beta adds DependsOn while preserving DataFlow
+        app.handle_key(key(KeyCode::Char('c')));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.project.config.connections.len(), 2);
+        assert!(app
+            .project
+            .config
+            .connections
+            .iter()
+            .any(|c| { c.from == "alpha" && c.to == "beta" && c.kind == EdgeKind::DataFlow }));
+        assert!(app
+            .project
+            .config
+            .connections
+            .iter()
+            .any(|c| { c.from == "alpha" && c.to == "beta" && c.kind == EdgeKind::DependsOn }));
+
+        // Second 'c' connect alpha -> beta removes only DependsOn, keeping DataFlow
+        app.handle_key(key(KeyCode::Left));
+        app.handle_key(key(KeyCode::Char('c')));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.project.config.connections.len(), 1);
+        assert_eq!(app.project.config.connections[0].kind, EdgeKind::DataFlow);
+        assert_eq!(
+            app.project.config.connections[0].label.as_deref(),
+            Some("stream")
+        );
+
+        let reloaded = load_project(dir.path()).expect("reload after toggle");
+        assert_eq!(reloaded.config.connections.len(), 1);
+        assert_eq!(reloaded.config.connections[0].kind, EdgeKind::DataFlow);
+    }
+
+    #[test]
+    fn delete_contains_connection_clears_child_parent_id() {
+        use crate::storage::{init_workspace, load_project, save_component};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Delete Contains", "Clear parent_id on delete")
+            .expect("init workspace");
+
+        let mut parent = make_component("parent_svc");
+        parent.position = GridPos { col: 0, row: 0 };
+        let mut child = make_component("child_mod");
+        child.parent_id = Some("parent_svc".to_string());
+        child.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &parent).expect("save parent");
+        save_component(dir.path(), &child).expect("save child");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "parent_svc".to_string(),
+            to: "child_mod".to_string(),
+            kind: EdgeKind::Contains,
+            label: None,
+        });
+        save_project_config(dir.path(), &project.config).expect("save Contains edge");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Select parent_svc (index 0) and delete its Contains connection via 'D' -> 'y'
+        assert_eq!(app.selected_component().expect("parent").id, "parent_svc");
+        app.handle_key(key(KeyCode::Char('D')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Char('y')));
+
+        assert_eq!(app.mode, InputMode::Navigate);
+        assert!(app.project.config.connections.is_empty());
+        assert_eq!(
+            app.project.component("child_mod").expect("child").parent_id,
+            None
+        );
+
+        let reloaded = load_project(dir.path()).expect("reload after delete");
+        assert!(reloaded.config.connections.is_empty());
+        assert_eq!(
+            reloaded
+                .component("child_mod")
+                .expect("child on disk")
+                .parent_id,
+            None
+        );
+    }
+
+    #[test]
+    fn delete_component_rolls_back_detached_children_on_failure() {
+        use crate::storage::{init_workspace, load_project, save_component, PROJECT_FILE};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Delete Rollback", "Rollback detached child")
+            .expect("init workspace");
+
+        let mut parent = make_component("parent_svc");
+        parent.position = GridPos { col: 0, row: 0 };
+        let mut child = make_component("child_mod");
+        child.parent_id = Some("parent_svc".to_string());
+        child.position = GridPos { col: 1, row: 0 };
+        save_component(dir.path(), &parent).expect("save parent");
+        save_component(dir.path(), &child).expect("save child");
+
+        let mut project = load_project(dir.path()).expect("load project");
+        project.config.connections.push(Connection {
+            from: "parent_svc".to_string(),
+            to: "child_mod".to_string(),
+            kind: EdgeKind::Contains,
+            label: None,
+        });
+        save_project_config(dir.path(), &project.config).expect("save Contains edge");
+
+        let project = load_project(dir.path()).expect("reload project");
+        let theme = default_theme().expect("default theme");
+        let mut app = App::new(dir.path().to_path_buf(), project, theme);
+
+        // Force config save failure after child_mod has been detached on disk
+        let project_toml = dir.path().join(ROCKET_DIR).join(PROJECT_FILE);
+        let saved_toml_bytes = std::fs::read(&project_toml).expect("read project.toml");
+        std::fs::remove_file(&project_toml).expect("remove project.toml");
+        std::fs::create_dir(&project_toml).expect("replace project.toml with dir");
+
+        assert_eq!(app.selected_component().expect("parent").id, "parent_svc");
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.mode, InputMode::Modal);
+        app.handle_key(key(KeyCode::Char('y')));
+
+        // Modal stays open with error and in-memory state is unchanged
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.modal.is_some());
+        if let Some(ModalState::ConfirmDelete(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected ConfirmDelete modal to remain open");
+        }
+        assert!(app.project.component("parent_svc").is_some());
+        assert_eq!(
+            app.project
+                .component("child_mod")
+                .expect("child in memory")
+                .parent_id
+                .as_deref(),
+            Some("parent_svc")
+        );
+
+        // Restore project.toml and confirm child_mod was rolled back on disk
+        std::fs::remove_dir(&project_toml).expect("remove blocking dir");
+        std::fs::write(&project_toml, saved_toml_bytes).expect("restore project.toml");
+
+        let reloaded = load_project(dir.path()).expect("reload after rollback");
+        assert!(reloaded.component("parent_svc").is_some());
+        assert_eq!(
+            reloaded
+                .component("child_mod")
+                .expect("child on disk")
+                .parent_id
+                .as_deref(),
+            Some("parent_svc")
+        );
+    }
 }

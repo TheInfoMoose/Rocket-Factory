@@ -135,11 +135,9 @@ impl App {
         }
 
         let mut candidate_config = self.project.config.clone();
-        let mut msg = if let Some(pos) = candidate_config
-            .connections
-            .iter()
-            .position(|conn| conn.from == source_id && conn.to == target_id)
-        {
+        let mut msg = if let Some(pos) = candidate_config.connections.iter().position(|conn| {
+            conn.from == source_id && conn.to == target_id && conn.kind == EdgeKind::DependsOn
+        }) {
             candidate_config.connections.remove(pos);
             format!("Removed connection {source_id} -> {target_id}")
         } else {
@@ -194,7 +192,7 @@ impl App {
                     return;
                 }
 
-                let (comp, grid_expanded_config) = if let Some(ref pid) = parent_id {
+                let (comp, config_to_save) = if let Some(ref pid) = parent_id {
                     let Some(parent_pos) = self.project.component(pid).map(|c| c.position) else {
                         let err = format!("parent component '{pid}' not found");
                         if let ModalState::NewComponent(ref mut form) = modal {
@@ -204,11 +202,31 @@ impl App {
                         self.modal = Some(modal);
                         return;
                     };
-                    let pos = self.find_proximity_grid_pos(parent_pos);
+                    let Some(pos) = self.find_proximity_grid_pos(parent_pos) else {
+                        let err = "grid is full; no free cell available".to_string();
+                        if let ModalState::NewComponent(ref mut form) = modal {
+                            form.error = Some(err.clone());
+                        }
+                        self.status_message = err;
+                        self.modal = Some(modal);
+                        return;
+                    };
                     let mut candidate_config = self.project.config.clone();
-                    let expanded = ensure_grid_contains(&mut candidate_config.grid, pos);
+                    ensure_grid_contains(&mut candidate_config.grid, pos);
+                    let already_contains = candidate_config
+                        .connections
+                        .iter()
+                        .any(|c| c.from == *pid && c.to == id && c.kind == EdgeKind::Contains);
+                    if !already_contains {
+                        candidate_config.connections.push(Connection {
+                            from: pid.clone(),
+                            to: id.clone(),
+                            kind: EdgeKind::Contains,
+                            label: None,
+                        });
+                    }
                     let comp = scaffold_sub_component(&id, &name, kind, pos, pid);
-                    (comp, expanded.then_some(candidate_config))
+                    (comp, Some(candidate_config))
                 } else {
                     let Some(pos) = self.first_unoccupied_grid_pos() else {
                         let grid = self.effective_grid();
@@ -240,7 +258,7 @@ impl App {
                     self.modal = Some(modal);
                     return;
                 }
-                if let Some(ref cfg) = grid_expanded_config {
+                if let Some(ref cfg) = config_to_save {
                     if let Err(err) = save_project_config(&self.root, cfg) {
                         let msg = match delete_component(&self.root, &comp.id) {
                             Ok(()) => format!("Failed to save grid config: {err}"),
@@ -259,7 +277,7 @@ impl App {
                     }
                 }
 
-                if let Some(cfg) = grid_expanded_config {
+                if let Some(cfg) = config_to_save {
                     self.project.config = cfg;
                 }
                 self.project.components.push(comp);
@@ -312,7 +330,8 @@ impl App {
                     return;
                 };
 
-                let mut candidate = self.project.components[comp_idx].clone();
+                let previous = self.project.components[comp_idx].clone();
+                let mut candidate = previous.clone();
                 candidate.name = name.clone();
                 candidate.kind = kind;
                 candidate.description = description;
@@ -334,63 +353,65 @@ impl App {
                     });
                 }
 
-                let (new_sub_comp, grid_expanded_config) =
-                    if let Some(ref sub_name) = add_sub_component {
-                        let sub_id = self.derive_unique_sub_component_id(&component_id, sub_name);
-                        let sub_pos = self.find_proximity_grid_pos(candidate.position);
-                        let mut candidate_config = self.project.config.clone();
-                        let expanded = ensure_grid_contains(&mut candidate_config.grid, sub_pos);
-                        let sub_comp = scaffold_sub_component(
-                            &sub_id,
-                            sub_name,
-                            ComponentKind::Concept,
-                            sub_pos,
-                            &component_id,
-                        );
-                        (Some(sub_comp), expanded.then_some(candidate_config))
-                    } else {
-                        (None, None)
+                let (new_sub_comp, config_to_save) = if let Some(ref sub_name) = add_sub_component {
+                    let sub_id = self.derive_unique_sub_component_id(&component_id, sub_name);
+                    let Some(sub_pos) = self.find_proximity_grid_pos(candidate.position) else {
+                        let msg = "grid is full; no free cell available".to_string();
+                        if let ModalState::EditComponent(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
                     };
+                    let mut candidate_config = self.project.config.clone();
+                    ensure_grid_contains(&mut candidate_config.grid, sub_pos);
+                    let already_contains = candidate_config.connections.iter().any(|c| {
+                        c.from == component_id && c.to == sub_id && c.kind == EdgeKind::Contains
+                    });
+                    if !already_contains {
+                        candidate_config.connections.push(Connection {
+                            from: component_id.clone(),
+                            to: sub_id.clone(),
+                            kind: EdgeKind::Contains,
+                            label: None,
+                        });
+                    }
+                    let sub_comp = scaffold_sub_component(
+                        &sub_id,
+                        sub_name,
+                        ComponentKind::Concept,
+                        sub_pos,
+                        &component_id,
+                    );
+                    (Some(sub_comp), Some(candidate_config))
+                } else {
+                    (None, None)
+                };
 
-                let save_result = save_component(&self.root, &candidate).and_then(|()| {
-                    if let Some(ref sub_comp) = new_sub_comp {
-                        save_component(&self.root, sub_comp)?;
+                if let Err(err) = save_component(&self.root, &candidate) {
+                    let msg = format!("Failed to save {name}: {err}");
+                    if let ModalState::EditComponent(ref mut form) = modal {
+                        form.error = Some(msg.clone());
                     }
-                    if let Some(ref cfg) = grid_expanded_config {
-                        save_project_config(&self.root, cfg)?;
-                    }
-                    Ok(())
-                });
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    self.mode = InputMode::Modal;
+                    return;
+                }
 
-                match save_result {
-                    Ok(()) => {
-                        self.project.components[comp_idx] = candidate;
-                        if let Some(cfg) = grid_expanded_config {
-                            self.project.config = cfg;
-                        }
-                        if let Some(sub_comp) = new_sub_comp {
-                            let sub_id = sub_comp.id.clone();
-                            let sub_name = sub_comp.name.clone();
-                            self.project.components.push(sub_comp);
-                            let save_errors = if self.expanded_components.contains(&component_id) {
-                                self.resolve_visible_collisions_for(&sub_id)
-                            } else {
-                                Vec::new()
-                            };
-                            let base_msg = format!(
-                                "Updated component {name} and added sub-component {sub_name} ({sub_id})"
-                            );
-                            self.status_message = if save_errors.is_empty() {
-                                base_msg
-                            } else {
-                                format!("{base_msg} (save warning: {})", save_errors.join("; "))
-                            };
-                        } else {
-                            self.status_message = format!("Updated component {name}");
-                        }
-                    }
-                    Err(err) => {
-                        let msg = format!("Failed to save {name}: {err}");
+                if let Some(ref sub_comp) = new_sub_comp {
+                    if let Err(err) = save_component(&self.root, sub_comp) {
+                        let msg = match save_component(&self.root, &previous) {
+                            Ok(()) => {
+                                format!("Failed to save sub-component {}: {err}", sub_comp.name)
+                            }
+                            Err(rb_err) => format!(
+                                "Failed to save sub-component {}: {err} (rollback failed: {rb_err})",
+                                sub_comp.name
+                            ),
+                        };
                         if let ModalState::EditComponent(ref mut form) = modal {
                             form.error = Some(msg.clone());
                         }
@@ -399,6 +420,60 @@ impl App {
                         self.mode = InputMode::Modal;
                         return;
                     }
+                }
+
+                if let Some(ref cfg) = config_to_save {
+                    if let Err(err) = save_project_config(&self.root, cfg) {
+                        let mut rollback_errs = Vec::new();
+                        if let Some(ref sub_comp) = new_sub_comp {
+                            if let Err(rb_err) = delete_component(&self.root, &sub_comp.id) {
+                                rollback_errs.push(format!("delete {}: {rb_err}", sub_comp.id));
+                            }
+                        }
+                        if let Err(rb_err) = save_component(&self.root, &previous) {
+                            rollback_errs.push(format!("restore {}: {rb_err}", previous.id));
+                        }
+                        let msg = if rollback_errs.is_empty() {
+                            format!("Failed to save project config: {err}")
+                        } else {
+                            format!(
+                                "Failed to save project config: {err} (rollback failed: {})",
+                                rollback_errs.join("; ")
+                            )
+                        };
+                        if let ModalState::EditComponent(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
+                    }
+                }
+
+                self.project.components[comp_idx] = candidate;
+                if let Some(cfg) = config_to_save {
+                    self.project.config = cfg;
+                }
+                if let Some(sub_comp) = new_sub_comp {
+                    let sub_id = sub_comp.id.clone();
+                    let sub_name = sub_comp.name.clone();
+                    self.project.components.push(sub_comp);
+                    let save_errors = if self.expanded_components.contains(&component_id) {
+                        self.resolve_visible_collisions_for(&sub_id)
+                    } else {
+                        Vec::new()
+                    };
+                    let base_msg = format!(
+                        "Updated component {name} and added sub-component {sub_name} ({sub_id})"
+                    );
+                    self.status_message = if save_errors.is_empty() {
+                        base_msg
+                    } else {
+                        format!("{base_msg} (save warning: {})", save_errors.join("; "))
+                    };
+                } else {
+                    self.status_message = format!("Updated component {name}");
                 }
                 self.clamp_selection();
                 self.refresh_audit();
@@ -549,9 +624,74 @@ impl App {
                 let connections_changed =
                     candidate_config.connections.len() != self.project.config.connections.len();
 
+                let detached_children: Vec<(
+                    usize,
+                    crate::model::Component,
+                    crate::model::Component,
+                )> = self
+                    .project
+                    .components
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.id != id && c.parent_id.as_deref() == Some(id.as_str()))
+                    .map(|(idx, c)| {
+                        let previous = c.clone();
+                        let mut detached = previous.clone();
+                        detached.parent_id = None;
+                        (idx, previous, detached)
+                    })
+                    .collect();
+
+                let mut written_children: Vec<usize> = Vec::new();
+                for (plan_pos, (_, _, detached)) in detached_children.iter().enumerate() {
+                    if let Err(err) = save_component(&self.root, detached) {
+                        let mut rollback_errs = Vec::new();
+                        for prev_pos in written_children.into_iter().rev() {
+                            let (_, ref previous, _) = detached_children[prev_pos];
+                            if let Err(rb_err) = save_component(&self.root, previous) {
+                                rollback_errs.push(format!("restore {}: {rb_err}", previous.id));
+                            }
+                        }
+                        let msg = if rollback_errs.is_empty() {
+                            format!(
+                                "Failed to detach child {} before deleting {id}: {err}",
+                                detached.id
+                            )
+                        } else {
+                            format!(
+                                "Failed to detach child {} before deleting {id}: {err} (rollback failed: {})",
+                                detached.id,
+                                rollback_errs.join("; ")
+                            )
+                        };
+                        if let ModalState::ConfirmDelete(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
+                    }
+                    written_children.push(plan_pos);
+                }
+
                 if connections_changed {
                     if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                        let msg = format!("Failed to save connections before deleting {id}: {err}");
+                        let mut rollback_errs = Vec::new();
+                        for prev_pos in written_children.into_iter().rev() {
+                            let (_, ref previous, _) = detached_children[prev_pos];
+                            if let Err(rb_err) = save_component(&self.root, previous) {
+                                rollback_errs.push(format!("restore {}: {rb_err}", previous.id));
+                            }
+                        }
+                        let msg = if rollback_errs.is_empty() {
+                            format!("Failed to save connections before deleting {id}: {err}")
+                        } else {
+                            format!(
+                                "Failed to save connections before deleting {id}: {err} (rollback failed: {})",
+                                rollback_errs.join("; ")
+                            )
+                        };
                         if let ModalState::ConfirmDelete(ref mut form) = modal {
                             form.error = Some(msg.clone());
                         }
@@ -563,10 +703,26 @@ impl App {
                 }
 
                 if let Err(err) = delete_component(&self.root, &id) {
+                    let mut rollback_errs = Vec::new();
                     if connections_changed {
-                        let _ = save_project_config(&self.root, &self.project.config);
+                        if let Err(rb_err) = save_project_config(&self.root, &self.project.config) {
+                            rollback_errs.push(format!("restore config: {rb_err}"));
+                        }
                     }
-                    let msg = format!("Failed to delete component {id}: {err}");
+                    for prev_pos in written_children.into_iter().rev() {
+                        let (_, ref previous, _) = detached_children[prev_pos];
+                        if let Err(rb_err) = save_component(&self.root, previous) {
+                            rollback_errs.push(format!("restore {}: {rb_err}", previous.id));
+                        }
+                    }
+                    let msg = if rollback_errs.is_empty() {
+                        format!("Failed to delete component {id}: {err}")
+                    } else {
+                        format!(
+                            "Failed to delete component {id}: {err} (rollback failed: {})",
+                            rollback_errs.join("; ")
+                        )
+                    };
                     if let ModalState::ConfirmDelete(ref mut form) = modal {
                         form.error = Some(msg.clone());
                     }
@@ -576,16 +732,10 @@ impl App {
                     return;
                 }
 
-                self.project.components.retain(|c| c.id != id);
-                let mut detach_errors = Vec::new();
-                for child in &mut self.project.components {
-                    if child.parent_id.as_deref() == Some(id.as_str()) {
-                        child.parent_id = None;
-                        if let Err(err) = save_component(&self.root, child) {
-                            detach_errors.push(format!("failed to detach {}: {err}", child.id));
-                        }
-                    }
+                for (idx, _, detached) in detached_children {
+                    self.project.components[idx] = detached;
                 }
+                self.project.components.retain(|c| c.id != id);
                 self.expanded_components.remove(&id);
                 self.project.config = candidate_config;
                 self.connect_source_id = None;
@@ -596,14 +746,7 @@ impl App {
                 self.detail_scroll = 0;
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
-                self.status_message = if detach_errors.is_empty() {
-                    format!("Deleted component {id}")
-                } else {
-                    format!(
-                        "Deleted component {id} (warning: {})",
-                        detach_errors.join("; ")
-                    )
-                };
+                self.status_message = format!("Deleted component {id}");
             }
             ModalAction::DeleteConnection { from, to } => {
                 let mut candidate_config = self.project.config.clone();
@@ -616,7 +759,21 @@ impl App {
                     self.status_message = format!("Connection {from} -> {to} not found");
                     return;
                 };
-                candidate_config.connections.remove(pos);
+                let removed = candidate_config.connections.remove(pos);
+
+                let updated_to_comp = if removed.kind == EdgeKind::Contains {
+                    self.project.component(&to).and_then(|c| {
+                        if c.parent_id.as_deref() == Some(from.as_str()) {
+                            let mut updated = c.clone();
+                            updated.parent_id = None;
+                            Some(updated)
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                };
 
                 if let Err(err) = save_project_config(&self.root, &candidate_config) {
                     let msg = format!("Failed to save connections: {err}");
@@ -629,8 +786,32 @@ impl App {
                     return;
                 }
 
+                if let Some(ref updated_comp) = updated_to_comp {
+                    if let Err(err) = save_component(&self.root, updated_comp) {
+                        let msg = match save_project_config(&self.root, &self.project.config) {
+                            Ok(()) => format!("Failed to save component {to}: {err}"),
+                            Err(rollback_err) => format!(
+                                "Failed to save component {to}: {err} (rollback failed: {rollback_err})"
+                            ),
+                        };
+                        if let ModalState::ConfirmDelete(ref mut form) = modal {
+                            form.error = Some(msg.clone());
+                        }
+                        self.status_message = msg;
+                        self.modal = Some(modal);
+                        self.mode = InputMode::Modal;
+                        return;
+                    }
+                }
+
                 self.project.config = candidate_config;
+                if let Some(updated_comp) = updated_to_comp {
+                    if let Some(slot) = self.project.component_mut(&to) {
+                        *slot = updated_comp;
+                    }
+                }
                 self.connect_source_id = None;
+                self.clamp_selection();
                 self.refresh_audit();
                 self.mode = InputMode::Navigate;
                 self.status_message = format!("Deleted connection {from} -> {to}");
@@ -702,7 +883,7 @@ impl App {
                         .config
                         .connections
                         .iter()
-                        .find(|c| c.from == comp_id)
+                        .rfind(|c| c.from == comp_id)
                     {
                         self.modal = Some(ModalState::edit_connection(
                             &conn.from,

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::model::{GridConfig, GridPos};
+use crate::model::{Component, GridConfig, GridPos};
 use crate::storage::{save_component, save_project_config};
 
 use super::state::{App, Direction};
@@ -206,86 +206,14 @@ impl App {
         None
     }
 
-    pub(super) fn find_proximity_grid_pos(&self, anchor: GridPos) -> GridPos {
+    pub(super) fn find_proximity_grid_pos(&self, anchor: GridPos) -> Option<GridPos> {
         let occupied: HashSet<GridPos> = self
             .visible_component_indices()
             .into_iter()
             .filter_map(|idx| self.project.components.get(idx).map(|c| c.position))
             .collect();
 
-        let cols = self.project.config.grid.cols.max(1);
-        let rows = self.project.config.grid.rows.max(1);
-        let max_dist = cols.saturating_add(rows);
-
-        let is_free_in_bounds =
-            |pos: GridPos| -> bool { pos.col < cols && pos.row < rows && !occupied.contains(&pos) };
-
-        for dist in 1..=max_dist {
-            // 1. Right / below anchor first: (+dist, 0), ..., (0, +dist)
-            for dr in 0..=dist {
-                let dc = dist - dr;
-                if let (Some(col), Some(row)) =
-                    (anchor.col.checked_add(dc), anchor.row.checked_add(dr))
-                {
-                    let candidate = GridPos { col, row };
-                    if is_free_in_bounds(candidate) {
-                        return candidate;
-                    }
-                }
-            }
-
-            // 2. Right / above anchor: dc > 0, dr < 0
-            for dr in 1..dist {
-                let dc = dist - dr;
-                if let (Some(col), Some(row)) =
-                    (anchor.col.checked_add(dc), anchor.row.checked_sub(dr))
-                {
-                    let candidate = GridPos { col, row };
-                    if is_free_in_bounds(candidate) {
-                        return candidate;
-                    }
-                }
-            }
-
-            // 3. Left / below anchor: dc < 0, dr > 0
-            for dc in 1..dist {
-                let dr = dist - dc;
-                if let (Some(col), Some(row)) =
-                    (anchor.col.checked_sub(dc), anchor.row.checked_add(dr))
-                {
-                    let candidate = GridPos { col, row };
-                    if is_free_in_bounds(candidate) {
-                        return candidate;
-                    }
-                }
-            }
-
-            // 4. Left / above anchor: dc <= 0, dr <= 0
-            for dr in 0..=dist {
-                let dc = dist - dr;
-                if let (Some(col), Some(row)) =
-                    (anchor.col.checked_sub(dc), anchor.row.checked_sub(dr))
-                {
-                    let candidate = GridPos { col, row };
-                    if is_free_in_bounds(candidate) {
-                        return candidate;
-                    }
-                }
-            }
-        }
-
-        // Grid is full within current bounds: expand to the right of the grid at anchor.row.
-        let mut extra_col = cols;
-        loop {
-            let candidate = GridPos {
-                col: extra_col,
-                row: anchor.row,
-            };
-            if !occupied.contains(&candidate) {
-                return candidate;
-            }
-            extra_col = extra_col.saturating_add(1);
-        }
+        find_proximity_in_occupied(anchor, self.project.config.grid, &occupied)
     }
 
     pub(super) fn resolve_visible_collisions_for(&mut self, protected_id: &str) -> Vec<String> {
@@ -304,31 +232,200 @@ impl App {
             })
             .collect();
 
+        if colliding_indices.is_empty() {
+            return Vec::new();
+        }
+
+        let mut occupied: HashSet<GridPos> = self
+            .visible_component_indices()
+            .into_iter()
+            .filter_map(|idx| self.project.components.get(idx).map(|c| c.position))
+            .collect();
+
+        let mut candidate_config = self.project.config.clone();
         let mut grid_expanded_any = false;
+        let mut planned: Vec<(usize, Component, Component)> = Vec::new();
         let mut errors = Vec::new();
 
         for idx in colliding_indices {
-            let new_pos = self.find_proximity_grid_pos(protected_pos);
-            let Some(mut candidate) = self.project.components.get(idx).cloned() else {
+            let Some(previous) = self.project.components.get(idx).cloned() else {
                 continue;
             };
-            candidate.position = new_pos;
-            if let Err(err) = save_component(&self.root, &candidate) {
-                errors.push(format!("failed to save {}: {err}", candidate.id));
+            let Some(new_pos) =
+                find_proximity_in_occupied(protected_pos, candidate_config.grid, &occupied)
+            else {
+                errors.push(format!(
+                    "no free grid cell available to relocate {}",
+                    previous.id
+                ));
                 continue;
-            }
-            if ensure_grid_contains(&mut self.project.config.grid, new_pos) {
+            };
+            occupied.insert(new_pos);
+            if ensure_grid_contains(&mut candidate_config.grid, new_pos) {
                 grid_expanded_any = true;
             }
-            self.project.components[idx] = candidate;
+            let mut candidate = previous.clone();
+            candidate.position = new_pos;
+            planned.push((idx, previous, candidate));
         }
 
-        if grid_expanded_any {
-            if let Err(err) = save_project_config(&self.root, &self.project.config) {
-                errors.push(format!("failed to save grid config: {err}"));
+        let mut written: Vec<usize> = Vec::new();
+        let mut failed = false;
+
+        for (plan_pos, (_, _, candidate)) in planned.iter().enumerate() {
+            if let Err(err) = save_component(&self.root, candidate) {
+                errors.push(format!("failed to save {}: {err}", candidate.id));
+                failed = true;
+                break;
             }
+            written.push(plan_pos);
+        }
+
+        let mut config_written = false;
+        if !failed && grid_expanded_any {
+            if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                errors.push(format!("failed to save grid config: {err}"));
+                failed = true;
+            } else {
+                config_written = true;
+            }
+        }
+
+        if failed {
+            if config_written {
+                if let Err(rb_err) = save_project_config(&self.root, &self.project.config) {
+                    errors.push(format!("rollback failed for grid config: {rb_err}"));
+                }
+            }
+            for plan_pos in written.into_iter().rev() {
+                let (_, ref previous, _) = planned[plan_pos];
+                if let Err(rb_err) = save_component(&self.root, previous) {
+                    errors.push(format!("rollback failed for {}: {rb_err}", previous.id));
+                }
+            }
+            return errors;
+        }
+
+        for (comp_idx, _, candidate) in planned {
+            self.project.components[comp_idx] = candidate;
+        }
+        if grid_expanded_any {
+            self.project.config = candidate_config;
         }
 
         errors
     }
+}
+
+fn find_proximity_in_occupied(
+    anchor: GridPos,
+    grid: GridConfig,
+    occupied: &HashSet<GridPos>,
+) -> Option<GridPos> {
+    let cols = grid.cols.max(1);
+    let rows = grid.rows.max(1);
+    let max_dist = cols.saturating_add(rows);
+
+    let is_free_in_bounds =
+        |pos: GridPos| -> bool { pos.col < cols && pos.row < rows && !occupied.contains(&pos) };
+
+    let total_in_bounds = u64::from(cols) * u64::from(rows);
+    let occupied_in_bounds = occupied
+        .iter()
+        .filter(|pos| pos.col < cols && pos.row < rows)
+        .count() as u64;
+
+    if occupied_in_bounds < total_in_bounds {
+        for dist in 1..=max_dist {
+            // 1. Right / below anchor first: (+dist, 0), ..., (0, +dist)
+            if anchor.row < rows {
+                let max_dr = dist.min((rows - 1) - anchor.row);
+                for dr in 0..=max_dr {
+                    let dc = dist - dr;
+                    if let (Some(col), Some(row)) =
+                        (anchor.col.checked_add(dc), anchor.row.checked_add(dr))
+                    {
+                        let candidate = GridPos { col, row };
+                        if is_free_in_bounds(candidate) {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+
+            // 2. Right / above anchor: dc > 0, dr < 0
+            if dist > 1 && anchor.row > 0 {
+                let max_dr = (dist - 1).min(anchor.row);
+                for dr in 1..=max_dr {
+                    let dc = dist - dr;
+                    if let (Some(col), Some(row)) =
+                        (anchor.col.checked_add(dc), anchor.row.checked_sub(dr))
+                    {
+                        let candidate = GridPos { col, row };
+                        if is_free_in_bounds(candidate) {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+
+            // 3. Left / below anchor: dc < 0, dr > 0
+            if dist > 1 && anchor.row < rows {
+                let max_dr = (dist - 1).min((rows - 1) - anchor.row);
+                if max_dr >= 1 {
+                    let min_dc = dist - max_dr;
+                    for dc in min_dc..dist {
+                        let dr = dist - dc;
+                        if let (Some(col), Some(row)) =
+                            (anchor.col.checked_sub(dc), anchor.row.checked_add(dr))
+                        {
+                            let candidate = GridPos { col, row };
+                            if is_free_in_bounds(candidate) {
+                                return Some(candidate);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Left / above anchor: dc <= 0, dr <= 0
+            let max_dr = dist.min(anchor.row);
+            for dr in 0..=max_dr {
+                let dc = dist - dr;
+                if let (Some(col), Some(row)) =
+                    (anchor.col.checked_sub(dc), anchor.row.checked_sub(dr))
+                {
+                    let candidate = GridPos { col, row };
+                    if is_free_in_bounds(candidate) {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    // Grid is full within current bounds: expand to the right of the grid at anchor.row.
+    let mut extra_col = Some(cols);
+    while let Some(col) = extra_col {
+        let candidate = GridPos {
+            col,
+            row: anchor.row,
+        };
+        if !occupied.contains(&candidate) {
+            return Some(candidate);
+        }
+        extra_col = col.checked_add(1);
+    }
+
+    // anchor.row is exhausted across cols..=u16::MAX; scan remaining cells across 0..=u16::MAX.
+    for row in 0..=u16::MAX {
+        for col in 0..=u16::MAX {
+            let candidate = GridPos { col, row };
+            if !occupied.contains(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
 }
