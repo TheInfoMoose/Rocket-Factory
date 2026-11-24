@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0124"
 type = "task"
 title = "tests"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T21:47:45Z"
-updated_at = "2026-11-24T21:47:45Z"
+updated_at = "2026-11-24T22:02:54Z"
 source_ref = "STEP 19D"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0124@2026-11-24T22:00:39Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "5ef6c41"
+summary = "STEP 19D: `terminal.rs` Event-Loop/Editor & `storage.rs` Error/Symlink Tests (`TASK-0079`, `TASK-0080`) (phased check PASS)"
