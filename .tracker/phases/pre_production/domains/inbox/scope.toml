@@ -168,14 +168,14 @@ created_at = "2026-11-23T15:51:26Z"
 [[items.bugs]]
 id = "BUG-0024"
 title = "[BUG-01] render_component_list uses stateless List without ListState and never scrolls on overflow"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:51:27Z"
 
 [[items.bugs]]
 id = "BUG-0025"
 title = "[BUG-02] find_proximity_grid_pos infinite loop at u16::MAX"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:28Z"
 
@@ -1095,3 +1095,45 @@ title = "security"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-24T04:44:18Z"
+
+[[items.tasks]]
+id = "TASK-0106"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"
+
+[[items.tasks]]
+id = "TASK-0107"
+title = "storage"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"
+
+[[items.tasks]]
+id = "TASK-0108"
+title = "audit"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"
+
+[[items.tasks]]
+id = "TASK-0109"
+title = "adapter"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"
+
+[[items.tasks]]
+id = "TASK-0110"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"
+
+[[items.tasks]]
+id = "TASK-0111"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T05:31:30Z"

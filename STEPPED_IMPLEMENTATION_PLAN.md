@@ -6,7 +6,7 @@
 
 **Base gate:** `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
 
-**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*`
+**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*:scripts/*`
 
 **Planning files:** `Rocket Factory.md:docs/*`
 
@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 16):** Fix all phased-workflow script bugs (`SCR-01`–`SCR-07`, `BUG-0047`–`BUG-0053`) and security vulnerabilities (`SEC-01`–`SEC-06`, `BUG-0018`–`BUG-0023`): harden `scripts/phased-step.sh` and `scripts/neon-dispatch`, remove CWD `.rocket/adapters.toml` fallback and require `--auto-pull` for startup adapter sync, add concurrent I/O + timeout + output bounds to `run_command_with_stdin`, harden symlink/size checks in `storage.rs` and `theme.rs`, add quote-aware `$EDITOR` parsing, and strip control characters in modal input and TUI rendering.
+**Phase goal (Phase 17):** Clean up `RbError` variants and `pub` crate surface (`TASK-0072`, `TASK-0073`), harden `model.rs` serde defaults/`GridConfig` validation, `storage.rs` durability/load checks, and missing `.rocket/` mutation guard (`BUG-0033`–`BUG-0035`, `BUG-0039`), expand `audit_project` and fix `export.rs` (`BUG-0038`, `BUG-0044`), fix CLI exit-code/env/`--component` validation (`BUG-0046`), consolidate adapter sync orchestration without full `Project` deep clones (`TASK-0070`, `TASK-0076`, `BUG-0036`, `BUG-0037`, `BUG-0045`), preserve legacy `ComponentKind` on TUI edit (`TASK-0071`), and split `src/tui/app.rs` into submodules with deduplicated grid/path helpers (`TASK-0069`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,12 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 16A** | `/goal` | scripts | `scripts/phased-step.sh`, `scripts/neon-dispatch` | — |
-| 2 | **STEP 16B** | `/goal` | security | `src/cli.rs`, `src/main.rs`, `src/tui/terminal.rs` | — |
-| 3 | **STEP 16C** | `/goal` | security | `src/adapter.rs` | — |
-| 4 | **STEP 16D** | `/goal` | security | `src/storage.rs`, `src/theme.rs` | — |
-| 5 | **STEP 16E** | `/goal` | security | `src/tui/terminal.rs` | — |
-| 6 | **STEP 16F** | `/goal` | security | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` | — |
+| 1 | **STEP 17A** | `/goal` | core | `src/error.rs`, `src/cli.rs`, `src/theme.rs`, `src/main.rs` | — |
+| 2 | **STEP 17B** | `/goal` | storage | `src/model.rs`, `src/storage.rs`, `src/tui/app.rs` | **STEP 17A** |
+| 3 | **STEP 17C** | `/goal` | audit | `src/audit.rs`, `src/export.rs` | — |
+| 4 | **STEP 17D** | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` | **STEP 17B** |
+| 5 | **STEP 17E** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/mod.rs`, `src/tui/canvas.rs`, `src/tui/terminal.rs` | **STEP 17D** |
+| 6 | **STEP 17F** | `/goal` | tui | `src/tui/app.rs`, `src/tui/app/*`, `src/storage.rs`, `src/theme.rs`, `src/tui/terminal.rs` | **STEP 17E** |
 
 ### Completed
 
@@ -97,6 +97,12 @@
 | **STEP 15B** | Done (`3167e10`) | `/goal` | core | `src/error.rs`, `src/lib.rs`, `src/adapter.rs`, `src/cli.rs`, `src/export.rs`, `src/storage.rs`, `src/theme.rs`, `src/tui/app.rs`, `src/tui/terminal.rs` |
 | **STEP 15C** | Done (`864c112`) | `/goal` | ui | `src/cli.rs`, `src/tui/terminal.rs`, `src/tui/ui.rs`, `src/model.rs` |
 | **STEP 15D** | Done (`2e83b6e`) | `/goal` | docs | `README.md`, `LICENSE`, `.github/workflows/ci.yml` |
+| **STEP 16A** | Done (`dcc594d`) | `/goal` | scripts | `scripts/phased-step.sh`, `scripts/neon-dispatch` |
+| **STEP 16B** | Done (`3b8c122`) | `/goal` | security | `src/cli.rs`, `src/main.rs`, `src/tui/terminal.rs` |
+| **STEP 16C** | Done (`4928acb`) | `/goal` | security | `src/adapter.rs` |
+| **STEP 16D** | Done (`86781d7`) | `/goal` | security | `src/storage.rs`, `src/theme.rs` |
+| **STEP 16E** | Done (`db3e74f`) | `/goal` | security | `src/tui/terminal.rs` |
+| **STEP 16F** | Done (`1c5c729`) | `/goal` | security | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` |
 
 ### Future phases
 
@@ -4097,6 +4103,348 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub\(crate\) fn sanitize_display_text\b' src/tui/ui.rs && grep -qE 'fn modal_rejects_control_characters_in_text_input\b' src/tui/modal.rs && grep -qE 'fn render_strips_control_chars_from_untrusted_text\b' src/tui/ui.rs && grep -qE 'fn canvas_strips_control_chars_from_card_and_edge_labels\b' src/tui/canvas.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17A: Error Variant Cleanup & CLI Validation Fixes
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 17A: Clean up RbError variant overloading and fix CLI exit code, env parsing, and export --component validation (`TASK-0072`, `BUG-0046`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/error.rs
+  - src/cli.rs
+  - src/theme.rs
+  - src/main.rs
+READ_ONLY_REFS:
+  - src/export.rs (export_component_manifest_toml, export_roadmap_markdown, export_project_json)
+  - tests/e2e.rs (existing CLI assertions)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not rename RbError itself or change existing variant names other than JsonSerialize -> Json.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Eliminate overloaded RbError variants and fix CLI exit-code truncation, silent RKTB_POLL_INTERVAL_SECS parse failures, and export --component flag handling.
+
+Contract & Behavior:
+  1. `src/error.rs`:
+     - Add `InvalidArgument(String)` (`#[error("invalid argument: {0}")]`) and `Validation(String)` (`#[error("validation error: {0}")]`) to `RbError`.
+     - Rename `RbError::JsonSerialize(#[from] serde_json::Error)` to `RbError::Json(#[from] serde_json::Error)` with display `#[error("JSON error: {0}")]`.
+  2. `src/theme.rs`:
+     - In `validate_theme_name`, return `RbError::Validation(...)` instead of `RbError::PathEscape(...)` when rejecting empty names, `/`, `\`, `..`, or null bytes. Keep `RbError::PathEscape` for directory/symlink boundary escapes.
+     - Update affected unit tests in `src/theme.rs` to assert `RbError::Validation`.
+  3. `src/cli.rs`:
+     - Return `RbError::InvalidArgument(...)` instead of `RbError::NotFound(...)` when `export --format manifest` is invoked without `--component` and when `push`/`pull` have an empty `adapters_path` (no adapters file configured).
+     - When `export --format roadmap` or `export --format json` is invoked with `--component <id>`, return `Err(RbError::InvalidArgument("export --component is only supported with --format manifest".into()))` instead of silently ignoring `--component`.
+     - Update affected unit tests in `src/cli.rs` to assert `RbError::InvalidArgument`.
+  4. `src/main.rs`:
+     - When `output.exit_code != 0`, convert without `as u8` truncation: `ExitCode::from(u8::try_from(output.exit_code).unwrap_or(1))`.
+     - When `RKTB_POLL_INTERVAL_SECS` is set, if parsing as `u64` fails or yields `0`, print a warning to `stderr` (`eprintln!("warning: ignoring invalid RKTB_POLL_INTERVAL_SECS={raw:?}; expected positive integer seconds")`) and leave `poll_interval` as `None`.
+
+Must still work:
+  - `export --format manifest --component <id>` still exports the component manifest TOML.
+  - `export --format roadmap` and `export --format json` without `--component` still exit `0` and emit roadmap/JSON output.
+  - `resolve_theme` still rejects symlinked theme files or escaping paths with `RbError::PathEscape`.
+
+Drops:
+  - Removes `RbError::JsonSerialize` in favor of `RbError::Json`.
+
+Tests:
+  - `export_rejects_component_with_roadmap_or_json` (`src/cli.rs`): call `execute_command` with `ExportKind::Roadmap` and `component: Some("core".into())` and with `ExportKind::Json` and `component: Some("core".into())` -> both return `Err(RbError::InvalidArgument(_))`.
+  - `export_manifest_requires_component_returns_invalid_argument` (`src/cli.rs`): call `execute_command` with `ExportKind::Manifest` and `component: None` -> returns `Err(RbError::InvalidArgument(_))`.
+  - `resolve_theme_rejects_invalid_theme_name_with_validation` (`src/theme.rs`): call `resolve_theme` with `"../evil"` and `""` -> returns `Err(RbError::Validation(_))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'InvalidArgument\(String\)' src/error.rs && grep -qE 'Validation\(String\)' src/error.rs && grep -qE 'Json\(#\[from\] serde_json::Error\)' src/error.rs && grep -qE 'fn export_rejects_component_with_roadmap_or_json' src/cli.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17B: Model Serde Defaults, Storage Durability & Missing `.rocket/` Guard
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 17B: Add serde defaults and GridConfig validation in model.rs, harden storage.rs durability and load checks, and fail loudly when .rocket/ is missing on App mutations (`BUG-0033`, `BUG-0034`, `BUG-0035`, `BUG-0039`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/model.rs
+  - src/storage.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/error.rs (RbError::Validation, RbError::AlreadyExists, RbError::Io)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not split src/tui/app.rs in this step.
+
+[PRE_GATE]
+grep -qE 'Validation\(String\)' src/error.rs
+
+[MUTATION_SPEC]
+Goal: Ensure minimal hand-authored TOMLs deserialize cleanly, 0x0 GridConfig is rejected, atomic writes and two-file component saves are durable/atomic, duplicate or mismatched component files fail load_project, and App mutations never silently drop disk persistence when .rocket/ is missing.
+
+Contract & Behavior:
+  1. `src/model.rs`:
+     - Add `#[serde(default)]` to fields of `Component` (`name`, `kind`, `parent_id`, `description`, `relative_path`, `position`, `tags`, `tech_stack`, `files`, `flags`, `features`, `external_tasks`), `ProjectConfig` (`name`, `description`, `theme`, `active_adapters`, `grid`, `connections`), `FeatureItem` (`pushed`, `external_id`), and `Connection` (`kind`, `label`), deriving `Default` where needed. Keep `id` / `title` / `from` / `to` required or defaulted consistently so minimal TOMLs with `[id]` / `name` deserialize without failing on omitted optional lists/flags.
+     - Add `pub fn validate(&self) -> RbResult<()>` on `GridConfig` returning `Err(RbError::Validation("grid dimensions must be at least 1x1".into()))` when `self.cols == 0 || self.rows == 0`.
+  2. `src/storage.rs`:
+     - Call `config.grid.validate()?` in `save_project_config` and `load_project`.
+     - In `atomic_write`: create temp files using `OpenOptions::new().write(true).create_new(true)` (`O_EXCL`) with a unique per-write suffix (PID + atomic counter), `sync_all()` the file before `fs::rename`, and `sync_all()` the parent directory after `fs::rename` (ignoring unsupported-fs errors such as `EINVAL`/`EACCES`/`EBADF` if directory sync is not supported).
+     - In `save_component`: snapshot existing `.toml` and `.md` file bytes/existence before writing; if writing `.md` fails after `.toml` was written, restore `.toml` to its prior contents (or remove it if it did not exist) before returning the error.
+     - In `load_project`: verify that each `*.toml` entry's file stem matches `component.id` (returning `Err(RbError::Validation(...))` on mismatch) and reject duplicate `component.id` values across files with `Err(RbError::AlreadyExists(...))`.
+  3. `src/tui/app.rs`:
+     - Remove all `if self.root.join(ROCKET_DIR).exists()` bypasses around `save_component`, `save_project_config`, and `delete_component`. Persistent mutations must attempt disk persistence and roll back in-memory state + surface the error (`status_message` / modal error / `Err`) if `.rocket/` is missing or persistence fails.
+     - Update any existing `App` unit tests that invoke persistent mutations without `.rocket/` to initialize a workspace via `init_workspace` first (except tests specifically verifying missing-`.rocket/` failure).
+
+Must still work:
+  - Existing valid `.rocket/project.toml` and `.rocket/components/*.toml` workspaces load and save identically.
+  - All existing `App` unit tests and `tests/e2e.rs` integration tests pass.
+
+Drops:
+  - Removes silent in-memory-only fallback when `.rocket/` is absent during `App` mutations.
+
+Tests:
+  - `minimal_toml_deserializes_with_defaults_and_zero_grid_rejected` (`src/model.rs`): deserialize a `Component` TOML with only `id = "c1"` and a `ProjectConfig` TOML with `name = "p"` -> succeeds with default fields; call `GridConfig { cols: 0, rows: 4 }.validate()` -> returns `Err(RbError::Validation(_))`.
+  - `load_project_rejects_duplicate_ids_and_stem_mismatch` (`src/storage.rs`): write `a.toml` with `id = "b"` in `.rocket/components/` -> `load_project` returns `Err(RbError::Validation(_))`; write `a.toml` and `b.toml` both with `id = "a"` -> `load_project` returns `Err(_)`.
+  - `mutation_errors_when_rocket_dir_missing` (`src/tui/app.rs`): construct `App` pointing to a temp dir without `.rocket/`, attempt a component create/edit/move/delete -> persistence fails, in-memory `project` is unchanged, and error is surfaced.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn validate\(&self\) -> RbResult<\(\)>' src/model.rs && grep -qE 'create_new\(true\)' src/storage.rs && grep -qE 'fn load_project_rejects_duplicate_ids_and_stem_mismatch' src/storage.rs && grep -qE 'fn mutation_errors_when_rocket_dir_missing' src/tui/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17C: Structural Audit Checks & Escaped Export Output
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 17C: Expand audit_project structural checks and fix export.rs manifest fields, Markdown escaping, and JSON trailing newline (`BUG-0038`, `BUG-0044`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/audit.rs
+  - src/export.rs
+READ_ONLY_REFS:
+  - src/model.rs (Project, Component, Connection, EdgeKind, GridConfig, GridPos)
+  - tests/e2e.rs (audit and export tests)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Detect all structural graph/grid/hierarchy defects in audit_project and produce complete, safely escaped manifest, Markdown roadmap, and JSON exports.
+
+Contract & Behavior:
+  1. `src/audit.rs`:
+     - Add `FindingKind` variants: `DuplicateComponentId`, `InvalidParent`, `SelfConnection`, `InvalidGrid`, and `HierarchyDrift`.
+     - Update `audit_project` to emit `FindingSeverity::Error` for:
+       * Duplicate `component.id` values (`DuplicateComponentId`).
+       * Dangling `parent_id` referencing a non-existent component (`InvalidParent`).
+       * Cycles in `parent_id` chains, including self-parenting (`InvalidParent`).
+       * Self-connections where `conn.from == conn.to` (`SelfConnection`).
+       * `GridConfig` with `cols == 0 || rows == 0`, out-of-bounds top-level `GridPos` (`col >= grid.cols || row >= grid.rows`), or overlapping `GridPos` among top-level components or among siblings under the same `parent_id` (`InvalidGrid`).
+     - Emit `FindingSeverity::Warning` when `EdgeKind::Contains` connections and `parent_id` disagree (e.g., `Contains` edge `parent -> child` without matching `child.parent_id == Some(parent)`, or vice versa) (`HierarchyDrift`).
+  2. `src/export.rs`:
+     - Add `pub parent_id: Option<String>` and `pub position: GridPos` to `ComponentManifestExport`.
+     - Exclude `EdgeKind::Contains` edges from `ComponentManifestExport::dependencies` (`conn.from == component_id && conn.kind != EdgeKind::Contains`).
+     - In `export_roadmap_markdown`, escape `|` -> `\|`, replace `\r`/`\n` with spaces, and escape backticks `` ` `` -> `` \` `` in interpolated `project.config.name`, `component.id`, `component.name`, `feature.id`, and `feature.title`.
+     - Ensure `export_project_json` ends with a trailing `\n`.
+
+Must still work:
+  - Existing `UntrackedComponent`, `UnpushedFeatures`, and `DanglingConnection` findings and severities remain unchanged.
+  - `export_project_json` output remains valid JSON parseable by `serde_json::from_str`.
+
+Drops: none
+
+Tests:
+  - `audit_detects_parent_cycle_and_grid_overlap` (`src/audit.rs`): build a `Project` with a 2-node `parent_id` cycle, a dangling `parent_id`, a duplicate component ID, a self-connection, overlapping `GridPos`, and `Contains`/`parent_id` drift -> `audit_project` reports `DuplicateComponentId`, `InvalidParent`, `SelfConnection`, `InvalidGrid`, and `HierarchyDrift`.
+  - `export_manifest_includes_hierarchy_and_excludes_contains` (`src/export.rs`): export a child component with `parent_id`, `GridPos`, a `Contains` edge, and a `DependsOn` edge -> TOML includes `parent_id` and `position` and `dependencies` contains only `DependsOn`.
+  - `export_roadmap_escapes_markdown_cells` (`src/export.rs`): export a project whose component name and feature title contain `|`, `\n`, and `` ` `` -> Markdown table cells are single-line with escaped `\|` and `` \` ``; `export_project_json` ends with `\n`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'DuplicateComponentId' src/audit.rs && grep -qE 'SelfConnection' src/audit.rs && grep -qE 'pub parent_id: Option<String>' src/export.rs && grep -qE 'fn audit_detects_parent_cycle_and_grid_overlap' src/audit.rs && grep -qE 'fn export_roadmap_escapes_markdown_cells' src/export.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17D: Consolidated Adapter Sync, Multi-Adapter Fixes & Zero-Clone Staging
+
+* **Recommended Command:** `/boost`
+
+```text
+[STEP_ID]
+STEP 17D: Consolidate CLI/TUI adapter sync orchestration in adapter.rs, fix multi-adapter reconcile/push/UTF-8/MarkdownRoadmap bugs, and avoid full Project deep clones (`TASK-0070`, `TASK-0076`, `BUG-0036`, `BUG-0037`, `BUG-0045`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+  - src/cli.rs
+  - src/tui/app.rs
+READ_ONLY_REFS:
+  - src/storage.rs (save_component, validate_component_id)
+  - src/export.rs (export_component_manifest_toml, export_roadmap_markdown, export_project_json)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not split src/tui/app.rs in this step.
+
+[PRE_GATE]
+grep -qE 'fn load_project_rejects_duplicate_ids_and_stem_mismatch' src/storage.rs
+
+[MUTATION_SPEC]
+Goal: Unify CLI and TUI adapter sync in src/adapter.rs with staged persistence, zero full-Project deep clones, accurate multi-adapter reconciliation/push tracking, strict UTF-8 decoding, and surfaced PushResponse metadata.
+
+Contract & Behavior:
+  1. `src/adapter.rs`:
+     - Add `pub fn sync_pull_project(project: &mut Project, root: &Path, adapters_path: &Path, adapter_filter: Option<&str>) -> RbResult<PullSyncReport>` and `pub fn sync_push_project(project: &mut Project, root: &Path, adapters_path: &Path, component_ids: &[String], adapter_filter: Option<&str>) -> RbResult<PushSyncReport>`.
+     - In `sync_pull_project`: serialize `export_project_json(project)` once and pass that payload to each active pull adapter instead of re-serializing per adapter; deduplicate `updated_ids` via `HashSet` (no `Vec::contains` linear scan); avoid cloning `Project` (including all `markdown_body` strings) by staging only affected components (or mutating/persisting via `save_component` cleanly without full `Project::clone()`).
+     - Fix `reconcile_status` (`BUG-0036`): merge `external_tasks` across adapters and duplicate `component_id` entries within a response by upserting on `external_id` instead of overwriting `component.external_tasks = entry.tasks.clone()`; count each updated component once per response via `HashSet`; only auto-link `feature.external_id.is_none()` by title when exactly one task matches `feature.title` (or when `external_id` matches).
+     - Fix `push_unpushed_features` (`BUG-0037`): record `feature.pushed = true` and `external_id` immediately per feature/adapter completion (persisting partial progress on error so retries do not re-push already-pushed features), and retain `external_id` from secondary adapters if earlier adapters returned `None`.
+     - Fix `run_push_component` & `run_command_with_limits` (`BUG-0045`): validate `project.component(component_id).ok_or_else(|| RbError::NotFound(...))?` for `ExportFormat::MarkdownRoadmap` as well as `TomlManifest` and `Json`; decode `stdout` with `String::from_utf8(stdout_bytes)` returning `Err(RbError::Adapter(...))` on invalid UTF-8 instead of lossy `U+FFFD`.
+     - Surface `PushResponse` (`external_id`, `message`) in `PushSyncReport`.
+  2. `src/cli.rs` & `src/tui/app.rs`:
+     - Route `Command::Push`, `Command::Pull`, `App::sync_pull`, and `App::sync_push_selected` through `adapter::sync_pull_project` and `adapter::sync_push_project`.
+     - Surface `PushResponse` (`external_id` / `message`) in CLI stdout and TUI `status_message`, and remove `Project::clone()` from `App::sync_pull` and `App::sync_push_selected`.
+
+Must still work:
+  - `App::sync_pull` and `App::sync_push_selected` return friendly status messages when `active_adapters` is empty or no component is selected.
+  - Existing adapter E2E tests in `tests/e2e.rs` and unit tests in `src/adapter.rs` and `src/cli.rs` pass.
+
+Drops: none
+
+Tests:
+  - `reconcile_status_merges_multi_adapter_tasks_without_clobbering` (`src/adapter.rs`): reconcile two responses for the same component -> both adapters' `external_tasks` are retained and `components_updated` counts unique components.
+  - `push_unpushed_features_records_partial_progress_on_failure` (`src/adapter.rs`): push 2 features where feature #2 fails -> feature #1 is marked `pushed = true` with its `external_id` so retry skips feature #1.
+  - `run_command_rejects_invalid_utf8_stdout` (`src/adapter.rs`): run a command emitting invalid UTF-8 bytes on stdout -> returns `Err(RbError::Adapter(_))`.
+  - `run_push_component_markdown_roadmap_requires_existing_component` (`src/adapter.rs`): call `run_push_component` with `ExportFormat::MarkdownRoadmap` and a missing component ID -> returns `Err(RbError::NotFound(_))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn sync_pull_project' src/adapter.rs && grep -qE 'pub fn sync_push_project' src/adapter.rs && grep -qE 'from_utf8\(' src/adapter.rs && grep -qE 'fn run_command_rejects_invalid_utf8_stdout' src/adapter.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17E: Legacy ComponentKind Preservation & Narrow Crate Surface
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 17E: Preserve legacy ComponentKind on TUI edit unless explicitly changed and narrow over-exposed pub crate surface (`TASK-0071`, `TASK-0073`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/app.rs
+  - src/tui/mod.rs
+  - src/tui/canvas.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/archetype.rs (ARCHETYPES, archetype_for)
+  - tests/e2e.rs (all rocket_bench::tui::* imports)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not break any `rocket_bench::*` imports used by `src/main.rs` or `tests/e2e.rs`.
+
+[PRE_GATE]
+grep -qE 'pub fn sync_pull_project' src/adapter.rs
+
+[MUTATION_SPEC]
+Goal: Stop coercing legacy ComponentKind variants during TUI component edits when the archetype field is unchanged, and narrow internal TUI modules/types to pub(crate) while removing dead canvas exports.
+
+Contract & Behavior:
+  1. `src/tui/modal.rs` & `src/tui/app.rs`:
+     - In `EditComponentForm` / `ModalState::edit_component`, store `original_kind: ComponentKind` and `initial_archetype_index: usize` (derived from `archetype_for(comp.kind).kind`).
+     - When `EditComponentForm` is submitted, if `form.archetype_index == form.initial_archetype_index`, emit `form.original_kind` in `ModalAction::UpdateComponent { kind, .. }`; otherwise emit `form.selected_archetype().kind`.
+  2. `src/tui/mod.rs`:
+     - Narrow `modal`, `style`, and `terminal` to `pub(crate) mod` (keeping `app`, `canvas`, `ui` `pub` for `tests/e2e.rs`, and keeping `pub use terminal::{default_theme_dirs, run_tui, suspend_for_editor}`).
+  3. `src/tui/terminal.rs`:
+     - Narrow internal items (`TuiTerminal`, `install_panic_hook`, `restore_terminal`, `handle_event`, etc.) to `pub(crate)` while keeping `default_theme_dirs`, `run_tui`, and `suspend_for_editor` `pub`.
+  4. `src/tui/app.rs`:
+     - Narrow internal types not used by `main.rs` or `tests/e2e.rs` (such as `SyncRequest`) to `pub(crate)`.
+  5. `src/tui/canvas.rs`:
+     - Remove unused dead public exports `CELL_STRIDE_X`, `CELL_STRIDE_Y`, and `visible_grid_capacity` (keep `visible_grid_capacity_for`).
+
+Must still work:
+  - `src/main.rs` and `tests/e2e.rs` compile and pass without changing their public imports.
+  - Changing the archetype in `EditComponent` modal still updates `ComponentKind` to the newly selected archetype.
+
+Drops:
+  - Removes dead public exports `CELL_STRIDE_X`, `CELL_STRIDE_Y`, and `visible_grid_capacity` from `src/tui/canvas.rs`.
+
+Tests:
+  - `edit_component_preserves_legacy_kind_when_archetype_unchanged` (`src/tui/modal.rs`): open `ModalState::edit_component` for a `ComponentKind::UiView` component, edit the name without changing archetype, press Enter -> `ModalAction::UpdateComponent` emits `kind: ComponentKind::UiView`.
+  - `edit_component_updates_kind_when_archetype_changed` (`src/tui/modal.rs`): open `ModalState::edit_component` for `ComponentKind::UiView`, cycle archetype to `Logic`, press Enter -> `ModalAction::UpdateComponent` emits `kind: ComponentKind::Logic`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub\(crate\) mod modal' src/tui/mod.rs && grep -qE 'pub\(crate\) struct TuiTerminal' src/tui/terminal.rs && grep -qE 'fn edit_component_preserves_legacy_kind_when_archetype_unchanged' src/tui/modal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17F: Split `src/tui/app.rs` & Deduplicate Grid/Path Helpers
+
+* **Recommended Command:** `/boost`
+
+```text
+[STEP_ID]
+STEP 17F: Split monolithic src/tui/app.rs into focused submodules, reuse ensure_grid_contains, and deduplicate ensure_contained via storage.rs (`TASK-0069`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app.rs
+  - src/tui/app/mod.rs (NEW)
+  - src/tui/app/state.rs (NEW)
+  - src/tui/app/grid.rs (NEW)
+  - src/tui/app/actions.rs (NEW)
+  - src/tui/app/sync.rs (NEW)
+  - src/storage.rs
+  - src/theme.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/tui/mod.rs (pub mod app; pub use app::{...})
+  - tests/e2e.rs (App usage)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not alter any user-visible TUI behavior or keybindings.
+
+[PRE_GATE]
+grep -qE 'pub\(crate\) mod modal' src/tui/mod.rs
+
+[MUTATION_SPEC]
+Goal: Decompose the 3,500+ line src/tui/app.rs into focused submodules (state, grid, actions, sync) and eliminate duplicated grid-expansion and path-containment logic.
+
+Contract & Behavior:
+  1. Replace `src/tui/app.rs` with `src/tui/app/mod.rs`, `src/tui/app/state.rs`, `src/tui/app/grid.rs`, `src/tui/app/actions.rs`, and `src/tui/app/sync.rs`, preserving all `pub` and `pub(crate)` exports (`App`, `FocusColumn`, `InputMode`, `ListFilter`, `SyncRequest`, etc.) and all unit tests.
+  2. In `src/tui/app/grid.rs`, consolidate all 4 duplicated grid-expansion checks so every card placement and move path reuses `ensure_grid_contains`.
+  3. In `src/storage.rs`, expose `pub(crate) fn ensure_contained(base: &Path, candidate: &Path) -> RbResult<PathBuf>`.
+  4. Reuse `crate::storage::ensure_contained` in `src/theme.rs`, `src/tui/terminal.rs`, and `src/tui/app/actions.rs` (markdown body loading) instead of duplicating `canonicalize` + `starts_with` + symlink checks.
+
+Must still work:
+  - All `App` public methods, `tests/e2e.rs`, and `src/tui/ui.rs` / `src/tui/canvas.rs` callers compile and pass without behavioral regressions.
+  - Theme symlink rejection, `$EDITOR` path containment, and markdown body containment continue to reject escaping or dangling symlinks.
+
+Drops: none
+
+Tests:
+  - All existing `App`, `storage`, `theme`, `terminal`, and `tests/e2e.rs` tests pass after the module split and helper deduplication.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && test -f src/tui/app/mod.rs && test ! -f src/tui/app.rs && grep -qE 'pub\(crate\) fn ensure_contained' src/storage.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

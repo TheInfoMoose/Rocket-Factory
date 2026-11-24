@@ -2,11 +2,11 @@
 id = "BUG-0024"
 type = "bug"
 title = "[BUG-01] render_component_list uses stateless List without ListState and never scrolls on overflow"
-status = "open"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:51:27Z"
-updated_at = "2026-11-23T15:51:27Z"
+updated_at = "2026-11-24T05:27:28Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "de13bd1"
+summary = "Closed in Phase 12 review (STEP 12F: Unix signal handling in TerminalGuard/run_event_loop and guard drop ordering in main.rs)"

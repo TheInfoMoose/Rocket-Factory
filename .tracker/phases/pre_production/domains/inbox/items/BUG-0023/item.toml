@@ -6,7 +6,7 @@ status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:51:26Z"
-updated_at = "2026-11-24T05:25:21Z"
+updated_at = "2026-11-24T05:27:27Z"
 
 [effort]
 logged_time_minutes = 0
@@ -19,3 +19,8 @@ recurrence_count = 0
 date = "2026-11-24"
 commit = "b6c8899"
 summary = "Fixed in Phase 16 (STEP 16D): capped theme .ron reads at 256 KiB and rejected/skipped symlinked search_dirs in src/theme.rs."
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "de13bd1"
+summary = "Closed in Phase 12 review (STEP 12E: LazyLock SyntaxSet and revision-keyed PreviewPaneState cache)"
