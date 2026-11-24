@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::error::{RbError, RbResult};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct GridPos {
     pub col: u16,
@@ -54,44 +56,60 @@ pub enum CardStatus {
     Complete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ExternalTaskRef {
     pub external_id: String,
     pub title: String,
+    #[serde(default)]
     pub status: TaskStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FeatureItem {
     pub id: String,
     pub title: String,
+    #[serde(default)]
     pub pushed: bool,
+    #[serde(default)]
     pub external_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Connection {
     pub from: String,
     pub to: String,
+    #[serde(default)]
     pub kind: EdgeKind,
+    #[serde(default)]
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Component {
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub kind: ComponentKind,
     #[serde(default)]
     pub parent_id: Option<String>,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub relative_path: Option<String>,
+    #[serde(default)]
     pub position: GridPos,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub tech_stack: Vec<String>,
+    #[serde(default)]
     pub files: Vec<String>,
+    #[serde(default)]
     pub flags: Vec<String>,
+    #[serde(default)]
     pub features: Vec<FeatureItem>,
+    #[serde(default)]
     pub external_tasks: Vec<ExternalTaskRef>,
     #[serde(skip)]
     pub markdown_body: String,
@@ -103,19 +121,36 @@ pub struct GridConfig {
     pub rows: u16,
 }
 
+impl GridConfig {
+    pub fn validate(&self) -> RbResult<()> {
+        if self.cols == 0 || self.rows == 0 {
+            return Err(RbError::Validation(
+                "grid dimensions must be at least 1x1".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Default for GridConfig {
     fn default() -> Self {
         Self { cols: 8, rows: 6 }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub theme: String,
+    #[serde(default)]
     pub active_adapters: Vec<String>,
+    #[serde(default)]
     pub grid: GridConfig,
+    #[serde(default)]
     pub connections: Vec<Connection>,
 }
 
@@ -341,5 +376,53 @@ row = 0
             assert_eq!(parsed.kind, expected_kind);
             assert_eq!(parsed.parent_id, None);
         }
+    }
+
+    #[test]
+    fn minimal_toml_deserializes_with_defaults_and_zero_grid_rejected() {
+        let comp: Component =
+            toml::from_str("id = \"c1\"\n").expect("deserialize minimal Component");
+        assert_eq!(comp.id, "c1");
+        assert_eq!(comp.name, "");
+        assert_eq!(comp.kind, ComponentKind::Concept);
+        assert_eq!(comp.parent_id, None);
+        assert_eq!(comp.description, "");
+        assert_eq!(comp.relative_path, None);
+        assert_eq!(comp.position, GridPos::default());
+        assert!(comp.tags.is_empty());
+        assert!(comp.tech_stack.is_empty());
+        assert!(comp.files.is_empty());
+        assert!(comp.flags.is_empty());
+        assert!(comp.features.is_empty());
+        assert!(comp.external_tasks.is_empty());
+
+        let cfg: ProjectConfig =
+            toml::from_str("name = \"p\"\n").expect("deserialize minimal ProjectConfig");
+        assert_eq!(cfg.name, "p");
+        assert_eq!(cfg.description, "");
+        assert_eq!(cfg.theme, "");
+        assert!(cfg.active_adapters.is_empty());
+        assert_eq!(cfg.grid, GridConfig::default());
+        assert!(cfg.connections.is_empty());
+
+        let feat: FeatureItem = toml::from_str("id = \"f1\"\ntitle = \"Feat\"\n")
+            .expect("deserialize minimal FeatureItem");
+        assert!(!feat.pushed);
+        assert_eq!(feat.external_id, None);
+
+        let conn: Connection =
+            toml::from_str("from = \"a\"\nto = \"b\"\n").expect("deserialize minimal Connection");
+        assert_eq!(conn.kind, EdgeKind::DependsOn);
+        assert_eq!(conn.label, None);
+
+        assert!(matches!(
+            GridConfig { cols: 0, rows: 4 }.validate(),
+            Err(RbError::Validation(_))
+        ));
+        assert!(matches!(
+            GridConfig { cols: 4, rows: 0 }.validate(),
+            Err(RbError::Validation(_))
+        ));
+        assert!(GridConfig { cols: 1, rows: 1 }.validate().is_ok());
     }
 }

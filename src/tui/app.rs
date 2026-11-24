@@ -199,11 +199,9 @@ impl App {
             }
         }
 
-        if self.root.join(ROCKET_DIR).exists() {
-            for comp_id in &updated_ids {
-                if let Some(comp) = candidate.component(comp_id) {
-                    save_component(&self.root, comp)?;
-                }
+        for comp_id in &updated_ids {
+            if let Some(comp) = candidate.component(comp_id) {
+                save_component(&self.root, comp)?;
             }
         }
 
@@ -256,7 +254,7 @@ impl App {
             modified = summary.modified;
         }
 
-        if modified && self.root.join(ROCKET_DIR).exists() {
+        if modified {
             if let Some(comp) = candidate.component(&comp_id) {
                 save_component(&self.root, comp)?;
             }
@@ -575,24 +573,22 @@ impl App {
             expanded = true;
         }
 
-        if self.root.join(ROCKET_DIR).exists() {
-            if let Err(err) = save_component(&self.root, &candidate) {
+        if let Err(err) = save_component(&self.root, &candidate) {
+            self.refresh_audit();
+            self.status_message = format!("Failed to save {comp_name}: {err}");
+            return;
+        }
+        if expanded {
+            if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                let msg = match save_component(&self.root, &previous) {
+                    Ok(()) => format!("Failed to save grid config: {err}"),
+                    Err(rb_err) => {
+                        format!("Failed to save grid config: {err} (rollback failed: {rb_err})")
+                    }
+                };
                 self.refresh_audit();
-                self.status_message = format!("Failed to save {comp_name}: {err}");
+                self.status_message = msg;
                 return;
-            }
-            if expanded {
-                if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                    let msg = match save_component(&self.root, &previous) {
-                        Ok(()) => format!("Failed to save grid config: {err}"),
-                        Err(rb_err) => {
-                            format!("Failed to save grid config: {err} (rollback failed: {rb_err})")
-                        }
-                    };
-                    self.refresh_audit();
-                    self.status_message = msg;
-                    return;
-                }
             }
         }
 
@@ -665,11 +661,7 @@ impl App {
             format!("Connected: {source_id} depends on {target_id}")
         };
 
-        let save_result = if self.root.join(ROCKET_DIR).exists() {
-            save_project_config(&self.root, &candidate_config)
-        } else {
-            Ok(())
-        };
+        let save_result = save_project_config(&self.root, &candidate_config);
 
         match save_result {
             Ok(()) => {
@@ -840,26 +832,26 @@ impl App {
             })
             .collect();
 
-        let has_rocket = self.root.join(ROCKET_DIR).exists();
         let mut grid_expanded_any = false;
         let mut errors = Vec::new();
 
         for idx in colliding_indices {
             let new_pos = self.find_proximity_grid_pos(protected_pos);
+            let Some(mut candidate) = self.project.components.get(idx).cloned() else {
+                continue;
+            };
+            candidate.position = new_pos;
+            if let Err(err) = save_component(&self.root, &candidate) {
+                errors.push(format!("failed to save {}: {err}", candidate.id));
+                continue;
+            }
             if self.ensure_grid_contains(new_pos) {
                 grid_expanded_any = true;
             }
-            if let Some(comp) = self.project.components.get_mut(idx) {
-                comp.position = new_pos;
-                if has_rocket {
-                    if let Err(err) = save_component(&self.root, comp) {
-                        errors.push(format!("failed to save {}: {err}", comp.id));
-                    }
-                }
-            }
+            self.project.components[idx] = candidate;
         }
 
-        if grid_expanded_any && has_rocket {
+        if grid_expanded_any {
             if let Err(err) = save_project_config(&self.root, &self.project.config) {
                 errors.push(format!("failed to save grid config: {err}"));
             }
@@ -1023,33 +1015,31 @@ impl App {
                     )
                 };
 
-                if self.root.join(ROCKET_DIR).exists() {
-                    if let Err(err) = save_component(&self.root, &comp) {
-                        let msg = format!("Failed to save {name}: {err}");
+                if let Err(err) = save_component(&self.root, &comp) {
+                    let msg = format!("Failed to save {name}: {err}");
+                    if let ModalState::NewComponent(ref mut form) = modal {
+                        form.error = Some(msg.clone());
+                    }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    return;
+                }
+                if let Some(ref cfg) = grid_expanded_config {
+                    if let Err(err) = save_project_config(&self.root, cfg) {
+                        let msg = match delete_component(&self.root, &comp.id) {
+                            Ok(()) => format!("Failed to save grid config: {err}"),
+                            Err(rb_err) => {
+                                format!(
+                                    "Failed to save grid config: {err} (rollback failed: {rb_err})"
+                                )
+                            }
+                        };
                         if let ModalState::NewComponent(ref mut form) = modal {
                             form.error = Some(msg.clone());
                         }
                         self.status_message = msg;
                         self.modal = Some(modal);
                         return;
-                    }
-                    if let Some(ref cfg) = grid_expanded_config {
-                        if let Err(err) = save_project_config(&self.root, cfg) {
-                            let msg = match delete_component(&self.root, &comp.id) {
-                                Ok(()) => format!("Failed to save grid config: {err}"),
-                                Err(rb_err) => {
-                                    format!(
-                                        "Failed to save grid config: {err} (rollback failed: {rb_err})"
-                                    )
-                                }
-                            };
-                            if let ModalState::NewComponent(ref mut form) = modal {
-                                form.error = Some(msg.clone());
-                            }
-                            self.status_message = msg;
-                            self.modal = Some(modal);
-                            return;
-                        }
                     }
                 }
 
@@ -1154,20 +1144,15 @@ impl App {
                         (None, None)
                     };
 
-                let has_rocket = self.root.join(ROCKET_DIR).exists();
-                let save_result = if has_rocket {
-                    save_component(&self.root, &candidate).and_then(|()| {
-                        if let Some(ref sub_comp) = new_sub_comp {
-                            save_component(&self.root, sub_comp)?;
-                        }
-                        if let Some(ref cfg) = grid_expanded_config {
-                            save_project_config(&self.root, cfg)?;
-                        }
-                        Ok(())
-                    })
-                } else {
+                let save_result = save_component(&self.root, &candidate).and_then(|()| {
+                    if let Some(ref sub_comp) = new_sub_comp {
+                        save_component(&self.root, sub_comp)?;
+                    }
+                    if let Some(ref cfg) = grid_expanded_config {
+                        save_project_config(&self.root, cfg)?;
+                    }
                     Ok(())
-                };
+                });
 
                 match save_result {
                     Ok(()) => {
@@ -1263,10 +1248,24 @@ impl App {
                     None
                 };
 
-                let has_rocket = self.root.join(ROCKET_DIR).exists();
-                if has_rocket {
-                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                        let msg = format!("Failed to save connections: {err}");
+                if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                    let msg = format!("Failed to save connections: {err}");
+                    if let ModalState::EditConnection(ref mut form) = modal {
+                        form.error = Some(msg.clone());
+                    }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    self.mode = InputMode::Modal;
+                    return;
+                }
+                if let Some(ref updated_comp) = updated_to_comp {
+                    if let Err(err) = save_component(&self.root, updated_comp) {
+                        let msg = match save_project_config(&self.root, &self.project.config) {
+                            Ok(()) => format!("Failed to save component {to}: {err}"),
+                            Err(rollback_err) => format!(
+                                "Failed to save component {to}: {err} (rollback failed: {rollback_err})"
+                            ),
+                        };
                         if let ModalState::EditConnection(ref mut form) = modal {
                             form.error = Some(msg.clone());
                         }
@@ -1274,23 +1273,6 @@ impl App {
                         self.modal = Some(modal);
                         self.mode = InputMode::Modal;
                         return;
-                    }
-                    if let Some(ref updated_comp) = updated_to_comp {
-                        if let Err(err) = save_component(&self.root, updated_comp) {
-                            let msg = match save_project_config(&self.root, &self.project.config) {
-                                Ok(()) => format!("Failed to save component {to}: {err}"),
-                                Err(rollback_err) => format!(
-                                    "Failed to save component {to}: {err} (rollback failed: {rollback_err})"
-                                ),
-                            };
-                            if let ModalState::EditConnection(ref mut form) = modal {
-                                form.error = Some(msg.clone());
-                            }
-                            self.status_message = msg;
-                            self.modal = Some(modal);
-                            self.mode = InputMode::Modal;
-                            return;
-                        }
                     }
                 }
 
@@ -1335,16 +1317,14 @@ impl App {
                 let mut candidate_config = self.project.config.clone();
                 candidate_config.theme = name.clone();
 
-                if self.root.join(ROCKET_DIR).exists() {
-                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                        let msg = format!("Failed to save theme '{name}': {err}");
-                        if let ModalState::ThemeSwitcher(ref mut form) = modal {
-                            form.error = Some(msg.clone());
-                        }
-                        self.status_message = msg;
-                        self.modal = Some(modal);
-                        return;
+                if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                    let msg = format!("Failed to save theme '{name}': {err}");
+                    if let ModalState::ThemeSwitcher(ref mut form) = modal {
+                        form.error = Some(msg.clone());
                     }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    return;
                 }
 
                 self.project.config = candidate_config;
@@ -1360,27 +1340,9 @@ impl App {
                 let connections_changed =
                     candidate_config.connections.len() != self.project.config.connections.len();
 
-                let has_rocket = self.root.join(ROCKET_DIR).exists();
-                if has_rocket {
-                    if connections_changed {
-                        if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                            let msg =
-                                format!("Failed to save connections before deleting {id}: {err}");
-                            if let ModalState::ConfirmDelete(ref mut form) = modal {
-                                form.error = Some(msg.clone());
-                            }
-                            self.status_message = msg;
-                            self.modal = Some(modal);
-                            self.mode = InputMode::Modal;
-                            return;
-                        }
-                    }
-
-                    if let Err(err) = crate::storage::delete_component(&self.root, &id) {
-                        if connections_changed {
-                            let _ = save_project_config(&self.root, &self.project.config);
-                        }
-                        let msg = format!("Failed to delete component {id}: {err}");
+                if connections_changed {
+                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                        let msg = format!("Failed to save connections before deleting {id}: {err}");
                         if let ModalState::ConfirmDelete(ref mut form) = modal {
                             form.error = Some(msg.clone());
                         }
@@ -1391,15 +1353,27 @@ impl App {
                     }
                 }
 
+                if let Err(err) = crate::storage::delete_component(&self.root, &id) {
+                    if connections_changed {
+                        let _ = save_project_config(&self.root, &self.project.config);
+                    }
+                    let msg = format!("Failed to delete component {id}: {err}");
+                    if let ModalState::ConfirmDelete(ref mut form) = modal {
+                        form.error = Some(msg.clone());
+                    }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    self.mode = InputMode::Modal;
+                    return;
+                }
+
                 self.project.components.retain(|c| c.id != id);
                 let mut detach_errors = Vec::new();
                 for child in &mut self.project.components {
                     if child.parent_id.as_deref() == Some(id.as_str()) {
                         child.parent_id = None;
-                        if has_rocket {
-                            if let Err(err) = save_component(&self.root, child) {
-                                detach_errors.push(format!("failed to detach {}: {err}", child.id));
-                            }
+                        if let Err(err) = save_component(&self.root, child) {
+                            detach_errors.push(format!("failed to detach {}: {err}", child.id));
                         }
                     }
                 }
@@ -1435,17 +1409,15 @@ impl App {
                 };
                 candidate_config.connections.remove(pos);
 
-                if self.root.join(ROCKET_DIR).exists() {
-                    if let Err(err) = save_project_config(&self.root, &candidate_config) {
-                        let msg = format!("Failed to save connections: {err}");
-                        if let ModalState::ConfirmDelete(ref mut form) = modal {
-                            form.error = Some(msg.clone());
-                        }
-                        self.status_message = msg;
-                        self.modal = Some(modal);
-                        self.mode = InputMode::Modal;
-                        return;
+                if let Err(err) = save_project_config(&self.root, &candidate_config) {
+                    let msg = format!("Failed to save connections: {err}");
+                    if let ModalState::ConfirmDelete(ref mut form) = modal {
+                        form.error = Some(msg.clone());
                     }
+                    self.status_message = msg;
+                    self.modal = Some(modal);
+                    self.mode = InputMode::Modal;
+                    return;
                 }
 
                 self.project.config = candidate_config;
@@ -2863,6 +2835,12 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
 
     #[test]
     fn sub_component_expand_collapse_hides_and_shows_children() {
+        use crate::storage::init_workspace;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Sub Expand Test", "Sub-component expand test")
+            .expect("init workspace");
+
         let mut parent = make_component("parent_svc");
         parent.position = GridPos { col: 0, row: 0 };
 
@@ -2878,6 +2856,7 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         orphan.position = GridPos { col: 3, row: 0 };
 
         let mut app = make_app(vec![parent, child, sibling, orphan]);
+        app.root = dir.path().to_path_buf();
 
         assert!(app.has_sub_components("parent_svc"));
         assert!(!app.has_sub_components("sibling_svc"));
@@ -3213,6 +3192,12 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
 
     #[test]
     fn connect_prompt_states_dependency_direction() {
+        use crate::storage::init_workspace;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_workspace(dir.path(), "Connect Prompt", "Connect prompt test")
+            .expect("init workspace");
+
         let mut alpha = make_component("alpha");
         alpha.name = "Alpha Service".to_string();
         alpha.position = GridPos { col: 0, row: 0 };
@@ -3221,6 +3206,7 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         beta.position = GridPos { col: 1, row: 0 };
 
         let mut app = make_app(vec![alpha, beta]);
+        app.root = dir.path().to_path_buf();
         app.focus = FocusColumn::Canvas;
 
         app.handle_key(key(KeyCode::Char('c')));
@@ -3513,5 +3499,68 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
                 .position,
             GridPos { col: 0, row: 20 }
         );
+    }
+
+    #[test]
+    fn mutation_errors_when_rocket_dir_missing() {
+        let dir = tempfile::tempdir().expect("tempdir without .rocket");
+        let mut alpha = make_component("alpha");
+        alpha.position = GridPos { col: 0, row: 0 };
+        alpha.description = "Initial alpha".to_string();
+
+        let mut app = make_app(vec![alpha]);
+        app.root = dir.path().to_path_buf();
+        let initial_project = app.project.clone();
+
+        // 1. Create component fails and leaves project unchanged
+        app.handle_key(key(KeyCode::Char('n')));
+        type_keys(&mut app, "beta");
+        app.handle_key(key(KeyCode::Tab));
+        type_keys(&mut app, "Beta");
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.project, initial_project);
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.status_message.contains("Failed to save"));
+        if let Some(ModalState::NewComponent(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected NewComponent modal to remain open");
+        }
+        app.handle_key(key(KeyCode::Esc));
+
+        // 2. Edit component fails and leaves project unchanged
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Tab)); // archetype
+        app.handle_key(key(KeyCode::Tab)); // description
+        type_keys(&mut app, " edited");
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.project, initial_project);
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.status_message.contains("Failed to save"));
+        if let Some(ModalState::EditComponent(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected EditComponent modal to remain open");
+        }
+        app.handle_key(key(KeyCode::Esc));
+
+        // 3. Move card fails and leaves project unchanged
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.project, initial_project);
+        assert!(app.status_message.contains("Failed to save"));
+        app.handle_key(key(KeyCode::Char('m')));
+
+        // 4. Delete component fails and leaves project unchanged
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.project, initial_project);
+        assert_eq!(app.mode, InputMode::Modal);
+        assert!(app.status_message.contains("Failed to delete"));
+        if let Some(ModalState::ConfirmDelete(ref form)) = app.modal {
+            assert!(form.error.is_some());
+        } else {
+            panic!("expected ConfirmDelete modal to remain open");
+        }
     }
 }

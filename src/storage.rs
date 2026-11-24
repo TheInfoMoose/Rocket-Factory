@@ -1,6 +1,8 @@
-use std::fs::{self, File};
+use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{RbError, RbResult};
 use crate::model::{Component, GridConfig, Project, ProjectConfig};
@@ -8,6 +10,8 @@ use crate::model::{Component, GridConfig, Project, ProjectConfig};
 pub const ROCKET_DIR: &str = ".rocket";
 pub const PROJECT_FILE: &str = "project.toml";
 pub const COMPONENTS_DIR: &str = "components";
+
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn validate_component_id(id: &str) -> RbResult<()> {
     if id.is_empty()
@@ -22,7 +26,20 @@ pub fn validate_component_id(id: &str) -> RbResult<()> {
     Ok(())
 }
 
+fn is_dir_sync_unsupported(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::InvalidInput
+            | std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::Unsupported
+    ) || matches!(err.raw_os_error(), Some(9))
+}
+
 fn atomic_write(path: &Path, contents: &str) -> RbResult<()> {
+    atomic_write_bytes(path, contents.as_bytes())
+}
+
+fn atomic_write_bytes(path: &Path, contents: &[u8]) -> RbResult<()> {
     let parent = path.parent().ok_or_else(|| RbError::Io {
         path: path.to_path_buf(),
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent"),
@@ -38,15 +55,25 @@ fn atomic_write(path: &Path, contents: &str) -> RbResult<()> {
             ),
         })?;
 
-    let tmp_path = parent.join(format!("{file_name}.tmp.{}", std::process::id()));
+    let seq = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = parent.join(format!("{file_name}.tmp.{}.{seq}", std::process::id()));
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|source| RbError::Io {
+            path: tmp_path.clone(),
+            source,
+        })?;
 
     let write_result = (|| -> std::io::Result<()> {
-        let mut file = File::create(&tmp_path)?;
-        file.write_all(contents.as_bytes())?;
+        file.write_all(contents)?;
         file.flush()?;
         file.sync_all()?;
         Ok(())
     })();
+    drop(file);
 
     if let Err(source) = write_result {
         let _ = fs::remove_file(&tmp_path);
@@ -62,6 +89,27 @@ fn atomic_write(path: &Path, contents: &str) -> RbResult<()> {
             path: path.to_path_buf(),
             source,
         });
+    }
+
+    match File::open(parent) {
+        Ok(dir) => {
+            if let Err(source) = dir.sync_all() {
+                if !is_dir_sync_unsupported(&source) {
+                    return Err(RbError::Io {
+                        path: parent.to_path_buf(),
+                        source,
+                    });
+                }
+            }
+        }
+        Err(source) => {
+            if !is_dir_sync_unsupported(&source) {
+                return Err(RbError::Io {
+                    path: parent.to_path_buf(),
+                    source,
+                });
+            }
+        }
     }
 
     Ok(())
@@ -153,6 +201,7 @@ pub fn init_workspace(root: &Path, name: &str, description: &str) -> RbResult<Pr
 }
 
 pub fn save_project_config(root: &Path, config: &ProjectConfig) -> RbResult<()> {
+    config.grid.validate()?;
     let rocket_dir = root.join(ROCKET_DIR);
     let project_path = rocket_dir.join(PROJECT_FILE);
     let safe_path = ensure_contained(&rocket_dir, &project_path)?;
@@ -173,9 +222,40 @@ pub fn save_component(root: &Path, component: &Component) -> RbResult<()> {
         &components_dir.join(format!("{}.md", component.id)),
     )?;
 
+    let prev_toml = match fs::read(&toml_path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(source) => {
+            return Err(RbError::Io {
+                path: toml_path,
+                source,
+            });
+        }
+    };
+    let _prev_md_exists = match fs::metadata(&md_path) {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(source) => {
+            return Err(RbError::Io {
+                path: md_path,
+                source,
+            });
+        }
+    };
+
     let serialized = toml::to_string_pretty(component)?;
     atomic_write(&toml_path, &serialized)?;
-    atomic_write(&md_path, &component.markdown_body)?;
+    if let Err(err) = atomic_write(&md_path, &component.markdown_body) {
+        match prev_toml {
+            Some(bytes) => {
+                let _ = atomic_write_bytes(&toml_path, &bytes);
+            }
+            None => {
+                let _ = fs::remove_file(&toml_path);
+            }
+        }
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -265,6 +345,7 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
             path: safe_project_path,
             source,
         })?;
+    config.grid.validate()?;
 
     let components_dir = safe_rocket_dir.join(COMPONENTS_DIR);
     match fs::symlink_metadata(&components_dir) {
@@ -302,6 +383,7 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
     toml_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut components = Vec::with_capacity(toml_files.len());
+    let mut seen_ids = HashSet::with_capacity(toml_files.len());
     for (_, path) in toml_files {
         let safe_path = ensure_contained(&safe_components_dir, &path)?;
         let meta = fs::metadata(&safe_path).map_err(|source| RbError::Io {
@@ -318,11 +400,25 @@ pub fn load_project(root: &Path) -> RbResult<Project> {
         })?;
         let mut component: Component =
             toml::from_str(&raw).map_err(|source| RbError::TomlParse {
-                path: safe_path,
+                path: safe_path.clone(),
                 source,
             })?;
 
         validate_component_id(&component.id)?;
+        if !seen_ids.insert(component.id.clone()) {
+            return Err(RbError::AlreadyExists(format!(
+                "duplicate component id '{}'",
+                component.id
+            )));
+        }
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if file_stem != component.id {
+            return Err(RbError::Validation(format!(
+                "component file '{}' has mismatched id '{}'",
+                safe_path.display(),
+                component.id
+            )));
+        }
         let md_path = ensure_contained(
             &safe_components_dir,
             &safe_components_dir.join(format!("{}.md", component.id)),
@@ -473,5 +569,36 @@ mod tests {
         fs::create_dir(comp_dir.join("dir.toml")).expect("create dir.toml");
         let loaded = load_project(ws_comp.path()).expect("load project skips dir.toml");
         assert!(loaded.components.is_empty());
+    }
+
+    #[test]
+    fn load_project_rejects_duplicate_ids_and_stem_mismatch() {
+        // 1. Stem mismatch: a.toml with id = "b" -> Validation error
+        let dir_mismatch = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir_mismatch.path(), "demo", "Demo").expect("init workspace");
+        let comp_dir = dir_mismatch.path().join(ROCKET_DIR).join(COMPONENTS_DIR);
+        let comp_b = make_component("b", "");
+        fs::write(
+            comp_dir.join("a.toml"),
+            toml::to_string_pretty(&comp_b).expect("serialize comp_b"),
+        )
+        .expect("write mismatched a.toml");
+        assert!(matches!(
+            load_project(dir_mismatch.path()),
+            Err(RbError::Validation(_))
+        ));
+
+        // 2. Duplicate IDs across files: a.toml and b.toml both with id = "a" -> AlreadyExists error
+        let dir_dup = tempfile::tempdir().expect("create tempdir");
+        init_workspace(dir_dup.path(), "demo", "Demo").expect("init workspace");
+        let comp_dir_dup = dir_dup.path().join(ROCKET_DIR).join(COMPONENTS_DIR);
+        let comp_a = make_component("a", "");
+        let raw_a = toml::to_string_pretty(&comp_a).expect("serialize comp_a");
+        fs::write(comp_dir_dup.join("a.toml"), &raw_a).expect("write a.toml");
+        fs::write(comp_dir_dup.join("b.toml"), &raw_a).expect("write b.toml");
+        assert!(matches!(
+            load_project(dir_dup.path()),
+            Err(RbError::AlreadyExists(_))
+        ));
     }
 }
