@@ -15,49 +15,49 @@ features = []
 [[items.bugs]]
 id = "BUG-0047"
 title = "[SCR-01] Unanchored grep -qF in phased-step.sh defer dirty check"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:52:23Z"
 
 [[items.bugs]]
 id = "BUG-0048"
 title = "[SCR-02] Bypassable read_amendment() gate check and suppressed process-substitution exit"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:52:24Z"
 
 [[items.bugs]]
 id = "BUG-0049"
 title = "[SCR-03] Swallowed .tracker/ TOML/I/O exceptions in phased-step.sh"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:25Z"
 
 [[items.bugs]]
 id = "BUG-0050"
 title = "[SCR-04] Loose git log --grep on empty rerun in phased-step.sh"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:52:27Z"
 
 [[items.bugs]]
 id = "BUG-0051"
 title = "[SCR-05] Non-atomic .orrery/phase.toml write in phased-step.sh"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:28Z"
 
 [[items.bugs]]
 id = "BUG-0052"
 title = "[SCR-06] GNU/Bash 4+/Python 3.11+ portability and parser quirks in phased-step.sh"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:29Z"
 
 [[items.bugs]]
 id = "BUG-0053"
 title = "[SCR-07] neon-dispatch argument and flag expansion quirks"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:52:30Z"
 

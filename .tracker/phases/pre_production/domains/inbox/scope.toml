@@ -126,42 +126,42 @@ created_at = "2026-11-22T20:22:04Z"
 [[items.bugs]]
 id = "BUG-0018"
 title = "[SEC-01] Arbitrary command execution via default_adapters_path fallback and startup auto-pull"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:51:04Z"
 
 [[items.bugs]]
 id = "BUG-0019"
 title = "[SEC-02] run_command_with_stdin pipe deadlock, missing timeout, and unbounded buffering"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:51:21Z"
 
 [[items.bugs]]
 id = "BUG-0020"
 title = "[SEC-03] Asymmetric symlink validation in storage::load_project and dangling symlink blindness"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:51:23Z"
 
 [[items.bugs]]
 id = "BUG-0021"
 title = "[SEC-04] parse_editor_command splits quoted $EDITOR paths with spaces"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:51:24Z"
 
 [[items.bugs]]
 id = "BUG-0022"
 title = "[SEC-05] Unsanitized control characters in terminal rendering and modal input"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:51:25Z"
 
 [[items.bugs]]
 id = "BUG-0023"
 title = "[SEC-06] theme.rs unbounded .ron reads and symlinked search_dirs"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:51:26Z"
 

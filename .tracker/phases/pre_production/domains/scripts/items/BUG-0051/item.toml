@@ -2,11 +2,11 @@
 id = "BUG-0051"
 type = "bug"
 title = "[SCR-05] Non-atomic .orrery/phase.toml write in phased-step.sh"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "scripts"
 created_at = "2026-11-23T15:52:28Z"
-updated_at = "2026-11-23T15:52:28Z"
+updated_at = "2026-11-24T05:25:29Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "b6c8899"
+summary = "Fixed in Phase 16 (STEP 16A): made .orrery/phase.toml write atomic via mkstemp + fsync + os.replace in scripts/phased-step.sh."
