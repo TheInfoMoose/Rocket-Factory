@@ -1190,7 +1190,7 @@ created_at = "2026-11-24T19:11:20Z"
 [[items.tasks]]
 id = "TASK-0116"
 title = "tui"
-status = "open"
+status = "pending"
 severity = "medium"
 created_at = "2026-11-24T19:11:20Z"
 
@@ -1207,3 +1207,10 @@ title = "terminal"
 status = "open"
 severity = "medium"
 created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0119"
+title = "Update tests/e2e.rs for multi-edge E modal candidate ordering"
+status = "pending"
+severity = "high"
+created_at = "2026-11-24T19:38:40Z"
