@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::archetype::archetype_for;
 use crate::audit::{compute_card_status, task_progress};
+use crate::model::Project;
 use crate::theme::Theme;
 use crate::tui::app::{App, FocusColumn, ListFilter};
 use crate::tui::modal::{
@@ -66,6 +67,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         crate::tui::canvas::visible_grid_capacity_for(canvas_inner, app.viewport.zoom);
     app.last_canvas_capacity = Some((vis_cols, vis_rows));
 
+    let visible = app.visible_component_indices();
+
     let occupied_cols = app
         .project
         .components
@@ -87,13 +90,49 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         occupied_rows,
     );
 
-    if let Some(selected_pos) = app.selected_component().map(|selected| selected.position) {
+    if let Some(selected_pos) = visible
+        .get(app.selected_index)
+        .and_then(|&idx| app.project.components.get(idx))
+        .map(|selected| selected.position)
+    {
         crate::tui::canvas::ensure_visible(canvas_inner, &mut app.viewport, selected_pos);
     }
 
-    render_component_list(frame, cols[0], app);
-    crate::tui::canvas::render_canvas(frame, cols[1], app, app.viewport);
-    render_detail_panel(frame, cols[2], app);
+    let mut list_state = std::mem::take(&mut app.list_state);
+    let mut detail_scroll = app.detail_scroll;
+    let mut last_detail_max_scroll = app.last_detail_max_scroll;
+    {
+        let (child_counts, depths) = compute_hierarchy_caches(&app.project);
+        render_component_list(
+            frame,
+            cols[0],
+            app,
+            &mut list_state,
+            &visible,
+            &child_counts,
+            &depths,
+        );
+        crate::tui::canvas::render_canvas_with_cache(
+            frame,
+            cols[1],
+            app,
+            app.viewport,
+            &visible,
+            &child_counts,
+        );
+        render_detail_panel(
+            frame,
+            cols[2],
+            app,
+            &visible,
+            &child_counts,
+            &mut detail_scroll,
+            &mut last_detail_max_scroll,
+        );
+    }
+    app.list_state = list_state;
+    app.detail_scroll = detail_scroll;
+    app.last_detail_max_scroll = last_detail_max_scroll;
 
     render_footer(frame, chunks[2], app);
 
@@ -140,26 +179,37 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(header, area);
 }
 
-fn component_depth(app: &App, comp_id: &str) -> usize {
-    let mut depth = 0usize;
-    let mut current_id = comp_id;
-    let mut visited = HashSet::new();
-    visited.insert(current_id);
-    while let Some(parent_id) = app
-        .project
-        .component(current_id)
-        .and_then(|c| c.parent_id.as_deref())
-    {
-        if !visited.insert(parent_id) {
-            break;
+fn compute_hierarchy_caches(project: &Project) -> (HashMap<&str, usize>, HashMap<&str, usize>) {
+    let mut parent_of: HashMap<&str, Option<&str>> =
+        HashMap::with_capacity(project.components.len());
+    let mut child_counts: HashMap<&str, usize> = HashMap::new();
+    for comp in &project.components {
+        parent_of.insert(comp.id.as_str(), comp.parent_id.as_deref());
+        if let Some(pid) = comp.parent_id.as_deref() {
+            *child_counts.entry(pid).or_insert(0) += 1;
         }
-        depth += 1;
-        if app.project.component(parent_id).is_none() {
-            break;
-        }
-        current_id = parent_id;
     }
-    depth
+
+    let mut depths: HashMap<&str, usize> = HashMap::with_capacity(project.components.len());
+    for comp in &project.components {
+        let mut depth = 0usize;
+        let mut current_id = comp.id.as_str();
+        let mut visited = HashSet::new();
+        visited.insert(current_id);
+        while let Some(Some(parent_id)) = parent_of.get(current_id) {
+            if !visited.insert(*parent_id) {
+                break;
+            }
+            depth += 1;
+            if !parent_of.contains_key(*parent_id) {
+                break;
+            }
+            current_id = parent_id;
+        }
+        depths.insert(comp.id.as_str(), depth);
+    }
+
+    (child_counts, depths)
 }
 
 fn format_component_list_label(
@@ -205,7 +255,15 @@ fn format_component_list_label(
     format!("{prefix}{truncated_name}{suffix}")
 }
 
-fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
+fn render_component_list(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    list_state: &mut ListState,
+    visible: &[usize],
+    child_counts: &HashMap<&str, usize>,
+    depths: &HashMap<&str, usize>,
+) {
     let title = match app.filter {
         ListFilter::All => " Components ",
         ListFilter::GapsOnly => " Components [GAPS] ",
@@ -220,9 +278,8 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
         ))
         .style(style::base_style(&app.theme));
 
-    let visible = app.visible_component_indices();
     if visible.is_empty() {
-        app.list_state.select(None);
+        list_state.select(None);
         let empty = Paragraph::new(" (no components) ")
             .style(style::muted_style(&app.theme))
             .block(block);
@@ -231,7 +288,7 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let selected = app.selected_index.min(visible.len() - 1);
-    app.list_state.select(Some(selected));
+    list_state.select(Some(selected));
 
     let inner_width = usize::from(area.width.saturating_sub(2));
     let items: Vec<ListItem> = visible
@@ -242,13 +299,14 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
             let status = compute_card_status(comp);
             let glyph = style::status_glyph(status);
             let progress = task_progress(comp);
-            let depth = component_depth(app, &comp.id);
+            let depth = depths.get(comp.id.as_str()).copied().unwrap_or(0);
             let indent = if depth > 0 {
                 format!("{}└─ ", "  ".repeat(depth))
             } else {
                 String::new()
             };
-            let expand_prefix = if app.has_sub_components(&comp.id) {
+            let has_children = child_counts.get(comp.id.as_str()).copied().unwrap_or(0) > 0;
+            let expand_prefix = if has_children {
                 if app.is_expanded(&comp.id) {
                     "▾ "
                 } else {
@@ -279,10 +337,18 @@ fn render_component_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let list = List::new(items)
         .block(block)
         .style(style::base_style(&app.theme));
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, area, list_state);
 }
 
-fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
+fn render_detail_panel(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    visible: &[usize],
+    child_counts: &HashMap<&str, usize>,
+    detail_scroll: &mut u16,
+    last_detail_max_scroll: &mut Option<u16>,
+) {
     let block = Block::default()
         .title(" Component Details ")
         .borders(Borders::ALL)
@@ -292,9 +358,12 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
         ))
         .style(style::base_style(&app.theme));
 
-    let Some(comp) = app.selected_component() else {
-        app.last_detail_max_scroll = Some(0);
-        app.detail_scroll = 0;
+    let Some(comp) = visible
+        .get(app.selected_index)
+        .and_then(|&idx| app.project.components.get(idx))
+    else {
+        *last_detail_max_scroll = Some(0);
+        *detail_scroll = 0;
         let empty = Paragraph::new("Select a component to inspect details.")
             .style(style::muted_style(&app.theme))
             .wrap(Wrap { trim: false })
@@ -358,9 +427,9 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
         base,
     )));
 
-    let sub_components = app.project.sub_components(&comp.id);
+    let sub_count = child_counts.get(comp.id.as_str()).copied().unwrap_or(0);
     lines.push(Line::from(""));
-    if sub_components.is_empty() {
+    if sub_count == 0 {
         lines.push(Line::from(Span::styled("Sub-components:", heading_style)));
         lines.push(Line::from(Span::styled("  (none)", muted)));
     } else {
@@ -373,7 +442,12 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
             format!("Sub-components: {sub_state}"),
             heading_style,
         )));
-        for child in sub_components {
+        for child in app
+            .project
+            .components
+            .iter()
+            .filter(|c| c.parent_id.as_deref() == Some(comp.id.as_str()))
+        {
             lines.push(Line::from(Span::styled(
                 format!(
                     "  {} ({})",
@@ -465,13 +539,13 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner_height = usize::from(area.height.saturating_sub(2));
     let total_lines = usize::from(wrapped_line_count(&lines, inner_width));
     let max_scroll = u16::try_from(total_lines.saturating_sub(inner_height)).unwrap_or(u16::MAX);
-    app.last_detail_max_scroll = Some(max_scroll);
-    app.detail_scroll = app.detail_scroll.min(max_scroll);
+    *last_detail_max_scroll = Some(max_scroll);
+    *detail_scroll = (*detail_scroll).min(max_scroll);
 
     let detail = Paragraph::new(lines)
         .style(base)
         .wrap(Wrap { trim: false })
-        .scroll((app.detail_scroll, 0))
+        .scroll((*detail_scroll, 0))
         .block(block);
     frame.render_widget(detail, area);
 }

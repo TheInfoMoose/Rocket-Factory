@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
@@ -241,45 +241,148 @@ fn in_bounds(x: u16, y: u16, bounds: Rect) -> bool {
         && y < bounds.y.saturating_add(bounds.height)
 }
 
+fn display_width(s: &str) -> usize {
+    Span::raw(s).width()
+}
+
+fn char_display_width(ch: char) -> usize {
+    let mut buf = [0u8; 4];
+    let s: &str = ch.encode_utf8(&mut buf);
+    Span::raw(s).width()
+}
+
+fn is_arrow(ch: char) -> bool {
+    matches!(ch, '▶' | '◀' | '▼' | '▲')
+}
+
+fn corridor_mask(ch: char) -> u8 {
+    const UP: u8 = 0b0001;
+    const DOWN: u8 = 0b0010;
+    const LEFT: u8 = 0b0100;
+    const RIGHT: u8 = 0b1000;
+    match ch {
+        '─' => LEFT | RIGHT,
+        '│' => UP | DOWN,
+        '┌' => DOWN | RIGHT,
+        '┐' => DOWN | LEFT,
+        '└' => UP | RIGHT,
+        '┘' => UP | LEFT,
+        '├' => UP | DOWN | RIGHT,
+        '┤' => UP | DOWN | LEFT,
+        '┬' => DOWN | LEFT | RIGHT,
+        '┴' => UP | LEFT | RIGHT,
+        '┼' => UP | DOWN | LEFT | RIGHT,
+        _ => 0,
+    }
+}
+
+fn mask_to_corridor_glyph(mask: u8) -> Option<char> {
+    const UP: u8 = 0b0001;
+    const DOWN: u8 = 0b0010;
+    const LEFT: u8 = 0b0100;
+    const RIGHT: u8 = 0b1000;
+    match mask {
+        m if m == LEFT | RIGHT => Some('─'),
+        m if m == UP | DOWN => Some('│'),
+        m if m == DOWN | RIGHT => Some('┌'),
+        m if m == DOWN | LEFT => Some('┐'),
+        m if m == UP | RIGHT => Some('└'),
+        m if m == UP | LEFT => Some('┘'),
+        m if m == UP | DOWN | RIGHT => Some('├'),
+        m if m == UP | DOWN | LEFT => Some('┤'),
+        m if m == DOWN | LEFT | RIGHT => Some('┬'),
+        m if m == UP | LEFT | RIGHT => Some('┴'),
+        m if m == UP | DOWN | LEFT | RIGHT => Some('┼'),
+        _ => None,
+    }
+}
+
+fn merge_corridor_glyph(existing: char, incoming: char) -> char {
+    if is_arrow(incoming) {
+        return incoming;
+    }
+    if is_arrow(existing) {
+        return existing;
+    }
+    let m1 = corridor_mask(existing);
+    let m2 = corridor_mask(incoming);
+    if m1 != 0 && m2 != 0 {
+        if let Some(merged) = mask_to_corridor_glyph(m1 | m2) {
+            return merged;
+        }
+    }
+    incoming
+}
+
 pub fn route_orthogonal_edge(
     from_rect: Rect,
     to_rect: Rect,
     label: Option<&str>,
     bounds: Rect,
 ) -> RoutedEdge {
+    if from_rect.width == 0 || from_rect.height == 0 || to_rect.width == 0 || to_rect.height == 0 {
+        return RoutedEdge {
+            segments: Vec::new(),
+            label_pos: None,
+            label: None,
+        };
+    }
+
     let from_a = card_anchor_points(from_rect);
     let to_a = card_anchor_points(to_rect);
 
-    let (start, end, arrow, horizontal_first) =
-        if to_rect.x >= from_rect.x.saturating_add(from_rect.width) {
-            (
-                (from_a.right.0.saturating_add(1), from_a.right.1),
-                (to_a.left.0.saturating_sub(1), to_a.left.1),
-                '▶',
-                true,
-            )
-        } else if from_rect.x >= to_rect.x.saturating_add(to_rect.width) {
-            (
-                (from_a.left.0.saturating_sub(1), from_a.left.1),
-                (to_a.right.0.saturating_add(1), to_a.right.1),
-                '◀',
-                true,
-            )
-        } else if to_rect.y >= from_rect.y.saturating_add(from_rect.height) {
-            (
-                (from_a.bottom.0, from_a.bottom.1.saturating_add(1)),
-                (to_a.top.0, to_a.top.1.saturating_sub(1)),
-                '▼',
-                false,
-            )
-        } else {
-            (
-                (from_a.top.0, from_a.top.1.saturating_sub(1)),
-                (to_a.bottom.0, to_a.bottom.1.saturating_add(1)),
-                '▲',
-                false,
-            )
+    let from_right = from_rect.x.saturating_add(from_rect.width);
+    let to_right = to_rect.x.saturating_add(to_rect.width);
+    let from_bottom = from_rect.y.saturating_add(from_rect.height);
+    let to_bottom = to_rect.y.saturating_add(to_rect.height);
+
+    let (start, end, arrow, horizontal_first) = if to_rect.x > from_right {
+        (
+            (from_a.right.0.saturating_add(1), from_a.right.1),
+            (to_a.left.0.saturating_sub(1), to_a.left.1),
+            '▶',
+            true,
+        )
+    } else if from_rect.x > to_right {
+        (
+            (from_a.left.0.saturating_sub(1), from_a.left.1),
+            (to_a.right.0.saturating_add(1), to_a.right.1),
+            '◀',
+            true,
+        )
+    } else if to_rect.y > from_bottom {
+        (
+            (from_a.bottom.0, from_a.bottom.1.saturating_add(1)),
+            (to_a.top.0, to_a.top.1.saturating_sub(1)),
+            '▼',
+            false,
+        )
+    } else if from_rect.y > to_bottom {
+        (
+            (from_a.top.0, from_a.top.1.saturating_sub(1)),
+            (to_a.bottom.0, to_a.bottom.1.saturating_add(1)),
+            '▲',
+            false,
+        )
+    } else {
+        return RoutedEdge {
+            segments: Vec::new(),
+            label_pos: None,
+            label: None,
         };
+    };
+
+    if in_bounds(start.0, start.1, from_rect)
+        || in_bounds(start.0, start.1, to_rect)
+        || in_bounds(end.0, end.1, from_rect)
+        || in_bounds(end.0, end.1, to_rect)
+    {
+        return RoutedEdge {
+            segments: Vec::new(),
+            label_pos: None,
+            label: None,
+        };
+    }
 
     let (sx, sy) = start;
     let (ex, ey) = end;
@@ -305,31 +408,35 @@ pub fn route_orthogonal_edge(
                 let corner1 = if sy < ey { '┐' } else { '┘' };
                 raw.push((mid_x, sy, corner1));
                 if sy < ey {
-                    for y in (sy + 1)..ey {
+                    for y in sy.saturating_add(1)..ey {
                         raw.push((mid_x, y, '│'));
                     }
                 } else {
-                    for y in ((ey + 1)..sy).rev() {
+                    for y in (ey.saturating_add(1)..sy).rev() {
                         raw.push((mid_x, y, '│'));
                     }
                 }
                 let corner2 = if sy < ey { '└' } else { '┌' };
                 raw.push((mid_x, ey, corner2));
-                for x in (mid_x + 1)..=ex {
-                    raw.push((x, ey, '─'));
+                if mid_x < ex {
+                    for x in mid_x.saturating_add(1)..=ex {
+                        raw.push((x, ey, '─'));
+                    }
                 }
             } else {
-                for x in ((mid_x + 1)..=sx).rev() {
-                    raw.push((x, sy, '─'));
+                if mid_x < sx {
+                    for x in (mid_x.saturating_add(1)..=sx).rev() {
+                        raw.push((x, sy, '─'));
+                    }
                 }
                 let corner1 = if sy < ey { '┌' } else { '└' };
                 raw.push((mid_x, sy, corner1));
                 if sy < ey {
-                    for y in (sy + 1)..ey {
+                    for y in sy.saturating_add(1)..ey {
                         raw.push((mid_x, y, '│'));
                     }
                 } else {
-                    for y in ((ey + 1)..sy).rev() {
+                    for y in (ey.saturating_add(1)..sy).rev() {
                         raw.push((mid_x, y, '│'));
                     }
                 }
@@ -359,31 +466,35 @@ pub fn route_orthogonal_edge(
             let corner1 = if sx < ex { '└' } else { '┘' };
             raw.push((sx, mid_y, corner1));
             if sx < ex {
-                for x in (sx + 1)..ex {
+                for x in sx.saturating_add(1)..ex {
                     raw.push((x, mid_y, '─'));
                 }
             } else {
-                for x in ((ex + 1)..sx).rev() {
+                for x in (ex.saturating_add(1)..sx).rev() {
                     raw.push((x, mid_y, '─'));
                 }
             }
             let corner2 = if sx < ex { '┐' } else { '┌' };
             raw.push((ex, mid_y, corner2));
-            for y in (mid_y + 1)..=ey {
-                raw.push((ex, y, '│'));
+            if mid_y < ey {
+                for y in mid_y.saturating_add(1)..=ey {
+                    raw.push((ex, y, '│'));
+                }
             }
         } else {
-            for y in ((mid_y + 1)..=sy).rev() {
-                raw.push((sx, y, '│'));
+            if mid_y < sy {
+                for y in (mid_y.saturating_add(1)..=sy).rev() {
+                    raw.push((sx, y, '│'));
+                }
             }
             let corner1 = if sx < ex { '┌' } else { '┐' };
             raw.push((sx, mid_y, corner1));
             if sx < ex {
-                for x in (sx + 1)..ex {
+                for x in sx.saturating_add(1)..ex {
                     raw.push((x, mid_y, '─'));
                 }
             } else {
-                for x in ((ex + 1)..sx).rev() {
+                for x in (ex.saturating_add(1)..sx).rev() {
                     raw.push((x, mid_y, '─'));
                 }
             }
@@ -403,7 +514,9 @@ pub fn route_orthogonal_edge(
 
     let segments: Vec<(u16, u16, char)> = raw
         .into_iter()
-        .filter(|&(x, y, _)| in_bounds(x, y, bounds))
+        .filter(|&(x, y, _)| {
+            in_bounds(x, y, bounds) && !in_bounds(x, y, from_rect) && !in_bounds(x, y, to_rect)
+        })
         .collect();
 
     let (label_pos, label) = match label {
@@ -432,7 +545,8 @@ fn compute_label_pos(
 
     let max_x = bounds.x.saturating_add(bounds.width);
     let max_y = bounds.y.saturating_add(bounds.height);
-    let text_len = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+    let text_width = display_width(text);
+    let text_len = u16::try_from(text_width).unwrap_or(u16::MAX);
     let is_segment = |x: u16, y: u16| segments.iter().any(|&(sx, sy, _)| sx == x && sy == y);
     let span_clear = |cx: u16, cy: u16| -> bool {
         if !in_bounds(cx, cy, bounds) {
@@ -476,8 +590,7 @@ fn compute_label_pos(
         }
 
         let run_len = usize::from(run_max_x.saturating_sub(run_min_x)) + 1;
-        let offset =
-            u16::try_from(run_len.saturating_sub(text.chars().count()) / 2).unwrap_or(u16::MAX);
+        let offset = u16::try_from(run_len.saturating_sub(text_width) / 2).unwrap_or(u16::MAX);
         let lx = run_min_x.saturating_add(offset);
 
         let mut candidates = Vec::new();
@@ -521,14 +634,28 @@ fn compute_label_pos(
     }
 }
 
-fn truncate_text(s: &str, max_chars: usize) -> String {
-    if max_chars == 0 {
+fn truncate_text(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
         return String::new();
     }
-    if s.chars().count() <= max_chars {
+    if display_width(s) <= max_cols {
         return s.to_string();
     }
-    let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    let ellipsis_w = display_width("…");
+    if max_cols <= ellipsis_w {
+        return "…".to_string();
+    }
+    let target = max_cols.saturating_sub(ellipsis_w);
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let ch_w = char_display_width(ch);
+        if used + ch_w > target {
+            break;
+        }
+        out.push(ch);
+        used += ch_w;
+    }
     out.push('…');
     out
 }
@@ -544,7 +671,99 @@ fn edge_kind_tag(kind: EdgeKind) -> &'static str {
     }
 }
 
+fn alternate_label_candidates(
+    segments: &[(u16, u16, char)],
+    primary: Option<(u16, u16)>,
+    label_width: usize,
+    bounds: Rect,
+) -> Vec<(u16, u16)> {
+    let mut candidates: Vec<(u16, u16)> = Vec::new();
+    let max_x = bounds.x.saturating_add(bounds.width);
+    let max_y = bounds.y.saturating_add(bounds.height);
+    let label_w_u16 = u16::try_from(label_width).unwrap_or(u16::MAX);
+
+    let mut push_unique = |pos: (u16, u16)| {
+        if in_bounds(pos.0, pos.1, bounds) && !candidates.contains(&pos) {
+            candidates.push(pos);
+        }
+    };
+
+    if let Some((px, py)) = primary {
+        push_unique((px, py));
+    }
+
+    if segments.is_empty() {
+        return candidates;
+    }
+
+    let mid_idx = segments.len() / 2;
+    let mut order = Vec::with_capacity(segments.len());
+    order.push(mid_idx);
+    for dist in 1..segments.len() {
+        if let Some(left) = mid_idx.checked_sub(dist) {
+            order.push(left);
+        }
+        let right = mid_idx + dist;
+        if right < segments.len() {
+            order.push(right);
+        }
+    }
+
+    for idx in order {
+        let (sx, sy, ch) = segments[idx];
+        if matches!(ch, '─' | '▶' | '◀') {
+            if sy > bounds.y {
+                push_unique((sx, sy - 1));
+            }
+            if sy.saturating_add(1) < max_y {
+                push_unique((sx, sy.saturating_add(1)));
+            }
+        } else if matches!(ch, '│' | '▼' | '▲') {
+            if sx.saturating_add(1) < max_x {
+                push_unique((sx.saturating_add(1), sy));
+            }
+            if sx > bounds.x {
+                push_unique((sx.saturating_sub(label_w_u16).max(bounds.x), sy));
+                push_unique((sx - 1, sy));
+            }
+        } else {
+            if sy > bounds.y {
+                push_unique((sx, sy - 1));
+            }
+            if sy.saturating_add(1) < max_y {
+                push_unique((sx, sy.saturating_add(1)));
+            }
+            if sx.saturating_add(1) < max_x {
+                push_unique((sx.saturating_add(1), sy));
+            }
+            if sx > bounds.x {
+                push_unique((sx - 1, sy));
+            }
+        }
+    }
+
+    candidates
+}
+
 pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasViewport) {
+    let visible = app.visible_component_indices();
+    let mut child_counts: HashMap<&str, usize> = HashMap::new();
+    for comp in &app.project.components {
+        if let Some(pid) = comp.parent_id.as_deref() {
+            *child_counts.entry(pid).or_insert(0) += 1;
+        }
+    }
+    render_canvas_with_cache(frame, area, app, viewport, &visible, &child_counts);
+}
+
+pub(crate) fn render_canvas_with_cache(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    viewport: CanvasViewport,
+    visible: &[usize],
+    child_counts: &HashMap<&str, usize>,
+) {
     let grid = app.effective_grid();
     let title = format!(
         " Snap Grid ({}x{}) [{}] ",
@@ -564,7 +783,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
 
     let mut visible_cards: Vec<(usize, Rect)> = Vec::new();
     let mut card_rects: HashMap<&str, Rect> = HashMap::new();
-    for idx in app.visible_component_indices() {
+    for &idx in visible {
         if let Some(comp) = app.project.components.get(idx) {
             if let Some(rect) = card_rect(inner, viewport, comp.position) {
                 visible_cards.push((idx, rect));
@@ -573,10 +792,19 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         }
     }
 
-    let selected_id = app.selected_component().map(|c| c.id.as_str());
+    let selected_id = visible
+        .get(app.selected_index)
+        .and_then(|&idx| app.project.components.get(idx))
+        .map(|c| c.id.as_str());
+
+    let highlight_style = Style::default()
+        .fg(style::to_color(app.theme.palette.accent))
+        .bg(style::to_color(app.theme.palette.background));
+    let normal_style = style::muted_style(&app.theme);
 
     let mut routed_edges: Vec<(RoutedEdge, Style)> = Vec::new();
-    let mut segment_cells: Vec<(u16, u16)> = Vec::new();
+    let mut corridor_cells: HashMap<(u16, u16), (char, bool)> = HashMap::new();
+    let mut segment_cells: HashSet<(u16, u16)> = HashSet::new();
 
     for conn in &app.project.config.connections {
         let (Some(&from_rect), Some(&to_rect)) = (
@@ -600,65 +828,127 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
         let is_highlighted =
             selected_id == Some(conn.from.as_str()) || selected_id == Some(conn.to.as_str());
         let edge_style = if is_highlighted {
-            Style::default()
-                .fg(style::to_color(app.theme.palette.accent))
-                .bg(style::to_color(app.theme.palette.background))
+            highlight_style
         } else {
-            style::muted_style(&app.theme)
+            normal_style
         };
 
-        let buf = frame.buffer_mut();
         for &(x, y, ch) in &routed.segments {
-            segment_cells.push((x, y));
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                let mut ch_buf = [0u8; 4];
-                cell.set_symbol(ch.encode_utf8(&mut ch_buf))
-                    .set_style(edge_style);
-            }
+            segment_cells.insert((x, y));
+            corridor_cells
+                .entry((x, y))
+                .and_modify(|(existing_ch, existing_hi)| {
+                    *existing_ch = merge_corridor_glyph(*existing_ch, ch);
+                    *existing_hi = *existing_hi || is_highlighted;
+                })
+                .or_insert((ch, is_highlighted));
         }
 
         routed_edges.push((routed, edge_style));
     }
 
-    let is_blocked = |x: u16, y: u16| -> bool {
-        !in_bounds(x, y, inner)
-            || segment_cells.contains(&(x, y))
-            || visible_cards.iter().any(|&(_, rect)| in_bounds(x, y, rect))
-    };
+    {
+        let buf = frame.buffer_mut();
+        for (&(x, y), &(ch, is_highlighted)) in &corridor_cells {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                let mut ch_buf = [0u8; 4];
+                let cell_style = if is_highlighted {
+                    highlight_style
+                } else {
+                    normal_style
+                };
+                cell.set_symbol(ch.encode_utf8(&mut ch_buf))
+                    .set_style(cell_style);
+            }
+        }
+    }
 
+    let mut occupied_label_cells: HashSet<(u16, u16)> = HashSet::new();
     let buf = frame.buffer_mut();
     let max_x = inner.x.saturating_add(inner.width);
+
     for (routed, edge_style) in &routed_edges {
-        if let (Some((lx, ly)), Some(text)) = (routed.label_pos, routed.label.as_deref()) {
-            if is_blocked(lx, ly) {
-                continue;
+        let Some(text) = routed.label.as_deref() else {
+            continue;
+        };
+        let safe_label = crate::tui::ui::sanitize_display_text(text);
+        let label_width = display_width(&safe_label);
+        if label_width == 0 {
+            continue;
+        }
+
+        let is_blocked = |x: u16, y: u16, occupied: &HashSet<(u16, u16)>| -> bool {
+            !in_bounds(x, y, inner)
+                || segment_cells.contains(&(x, y))
+                || occupied.contains(&(x, y))
+                || visible_cards.iter().any(|&(_, rect)| in_bounds(x, y, rect))
+        };
+
+        let avail_at = |cx: u16, cy: u16, occupied: &HashSet<(u16, u16)>| -> usize {
+            if is_blocked(cx, cy, occupied) {
+                return 0;
             }
             let mut avail = 0usize;
-            for x in lx..max_x {
-                if is_blocked(x, ly) {
+            for x in cx..max_x {
+                if is_blocked(x, cy, occupied) {
                     break;
                 }
                 avail += 1;
             }
+            avail
+        };
+
+        let candidates =
+            alternate_label_candidates(&routed.segments, routed.label_pos, label_width, inner);
+        let mut chosen: Option<(u16, u16, usize)> = None;
+        for (cx, cy) in candidates {
+            let avail = avail_at(cx, cy, &occupied_label_cells);
             if avail == 0 {
                 continue;
             }
-            let safe_label = crate::tui::ui::sanitize_display_text(text);
-            let clipped = truncate_text(&safe_label, avail);
-            for (offset, ch) in clipped.chars().enumerate() {
-                let Ok(dx) = u16::try_from(offset) else {
-                    break;
-                };
-                let x = lx.saturating_add(dx);
-                if is_blocked(x, ly) {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, ly)) {
-                    let mut ch_buf = [0u8; 4];
-                    cell.set_symbol(ch.encode_utf8(&mut ch_buf))
-                        .set_style(*edge_style);
+            if avail >= label_width {
+                chosen = Some((cx, cy, avail));
+                break;
+            }
+            if chosen.is_none_or(|(_, _, best_avail)| avail > best_avail) {
+                chosen = Some((cx, cy, avail));
+            }
+        }
+
+        let Some((lx, ly, avail)) = chosen else {
+            continue;
+        };
+
+        let clipped = truncate_text(&safe_label, avail);
+        let mut x = lx;
+        for ch in clipped.chars() {
+            let w = char_display_width(ch);
+            if w == 0 {
+                continue;
+            }
+            let Ok(w_u16) = u16::try_from(w) else {
+                break;
+            };
+            let Some(end_x) = x.checked_add(w_u16) else {
+                break;
+            };
+            if end_x > max_x || (x..end_x).any(|col| is_blocked(col, ly, &occupied_label_cells)) {
+                break;
+            }
+            if let Some(cell) = buf.cell_mut((x, ly)) {
+                let mut ch_buf = [0u8; 4];
+                cell.set_symbol(ch.encode_utf8(&mut ch_buf))
+                    .set_style(*edge_style);
+            }
+            for trail_x in x.saturating_add(1)..end_x {
+                if let Some(cell) = buf.cell_mut((trail_x, ly)) {
+                    cell.set_symbol("").set_style(*edge_style);
                 }
             }
+            for col in x..end_x {
+                occupied_label_cells.insert((col, ly));
+            }
+            x = end_x;
         }
     }
 
@@ -683,7 +973,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
 
         let inner_w = rect.width.saturating_sub(2) as usize;
         let inner_h = rect.height.saturating_sub(2) as usize;
-        let sub_count = app.project.sub_components(&comp.id).len();
+        let sub_count = child_counts.get(comp.id.as_str()).copied().unwrap_or(0);
         let safe_name = crate::tui::ui::sanitize_display_text(&comp.name);
         let safe_description = crate::tui::ui::sanitize_display_text(&comp.description);
         let line1 = if sub_count > 0 {
@@ -692,7 +982,7 @@ pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasV
             } else {
                 format!("[+{sub_count}]")
             };
-            let badge_len = badge.chars().count();
+            let badge_len = display_width(&badge);
             if inner_w > badge_len + 1 {
                 let prefix =
                     truncate_text(&format!("{glyph} {safe_name}"), inner_w - badge_len - 1);
@@ -1395,5 +1685,194 @@ mod tests {
         assert!(text.contains("Alpha"));
         assert!(text.contains("Beta"));
         assert!(text.contains("flow"));
+    }
+
+    #[test]
+    fn canvas_unicode_width_truncation_and_label_placement() {
+        let truncated = truncate_text("日本語テスト🚀", 6);
+        assert!(
+            display_width(&truncated) <= 6,
+            "expected display width <= 6, got {} for {truncated:?}",
+            display_width(&truncated)
+        );
+        assert!(truncated.ends_with('…'));
+        assert_eq!(truncate_text("日本語テスト🚀", 0), "");
+        assert!(display_width(&truncate_text("日本語テスト🚀", 1)) <= 1);
+
+        let mut app = make_canvas_test_app(
+            GridPos { col: 0, row: 0 },
+            GridPos { col: 1, row: 0 },
+            Some("日本語テスト🚀"),
+        );
+        app.project.components[0].name = "日本語テスト🚀コンポーネント".to_string();
+        app.project.components[1].name = "テスト🚀受信".to_string();
+
+        let buf = render_canvas_buffer(&app, 80, 24);
+        let inner = Rect::new(1, 1, 78, 22);
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let from_rect = card_rect(inner, normal_vp, GridPos { col: 0, row: 0 }).unwrap();
+        let to_rect = card_rect(inner, normal_vp, GridPos { col: 1, row: 0 }).unwrap();
+
+        // Selected card (alpha) uses Double borders; unselected card (beta) uses Plain borders.
+        assert_eq!(buf[(from_rect.x, from_rect.y)].symbol(), "╔");
+        assert_eq!(
+            buf[(from_rect.x + from_rect.width - 1, from_rect.y)].symbol(),
+            "╗"
+        );
+        assert_eq!(
+            buf[(from_rect.x + from_rect.width - 1, from_rect.y + 1)].symbol(),
+            "║"
+        );
+        assert_eq!(buf[(to_rect.x, to_rect.y)].symbol(), "┌");
+        assert_eq!(buf[(to_rect.x, to_rect.y + 1)].symbol(), "│");
+        assert_eq!(
+            buf[(to_rect.x + to_rect.width - 1, to_rect.y + 1)].symbol(),
+            "│"
+        );
+    }
+
+    #[test]
+    fn route_orthogonal_edge_handles_touching_and_overlapping_cards_without_overflow() {
+        let bounds = Rect::new(0, 0, u16::MAX, u16::MAX);
+        let cases = [
+            // Touching horizontally: x: 0..10 and x: 10..20
+            (Rect::new(0, 0, 10, 5), Rect::new(10, 0, 10, 5)),
+            // Touching vertically: y: 0..5 and y: 5..10
+            (Rect::new(0, 0, 10, 5), Rect::new(0, 5, 10, 5)),
+            // Overlapping rects
+            (Rect::new(0, 0, 10, 5), Rect::new(5, 2, 10, 5)),
+            // Rects near u16::MAX
+            (
+                Rect::new(u16::MAX - 20, u16::MAX - 10, 8, 4),
+                Rect::new(u16::MAX - 8, u16::MAX - 4, 8, 4),
+            ),
+            (
+                Rect::new(u16::MAX - 10, u16::MAX - 5, 10, 5),
+                Rect::new(u16::MAX - 20, u16::MAX - 5, 10, 5),
+            ),
+            (
+                Rect::new(u16::MAX - 4, u16::MAX - 4, 4, 4),
+                Rect::new(u16::MAX - 4, u16::MAX - 4, 4, 4),
+            ),
+        ];
+
+        for (from_rect, to_rect) in cases {
+            let edge = route_orthogonal_edge(from_rect, to_rect, Some("link"), bounds);
+            for &(x, y, _) in &edge.segments {
+                assert!(
+                    !in_bounds(x, y, from_rect),
+                    "segment ({x}, {y}) lies inside from_rect {from_rect:?}"
+                );
+                assert!(
+                    !in_bounds(x, y, to_rect),
+                    "segment ({x}, {y}) lies inside to_rect {to_rect:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn render_canvas_merges_corridor_junctions_and_avoids_label_overlap() {
+        use std::path::PathBuf;
+
+        use crate::model::{
+            Component, ComponentKind, Connection, GridConfig, Project, ProjectConfig,
+        };
+        use crate::theme::default_theme;
+
+        let make_comp = |id: &str, name: &str, pos: GridPos| Component {
+            id: id.to_string(),
+            name: name.to_string(),
+            kind: ComponentKind::Logic,
+            parent_id: None,
+            description: format!("{name} node"),
+            relative_path: Some(format!("src/{id}.rs")),
+            position: pos,
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+
+        let project = Project {
+            config: ProjectConfig {
+                name: "Corridor Test".to_string(),
+                description: "Junction and label overlap test".to_string(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig::default(),
+                connections: vec![
+                    Connection {
+                        from: "left".to_string(),
+                        to: "right".to_string(),
+                        kind: EdgeKind::DataFlow,
+                        label: Some("req".to_string()),
+                    },
+                    Connection {
+                        from: "left".to_string(),
+                        to: "right".to_string(),
+                        kind: EdgeKind::Invokes,
+                        label: Some("ack".to_string()),
+                    },
+                    Connection {
+                        from: "top".to_string(),
+                        to: "bottom".to_string(),
+                        kind: EdgeKind::DependsOn,
+                        label: None,
+                    },
+                ],
+            },
+            components: vec![
+                make_comp("left", "Left", GridPos { col: 0, row: 1 }),
+                make_comp("right", "Right", GridPos { col: 2, row: 1 }),
+                make_comp("top", "Top", GridPos { col: 1, row: 0 }),
+                make_comp("bottom", "Bottom", GridPos { col: 1, row: 2 }),
+            ],
+        };
+
+        let theme = default_theme().unwrap();
+        let app = App::new(PathBuf::from("/tmp/example-project"), project, theme);
+        // "left" is selected (index 0), so left->right is highlighted and top->bottom is unhighlighted.
+        let buf = render_canvas_buffer(&app, 95, 25);
+
+        let inner = Rect::new(1, 1, 93, 23);
+        let normal_vp = CanvasViewport {
+            zoom: ZoomLevel::Normal,
+            ..Default::default()
+        };
+        let left_rect = card_rect(inner, normal_vp, GridPos { col: 0, row: 1 }).unwrap();
+        let top_rect = card_rect(inner, normal_vp, GridPos { col: 1, row: 0 }).unwrap();
+        let cross_x = card_anchor_points(top_rect).bottom.0;
+        let cross_y = card_anchor_points(left_rect).right.1;
+
+        assert_eq!(
+            buf[(cross_x, cross_y)].symbol(),
+            "┼",
+            "expected crossing junction '┼' at ({cross_x}, {cross_y})"
+        );
+        assert_eq!(
+            buf[(cross_x, cross_y)].fg,
+            style::to_color(app.theme.palette.accent),
+            "expected highlighted foreground style on merged junction cell"
+        );
+
+        let full_text: String = (0..buf.area.height)
+            .map(|y| row_text(&buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            full_text.contains("req"),
+            "expected first parallel edge label 'req' in canvas:\n{full_text}"
+        );
+        assert!(
+            full_text.contains("ack"),
+            "expected second parallel edge label 'ack' in canvas:\n{full_text}"
+        );
     }
 }

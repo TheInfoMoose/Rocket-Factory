@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use ratatui::widgets::ListState;
@@ -139,6 +139,7 @@ impl App {
     fn push_visible_component(
         &self,
         idx: usize,
+        children: &HashMap<&str, Vec<usize>>,
         out: &mut Vec<usize>,
         visited: &mut HashSet<usize>,
     ) {
@@ -152,29 +153,28 @@ impl App {
             out.push(idx);
         }
         if self.expanded_components.contains(&comp.id) {
-            let parent_id = comp.id.as_str();
-            for (child_idx, child) in self.project.components.iter().enumerate() {
-                if child.parent_id.as_deref() == Some(parent_id) {
-                    self.push_visible_component(child_idx, out, visited);
+            if let Some(child_indices) = children.get(comp.id.as_str()) {
+                for &child_idx in child_indices {
+                    self.push_visible_component(child_idx, children, out, visited);
                 }
             }
         }
     }
 
-    fn has_top_level_root(&self, idx: usize, existing_ids: &HashSet<&str>) -> bool {
+    fn has_top_level_root(&self, idx: usize, id_to_idx: &HashMap<&str, usize>) -> bool {
         let Some(mut current) = self.project.components.get(idx) else {
             return false;
         };
         let mut seen = HashSet::new();
         seen.insert(current.id.as_str());
         while let Some(pid) = current.parent_id.as_deref() {
-            if !existing_ids.contains(pid) {
+            let Some(&parent_idx) = id_to_idx.get(pid) else {
                 return true;
-            }
+            };
             if !seen.insert(pid) {
                 return false;
             }
-            match self.project.component(pid) {
+            match self.project.components.get(parent_idx) {
                 Some(parent) => current = parent,
                 None => return true,
             }
@@ -183,28 +183,32 @@ impl App {
     }
 
     pub fn visible_component_indices(&self) -> Vec<usize> {
-        let existing_ids: HashSet<&str> = self
-            .project
-            .components
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
+        let mut id_to_idx: HashMap<&str, usize> =
+            HashMap::with_capacity(self.project.components.len());
+        let mut children: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (idx, comp) in self.project.components.iter().enumerate() {
+            id_to_idx.insert(comp.id.as_str(), idx);
+            if let Some(pid) = comp.parent_id.as_deref() {
+                children.entry(pid).or_default().push(idx);
+            }
+        }
+
         let mut out = Vec::new();
         let mut visited = HashSet::new();
 
         for (idx, comp) in self.project.components.iter().enumerate() {
             let is_top_level = match comp.parent_id.as_deref() {
                 None => true,
-                Some(pid) => !existing_ids.contains(pid),
+                Some(pid) => !id_to_idx.contains_key(pid),
             };
             if is_top_level {
-                self.push_visible_component(idx, &mut out, &mut visited);
+                self.push_visible_component(idx, &children, &mut out, &mut visited);
             }
         }
 
         for idx in 0..self.project.components.len() {
-            if !visited.contains(&idx) && !self.has_top_level_root(idx, &existing_ids) {
-                self.push_visible_component(idx, &mut out, &mut visited);
+            if !visited.contains(&idx) && !self.has_top_level_root(idx, &id_to_idx) {
+                self.push_visible_component(idx, &children, &mut out, &mut visited);
             }
         }
 
