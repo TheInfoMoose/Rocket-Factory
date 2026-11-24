@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0117"
 type = "task"
 title = "canvas"
-status = "open"
+status = "pending"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T19:11:20Z"
-updated_at = "2026-11-24T19:11:20Z"
+updated_at = "2026-11-24T19:40:11Z"
 source_ref = "STEP 18E"
 
 [effort]
