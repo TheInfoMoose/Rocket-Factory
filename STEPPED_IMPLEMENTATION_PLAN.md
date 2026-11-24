@@ -4634,6 +4634,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 * **Recommended Command:** `/goal`
 * **Advances:** `BUG-0041`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
@@ -4645,6 +4646,7 @@ ALLOWED_FILES:
   - src/tui/app/actions.rs
   - src/tui/ui.rs
   - src/tui/app/mod.rs
+  - tests/e2e.rs
 READ_ONLY_REFS:
   - src/model.rs:40-100 (Connection, EdgeKind)
   - src/tui/app/state.rs:25-35 (InputMode)
@@ -4673,7 +4675,7 @@ Contract & Behavior:
 
 Must still work:
   - Single-edge `E` (4 `Right` presses -> `Contains` -> `Enter`) and `D` (`y`/`Enter` to confirm, `Esc` to cancel) flows continue to work identically.
-  - Existing `EditConnection` / `ConfirmDelete` UI snapshot and rollback tests continue to pass (updating assertions in `src/tui/app/mod.rs` only where `D` now presents all incident edges).
+  - Existing `EditConnection` / `ConfirmDelete` UI snapshot and rollback tests continue to pass (updating assertions in `src/tui/app/mod.rs` only where `D` now presents all incident edges, and in `tests/e2e.rs` where `e2e_edge_contains_ingestion_mutable_archetype_and_connect_semantics` selects `frontend -> widget_lib` via `]` when `frontend` has multiple outgoing edges).
 
 Drops: none
 
