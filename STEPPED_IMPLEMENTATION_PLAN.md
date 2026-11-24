@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 17):** Clean up `RbError` variants and `pub` crate surface (`TASK-0072`, `TASK-0073`), harden `model.rs` serde defaults/`GridConfig` validation, `storage.rs` durability/load checks, and missing `.rocket/` mutation guard (`BUG-0033`–`BUG-0035`, `BUG-0039`), expand `audit_project` and fix `export.rs` (`BUG-0038`, `BUG-0044`), fix CLI exit-code/env/`--component` validation (`BUG-0046`), consolidate adapter sync orchestration without full `Project` deep clones (`TASK-0070`, `TASK-0076`, `BUG-0036`, `BUG-0037`, `BUG-0045`), preserve legacy `ComponentKind` on TUI edit (`TASK-0071`), and split `src/tui/app.rs` into submodules with deduplicated grid/path helpers (`TASK-0069`).
+**Phase goal (Phase 18):** Fix Phase 17 follow-up bugs in adapter task pruning and audit grid checks (`BUG-0054`, `BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`, `BUG-0055`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,12 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 17A** | `/goal` | core | `src/error.rs`, `src/cli.rs`, `src/theme.rs`, `src/main.rs` | — |
-| 2 | **STEP 17B** | `/goal` | storage | `src/model.rs`, `src/storage.rs`, `src/tui/app.rs` | **STEP 17A** |
-| 3 | **STEP 17C** | `/goal` | audit | `src/audit.rs`, `src/export.rs` | — |
-| 4 | **STEP 17D** | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` | **STEP 17B** |
-| 5 | **STEP 17E** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/mod.rs`, `src/tui/canvas.rs`, `src/tui/terminal.rs` | **STEP 17D** |
-| 6 | **STEP 17F** | `/goal` | tui | `src/tui/app.rs`, `src/tui/app/*`, `src/storage.rs`, `src/theme.rs`, `src/tui/terminal.rs` | **STEP 17E** |
+| 1 | **STEP 18A** | `/goal` | core | `src/adapter.rs`, `src/audit.rs` | — |
+| 2 | **STEP 18B** | `/goal` | tui | `src/tui/app/state.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs` | — |
+| 3 | **STEP 18C** | `/goal` | tui | `src/tui/app/actions.rs`, `src/tui/app/grid.rs`, `src/tui/app/mod.rs` | **STEP 18B** |
+| 4 | **STEP 18D** | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs` | **STEP 18C** |
+| 5 | **STEP 18E** | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs`, `src/tui/app/state.rs` | **STEP 18D** |
+| 6 | **STEP 18F** | `/boost` | terminal | `src/tui/terminal.rs`, `src/tui/app/state.rs`, `src/tui/app/sync.rs`, `src/tui/app/mod.rs` | **STEP 18E** |
 
 ### Completed
 
@@ -103,6 +103,12 @@
 | **STEP 16D** | Done (`86781d7`) | `/goal` | security | `src/storage.rs`, `src/theme.rs` |
 | **STEP 16E** | Done (`db3e74f`) | `/goal` | security | `src/tui/terminal.rs` |
 | **STEP 16F** | Done (`1c5c729`) | `/goal` | security | `src/tui/modal.rs`, `src/tui/ui.rs`, `src/tui/canvas.rs` |
+| **STEP 17A** | Done (`c448677`) | `/goal` | core | `src/error.rs`, `src/cli.rs`, `src/theme.rs`, `src/main.rs` |
+| **STEP 17B** | Done (`2bac916`) | `/goal` | storage | `src/model.rs`, `src/storage.rs`, `src/tui/app.rs` |
+| **STEP 17C** | Done (`1049fb5`) | `/goal` | audit | `src/audit.rs`, `src/export.rs` |
+| **STEP 17D** | Done (`bc61b2f`) | `/goal` | adapter | `src/adapter.rs`, `src/cli.rs`, `src/tui/app.rs` |
+| **STEP 17E** | Done (`a7ed114`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app.rs`, `src/tui/mod.rs`, `src/tui/canvas.rs`, `src/tui/terminal.rs` |
+| **STEP 17F** | Done (`6939805`) | `/goal` | tui | `src/tui/app.rs`, `src/tui/app/*`, `src/storage.rs`, `src/theme.rs`, `src/tui/terminal.rs` |
 
 ### Future phases
 
@@ -113,24 +119,10 @@
 - `scripts/*` is temporarily removed from `**Forbidden paths:**` for Phase 16 (`STEP 16A`) and must be restored to `**Forbidden paths:**` when planning Phase 17.
 - For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
 
-#### Phase 17: Architecture Refactor, Adapter Sync & Core Durability
-- **Goal:** Split the `src/tui/app.rs` monolith, consolidate CLI/TUI adapter sync, clean up `RbError`/public crate surface, and fix core model/storage/audit/export/adapter/CLI durability bugs (`TASK-0069`–`TASK-0073`, `TASK-0076`, `BUG-0033`–`BUG-0039`, `BUG-0044`–`BUG-0046`).
-- **Done looks like:** `app.rs` is split into focused submodules, CLI and TUI share one atomic sync path, and all core model/storage/audit/export/adapter/CLI bugs are resolved.
-- **Steps:**
-  - **STEP 17A:** Clean up `RbError` variants and narrow over-exposed `pub` crate surface (`TASK-0072`, `TASK-0073`)
-  - **STEP 17B:** Harden `model.rs` serde defaults/`GridConfig` validation, `storage.rs` durability/duplicate-ID checks, and missing `.rocket/` mutation guard (`BUG-0033`, `BUG-0034`, `BUG-0035`, `BUG-0039`)
-  - **STEP 17C:** Fix `audit_project` structural checks, `export.rs` manifest/Markdown escaping, and `cli.rs` exit/env/`--component` bugs (`BUG-0038`, `BUG-0044`, `BUG-0046`)
-  - **STEP 17D:** Consolidate adapter sync orchestration into `src/adapter.rs`, fix multi-adapter/push/UTF-8 bugs, and avoid full `Project` deep clone (`TASK-0070`, `TASK-0076`, `BUG-0036`, `BUG-0037`, `BUG-0045`)
-  - **STEP 17E:** Split `src/tui/app.rs` into focused submodules, deduplicate grid/path helpers, and preserve legacy `ComponentKind` on edit (`TASK-0069`, `TASK-0071`)
-
-#### Phase 18: TUI, Canvas & Responsiveness Fixes
-- **Goal:** Fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`) and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
-- **Done looks like:** Component list and detail panel scroll properly, canvas handles Unicode and overlapping edges cleanly, TUI mutations roll back atomically, and adapter sync runs off the UI thread with dirty-flag redraws.
-- **Steps:**
-  - **STEP 18A:** Fix component list scrolling (`ListState`), `detail_scroll` clamping, and `GapsOnly` selection clamping (`BUG-0024`, `BUG-0027`, `BUG-0040`)
-  - **STEP 18B:** Fix `parent_id` cycle visibility, `confirm_connect`/`Contains` edge handling, `E/D` multi-edge & `InputMode` guards, and `UpdateComponent`/multi-file rollback (`BUG-0026`, `BUG-0028`, `BUG-0029`, `BUG-0041`, `BUG-0042`)
-  - **STEP 18C:** Fix `canvas.rs` Unicode display width, `u16::MAX` proximity loop, overlapping edge/label routing, and touching-card routing (`BUG-0025`, `BUG-0030`, `BUG-0031`, `BUG-0043`)
-  - **STEP 18D:** Fix `run_tui` error propagation, `$EDITOR` restore safety, async adapter `mpsc` channel, dirty-flag event loop, and per-frame TUI render allocations (`BUG-0032`, `TASK-0074`, `TASK-0075`, `TASK-0077`)
+#### Phase 18: TUI, Canvas & Responsiveness Fixes (Active)
+- **Goal:** Fix Phase 17 follow-up bugs (`BUG-0054`–`BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
+- **Done looks like:** Stale pulled tasks are pruned, audit checks global grid bounds/overlaps, component list and detail panel scroll properly, canvas handles Unicode and overlapping edges cleanly, TUI mutations and `Contains` edges stay atomic and in sync, and adapter sync runs off the UI thread with dirty-flag redraws.
+- **Steps:** `STEP 18A`–`STEP 18F` (see `### Up Next` and `## Phase 18 Step Blocks`).
 
 #### Phase 19: Comprehensive Test Coverage
 - **Goal:** Close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
@@ -4447,6 +4439,372 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && test -f src/tui/app/mod.rs && test ! -f src/tui/app.rs && grep -qE 'pub\(crate\) fn ensure_contained' src/storage.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 18 Step Blocks
+
+### STEP 18A: Prune Stale Pulled Tasks & Enforce Global Grid Audit Checks
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0054`, `BUG-0056`
+
+```text
+[STEP_ID]
+STEP 18A: Prune stale deleted external tasks during adapter status reconciliation and enforce global grid bounds/overlap checks in `audit_project`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+  - src/audit.rs
+READ_ONLY_REFS:
+  - src/model.rs:1-165 (Project, Component, GridConfig, GridPos, ExternalTaskRef, FeatureItem)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not alter adapter CLI framing or `sync_push_project`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pulling status from one or more adapters removes stale external tasks that were deleted or moved off a component, and `audit_project` detects out-of-bounds sub-components and cross-parent grid overlaps on the shared canvas grid.
+
+Contract & Behavior:
+  1. `src/adapter.rs`:
+     - Add `pub fn reconcile_status_batch(project: &mut Project, responses: &[PullStatusResponse]) -> ReconcileSummary`.
+     - For every component mentioned in at least one `PulledComponentStatus` entry across `responses`, merge all pulled tasks across all matching entries/responses (deduplicating/upserting by `external_id`, with later entries overriding earlier ones on duplicate `external_id`), and **replace** `component.external_tasks` with that merged list so any previously stored task absent from all responses in the batch (including when an adapter returns `tasks: []`) is pruned.
+     - Link `component.features` against the component's merged tasks using the existing rule (`external_id` exact match first; otherwise unique `title` match across the merged tasks), updating `feature.pushed = true` and `feature.external_id = Some(...)` and counting `summary.features_linked`.
+     - Leave components not mentioned in any response in `responses` completely untouched.
+     - Have `pub fn reconcile_status(project: &mut Project, response: &PullStatusResponse) -> ReconcileSummary` delegate to `reconcile_status_batch(project, std::slice::from_ref(response))`.
+     - Have `sync_pull_project` call `reconcile_status_batch(project, &responses)` once instead of calling `reconcile_status` in a loop.
+  2. `src/audit.rs`:
+     - In `audit_project`, run the `grid_valid` bounds check (`component.position.col >= grid.cols || component.position.row >= grid.rows` -> `FindingSeverity::Error`, `FindingKind::InvalidGrid`) for **all** components regardless of whether `component.parent_id` is `Some` or `None` (remove the `else if` coupling to `parent_id`).
+     - Key `occupied_positions` globally by `component.position` (`HashMap<GridPos, &str>`) so any two components sharing the same `GridPos` on the global canvas grid (top-level vs. top-level, parent vs. child, or sub-components of different parents) emit `FindingSeverity::Error` with `FindingKind::InvalidGrid`.
+
+Must still work:
+  - Multi-adapter `sync_pull_project` merges tasks from all active pull adapters without one adapter clobbering another's tasks.
+  - Rollback of `external_tasks` and `features` on `save_component` failure in `sync_pull_project` remains intact.
+  - All existing `audit_project` checks (`UntrackedComponent`, `UnpushedFeatures`, `DanglingConnection`, `SelfConnection`, `InvalidParent`, `HierarchyDrift`, `InvalidGrid` for `0x0` grid) continue to pass.
+
+Drops:
+  - Calling `reconcile_status` sequentially across two separate calls no longer accumulates tasks across calls; multi-adapter merging uses `reconcile_status_batch`.
+  - Scoped per-parent grid overlap partitioning in `audit_project` is replaced by global canvas grid overlap detection.
+
+Tests:
+  - `reconcile_status_prunes_deleted_and_empty_tasks`: component starts with external tasks `T-1` and `T-2`; `reconcile_status` with only `T-2` removes `T-1`, then `reconcile_status` with `tasks: []` clears `external_tasks` to empty; an unmentioned sibling component retains its existing tasks.
+  - `reconcile_status_merges_multi_adapter_tasks_without_clobbering`: updated to call `reconcile_status_batch(&mut project, &[response_a, response_b])` and verify tasks from both adapters are merged while a pre-existing stale task absent from both responses is pruned.
+  - `audit_flags_sub_component_out_of_bounds_and_cross_parent_overlap`: project with `4x4` grid has a sub-component at `(5, 0)` (flagged `InvalidGrid` out-of-bounds) and a second sub-component under another parent sharing `(0, 0)` with a top-level component (flagged `InvalidGrid` overlap).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn reconcile_status_batch\b' src/adapter.rs && grep -qE 'fn reconcile_status_prunes_deleted_and_empty_tasks\b' src/adapter.rs && grep -qE 'fn audit_flags_sub_component_out_of_bounds_and_cross_parent_overlap\b' src/audit.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 18B: Stateful List Scrolling, Detail Scroll Clamping, GapsOnly Clamp & Cycle Visibility
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0024`, `BUG-0027`, `BUG-0028`, `BUG-0040`
+
+```text
+[STEP_ID]
+STEP 18B: Enable stateful component list scrolling, clamp `detail_scroll` and reset it on selection change, clamp selection after `UpdateComponent` under `GapsOnly`, and keep disconnected `parent_id` cycle members visible.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app/state.rs
+  - src/tui/app/actions.rs
+  - src/tui/ui.rs
+  - src/tui/app/mod.rs
+READ_ONLY_REFS:
+  - src/tui/canvas.rs:547-580 (render_canvas usage of visible_component_indices)
+  - src/model.rs:1-165 (Project, Component, CardStatus)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change modal schemas or canvas edge routing in this step.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Long component lists scroll with selection, `detail_scroll` stays clamped to wrapped content height and resets whenever selection changes, editing a gap component under `GapsOnly` never leaves `selected_index` out of bounds, and components in a `parent_id` cycle remain visible.
+
+Contract & Behavior:
+  1. `src/tui/app/state.rs`:
+     - Add `pub list_state: ratatui::widgets::ListState` (initialized to `ListState::default()`) and `pub last_detail_max_scroll: Option<u16>` (initialized to `None`) to `App`.
+     - In `visible_component_indices()`, after traversing all top-level roots (`parent_id.is_none()` or missing parent), iterate any remaining unvisited indices in `self.project.components` and call `push_visible_component` so disconnected `parent_id` cycles (e.g., `A -> B -> A`) remain visible in both list and canvas without infinite recursion.
+     - In `clamp_selection()`, record the selected component ID before clamping (using `selected_index` against the current visible list if in bounds, or `None` if out of bounds) and compare with the selected component ID after clamping; if the selected component changed or the visible list is empty, reset `self.detail_scroll = 0`.
+  2. `src/tui/app/actions.rs`:
+     - In `ModalAction::UpdateComponent`, call `self.clamp_selection()` after updating `self.project.components[comp_idx]` so removing the last visible `Gap` under `ListFilter::GapsOnly` clamps `selected_index` safely.
+     - In `handle_direction_key` (`FocusColumn::Detail`, `Direction::Down`), increment `self.detail_scroll` clamped to `max` when `self.last_detail_max_scroll` is `Some(max)` (and `saturating_add(1)` when `None`).
+  3. `src/tui/ui.rs`:
+     - Update `render_component_list` to take `app: &mut App`. When `visible.is_empty()`, call `app.list_state.select(None)` and render the empty paragraph. Otherwise, call `app.list_state.select(Some(app.selected_index.min(visible.len() - 1)))` and render the `List` via `frame.render_stateful_widget(list, area, &mut app.list_state)` so moving selection past the visible height scrolls the viewport to keep the selected row on screen.
+     - Update `render_detail_panel` to take `app: &mut App`. When no component is selected, set `app.last_detail_max_scroll = Some(0)` and `app.detail_scroll = 0`. Otherwise, compute wrapped line count for `inner_width = area.width.saturating_sub(2)` using `Paragraph::line_count(inner_width)` and `inner_height = usize::from(area.height.saturating_sub(2))`, compute `max_scroll = u16::try_from(total_lines.saturating_sub(inner_height)).unwrap_or(u16::MAX)`, store `app.last_detail_max_scroll = Some(max_scroll)`, clamp `app.detail_scroll = app.detail_scroll.min(max_scroll)`, and apply `.scroll((app.detail_scroll, 0))`.
+
+Must still work:
+  - Existing `App` headless unit tests that press `j` in `FocusColumn::Detail` before any render still observe `app.detail_scroll == 1`.
+  - Existing list selection styling, narrow-width (`80x24`) truncation with long names, expand/collapse glyphs (`▸`/`▾`), and `GapsOnly` toggle continue to render cleanly.
+
+Drops: none
+
+Tests:
+  - `component_list_scrolls_selection_into_view_on_overflow` (in `src/tui/ui.rs`): render an `80x12` frame with 20 components and `selected_index = 18` -> `app.list_state.offset() > 0` and the selected component's name appears inside the left column's rendered cells.
+  - `detail_scroll_clamps_to_wrapped_height_and_resets_on_clamp_selection` (in `src/tui/ui.rs`): render detail panel at `80x24` with long markdown text, press `j` 500 times -> `app.detail_scroll == app.last_detail_max_scroll.unwrap()` (`< 500`); then collapse/filter so `clamp_selection` changes the active component -> `app.detail_scroll == 0`.
+  - `update_component_clamps_selection_under_gaps_only` (in `src/tui/app/mod.rs`): under `ListFilter::GapsOnly` with 2 gap components and `selected_index = 1`, submit `ModalAction::UpdateComponent` adding a feature to the second component -> `app.selected_index == 0` and `app.selected_component().is_some()`.
+  - `visible_component_indices_includes_disconnected_parent_cycle` (in `src/tui/app/mod.rs`): project with `alpha.parent_id = Some("beta")` and `beta.parent_id = Some("alpha")` -> `visible_component_indices()` includes both indices without looping.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub list_state:' src/tui/app/state.rs && grep -qE 'render_stateful_widget' src/tui/ui.rs && grep -qE 'fn component_list_scrolls_selection_into_view_on_overflow\b' src/tui/ui.rs && grep -qE 'fn update_component_clamps_selection_under_gaps_only\b' src/tui/app/mod.rs && grep -qE 'fn visible_component_indices_includes_disconnected_parent_cycle\b' src/tui/app/mod.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 18C: Hierarchy Contains Sync, Atomic Multi-File Rollbacks & Grid Proximity Safety
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0025`, `BUG-0026`, `BUG-0029`, `BUG-0042`, `BUG-0055`
+
+```text
+[STEP_ID]
+STEP 18C: Keep `parent_id` and `EdgeKind::Contains` synchronized on sub-component creation and connection deletion, restrict `confirm_connect` to `DependsOn`, add atomic multi-file rollbacks, and eliminate the `u16::MAX` infinite loop in `find_proximity_grid_pos`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app/actions.rs
+  - src/tui/app/grid.rs
+  - src/tui/app/mod.rs
+READ_ONLY_REFS:
+  - src/audit.rs:193-206 (HierarchyDrift check requiring Contains edge for parent_id)
+  - src/storage.rs:1-140 (save_component, delete_component, save_project_config)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify modal structs or `src/audit.rs` in this step.
+
+[PRE_GATE]
+grep -qE 'pub list_state:' src/tui/app/state.rs
+
+[MUTATION_SPEC]
+Goal: Sub-component creation and `Contains` deletion never cause `HierarchyDrift`, `c` connect only toggles `DependsOn` edges, multi-file TUI mutations roll back cleanly on disk failure, and `find_proximity_grid_pos` never hangs at `u16::MAX`.
+
+Contract & Behavior:
+  1. `src/tui/app/grid.rs`:
+     - Change `find_proximity_grid_pos(&self, anchor: GridPos) -> Option<GridPos>`: replace the unbounded `extra_col = extra_col.saturating_add(1)` loop with `checked_add(1)` scanning `cols..=u16::MAX` on `anchor.row`, and if exhausted scan remaining rows `0..=u16::MAX` (bounded to available cells without wrapping/stalling), returning `None` if no free `u16` cell exists. Callers handle `None` with a user-visible error message without panicking or mutating state.
+     - In `resolve_visible_collisions_for`: compute all planned `(comp_idx, previous_comp, candidate_comp)` moves and the updated `candidate_config` up front. Persist moved components and `candidate_config` (when grid expanded); if any save fails, roll back all already-written moved components to their `previous_comp` and restore `self.project.config` on disk if it was written, returning the error message(s) and leaving `self.project` unchanged in memory for rolled-back items.
+  2. `src/tui/app/actions.rs`:
+     - In `ModalAction::CreateComponent` when `parent_id` is `Some(pid)`: append `Connection { from: pid.clone(), to: id.clone(), kind: EdgeKind::Contains, label: None }` to `candidate_config.connections` (if not already present) and always persist `candidate_config` alongside `save_component(&self.root, &comp)` (rolling back via `delete_component(&self.root, &comp.id)` if `save_project_config` fails), so newly created sub-components never trigger `FindingKind::HierarchyDrift`.
+     - In `ModalAction::UpdateComponent`:
+       - When `add_sub_component` is `Some(_)`, append the matching `EdgeKind::Contains` connection (`from: component_id, to: sub_id`) to `candidate_config.connections` and persist `candidate_config`.
+       - Keep `previous = self.project.components[comp_idx].clone()`. Persist `candidate`, then optional `sub_comp`, then optional `candidate_config`. If saving `sub_comp` fails, roll back `candidate` via `save_component(&self.root, &previous)`. If saving `candidate_config` fails, delete `sub_comp` (if written) and roll back `candidate` via `save_component(&self.root, &previous)`. Include rollback error details if rollback fails, keep the modal open with `form.error`, and leave `self.project` unmutated.
+     - In `confirm_connect`: match `conn.from == source_id && conn.to == target_id && conn.kind == EdgeKind::DependsOn` when toggling an edge so existing non-`DependsOn` edges (`DataFlow`, `Contains`, etc.) between the same pair are never accidentally deleted.
+     - In `ModalAction::DeleteConnection`: when the removed edge has `kind == EdgeKind::Contains`, if component `to` has `parent_id.as_deref() == Some(from.as_str())`, clear `to.parent_id = None` and persist `save_component(&self.root, &updated_to)`; if saving `updated_to` fails, roll back `save_project_config(&self.root, &self.project.config)`, keep the modal open with `form.error`, and leave `self.project` unchanged.
+     - In `ModalAction::DeleteComponent`: persist detached children (`parent_id = None`) **before** deleting the parent component; if detaching any child or saving `candidate_config` or deleting the parent fails, roll back previously detached children (and `project.config` if written) and keep the modal open with `form.error` so disk and memory stay consistent.
+
+Must still work:
+  - Creating top-level components, moving cards, expanding/collapsing sub-components, and editing connections (`UpdateConnection`) continue to work and pass all existing tests.
+  - `audit_project` reports zero `HierarchyDrift` findings immediately after creating a sub-component via `a` or `UpdateComponent`.
+
+Drops: none
+
+Tests:
+  - `find_proximity_grid_pos_terminates_at_u16_max` (in `src/tui/app/mod.rs`): grid with `cols = u16::MAX`, `rows = 1`, and a component at `(u16::MAX, 0)` -> `find_proximity_grid_pos` returns promptly (no infinite loop) with a valid free cell or `None` when full.
+  - `sub_component_creation_adds_contains_edge_without_hierarchy_drift` (in `src/tui/app/mod.rs`): create sub-components via both `ModalAction::CreateComponent { parent_id: Some(...) }` and `ModalAction::UpdateComponent { add_sub_component: Some(...) }` -> matching `EdgeKind::Contains` connections are persisted and `app.audit_findings` contains no `FindingKind::HierarchyDrift`.
+  - `update_component_rolls_back_on_partial_disk_failure` (in `src/tui/app/mod.rs`): force `project.toml` save failure (e.g., replace `project.toml` with a directory) while submitting `ModalAction::UpdateComponent` with `add_sub_component: Some(...)` -> parent component on disk reverts to its pre-edit state, sub-component file is removed, `app.project` is unchanged, and modal stays open.
+  - `confirm_connect_only_toggles_depends_on` (in `src/tui/app/mod.rs`): project has `alpha -> beta` with `EdgeKind::DataFlow`; running `c` connect from `alpha` to `beta` adds a `DependsOn` edge while preserving the `DataFlow` edge; running `c` again removes only `DependsOn`.
+  - `delete_contains_connection_clears_child_parent_id` (in `src/tui/app/mod.rs`): delete an `EdgeKind::Contains` edge via `D` -> `y` -> child's `parent_id` is cleared both in memory and on disk.
+  - `delete_component_rolls_back_detached_children_on_failure` (in `src/tui/app/mod.rs`): force parent deletion or config save failure while deleting a parent with a child -> child's `parent_id` remains restored on disk and in memory.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn find_proximity_grid_pos_terminates_at_u16_max\b' src/tui/app/mod.rs && grep -qE 'fn sub_component_creation_adds_contains_edge_without_hierarchy_drift\b' src/tui/app/mod.rs && grep -qE 'fn update_component_rolls_back_on_partial_disk_failure\b' src/tui/app/mod.rs && grep -qE 'fn confirm_connect_only_toggles_depends_on\b' src/tui/app/mod.rs && grep -qE 'fn delete_contains_connection_clears_child_parent_id\b' src/tui/app/mod.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 18D: Multi-Edge E/D Selection & Consistent InputMode Guards
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0041`
+
+```text
+[STEP_ID]
+STEP 18D: Allow `E` and `D` modals to cycle across all candidate connections on the selected component and enforce consistent `InputMode::Navigate` guards on action keys.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/modal.rs
+  - src/tui/app/actions.rs
+  - src/tui/ui.rs
+  - src/tui/app/mod.rs
+READ_ONLY_REFS:
+  - src/model.rs:40-100 (Connection, EdgeKind)
+  - src/tui/app/state.rs:25-35 (InputMode)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not alter canvas routing or terminal event loop in this step.
+
+[PRE_GATE]
+grep -qE 'fn confirm_connect_only_toggles_depends_on\b' src/tui/app/mod.rs
+
+[MUTATION_SPEC]
+Goal: Users can edit or delete any outgoing/incident connection on a component with multiple edges (not only the first), and pressing action/modal hotkeys while in `MoveCard` or `Connect` mode cannot corrupt mode state.
+
+Contract & Behavior:
+  1. `src/tui/modal.rs`:
+     - Extend `EditConnectionForm` with `pub candidates: Vec<Connection>`, `pub selected_candidate: usize`, and `pub original_kind: EdgeKind`. Keep `ModalState::edit_connection(from, to, kind, label)` backward-compatible (populating a 1-element `candidates` vec). Add `pub fn edit_connections(connections: Vec<Connection>) -> Self` initialized to index `0`.
+     - In `handle_edit_connection_key`, when `candidates.len() > 1`, `[` / `PageUp` cycles to the previous candidate and `]` / `PageDown` cycles to the next candidate, refreshing `from`, `to`, `original_kind`, `kind_index`, and `label` from the newly selected candidate and clearing `error`. Keep `active_field == 0` as `Kind` (`Left`/`Right` cycles `EdgeKind`) and `active_field == 1` as `Label`.
+     - Include `original_kind: EdgeKind` in `ModalAction::UpdateConnection`.
+     - Extend `ConfirmDeleteTarget::Connection` (or add candidate tracking fields `kind: Option<EdgeKind>`, `candidates: Vec<Connection>`, `selected_candidate: usize`) while keeping `ModalState::confirm_delete_connection(from, to)` working for single-edge callers and adding `pub fn confirm_delete_connections(connections: Vec<Connection>) -> Self`. When `candidates.len() > 1`, `Up`/`Down`/`j`/`k`/`Left`/`Right`/`[`/`]` cycles `selected_candidate`, updating `from`, `to`, and `kind`; `y`/`Enter` emits `ModalAction::DeleteConnection { from, to, kind }`.
+  2. `src/tui/app/actions.rs`:
+     - `E` collects all outgoing connections (`conn.from == comp_id`): opens `ModalState::edit_connections(outgoing)` when `outgoing.len() > 1`, `ModalState::edit_connection(...)` when `outgoing.len() == 1`, or reports `"No outgoing connection from <name> to edit"` when empty.
+     - `D` collects all incident connections (outgoing `conn.from == comp_id` first, then incoming `conn.to == comp_id`): opens `ModalState::confirm_delete_connections(incident)` when `incident.len() > 1`, `ModalState::confirm_delete_connection(...)` (carrying the edge's kind) when `incident.len() == 1`, or reports `"No connection on selected component to delete"` when empty.
+     - `ModalAction::UpdateConnection` locates the edge by `(from, to, original_kind)` (falling back to `(from, to)` if not found by exact kind). `ModalAction::DeleteConnection` locates the edge by `(from, to, kind)` when `kind` is `Some(k)`, else `(from, to)`.
+     - Enforce `self.mode == InputMode::Navigate` guards on action/modal keys in `handle_key`: `n`, `a`, `e`, `E`, `d`, `D`, `c`, `v`, `r`, `S`, `p`, `t`, `f`, `?` are ignored while in `InputMode::MoveCard` or `InputMode::Connect`. Keep `Ctrl+C`, `q`, `Esc`, `m` (toggle `MoveCard`), `Enter` (confirm `Connect` / expand `Navigate`), `Tab`/`BackTab`, `+/-`, and directional keys (`h/j/k/l`/arrows) working in their respective modes.
+  3. `src/tui/ui.rs`:
+     - In `render_modal`, when rendering `EditConnection` or `ConfirmDelete` (`Connection`) with `candidates.len() > 1`, show the `(selected+1/total)` index indicator, edge kind, and cycling hint (`[/]` for edit, `↑/↓` for delete), cleanly fitting within `80x24` terminals and truncating long IDs/labels safely.
+
+Must still work:
+  - Single-edge `E` (4 `Right` presses -> `Contains` -> `Enter`) and `D` (`y`/`Enter` to confirm, `Esc` to cancel) flows continue to work identically.
+  - Existing `EditConnection` / `ConfirmDelete` UI snapshot and rollback tests continue to pass (updating assertions in `src/tui/app/mod.rs` only where `D` now presents all incident edges).
+
+Drops: none
+
+Tests:
+  - `multi_edge_edit_and_delete_select_non_first_edge` (in `src/tui/app/mod.rs`): component `alpha` has two outgoing connections `alpha -> beta` (`DependsOn`) and `alpha -> gamma` (`DataFlow`); press `E`, press `]`, change label and press `Enter` -> `alpha -> gamma` is updated while `alpha -> beta` is untouched; press `D`, press `Down`, press `y` -> `alpha -> gamma` is deleted while `alpha -> beta` remains.
+  - `action_keys_are_ignored_in_move_card_and_connect_modes` (in `src/tui/app/mod.rs`): enter `MoveCard` (`m`) and `Connect` (`c`), press `n`, `e`, `E`, `d`, `D`, `v`, `r`, `p`, `t`, `f`, `?` -> `app.mode` stays in `MoveCard`/`Connect` and `app.modal` stays `None`, while `Esc` returns to `InputMode::Navigate`.
+  - `render_multi_edge_modals_fit_at_80x24_with_long_names` (in `src/tui/ui.rs`): render both `EditConnection` and `ConfirmDelete` (`Connection`) with 3 candidates and 60-char component IDs at `80x24` -> renders `(1/3)` counter inside modal bounds without panic.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn edit_connections\b' src/tui/modal.rs && grep -qE 'pub fn confirm_delete_connections\b' src/tui/modal.rs && grep -qE 'fn multi_edge_edit_and_delete_select_non_first_edge\b' src/tui/app/mod.rs && grep -qE 'fn action_keys_are_ignored_in_move_card_and_connect_modes\b' src/tui/app/mod.rs && grep -qE 'fn render_multi_edge_modals_fit_at_80x24_with_long_names\b' src/tui/ui.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 18E: Canvas Unicode Width, Edge/Label Routing & Per-Frame TUI Performance
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0030`, `BUG-0031`, `BUG-0043`, `TASK-0075`
+
+```text
+[STEP_ID]
+STEP 18E: Fix Unicode display width, touching-card routing, corridor junctions/label occupancy in `canvas.rs`, and eliminate redundant per-frame allocations and O(N^2) traversals in TUI rendering.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/canvas.rs
+  - src/tui/ui.rs
+  - src/tui/app/state.rs
+READ_ONLY_REFS:
+  - src/model.rs:155-205 (Project, Component, Connection)
+  - src/tui/style.rs:1-118 (status_glyph, card_border_color, muted_style)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not add new external crates to `Cargo.toml`; use `ratatui::text::Span`/`Line` display width.
+
+[PRE_GATE]
+grep -qE 'fn multi_edge_edit_and_delete_select_non_first_edge\b' src/tui/app/mod.rs
+
+[MUTATION_SPEC]
+Goal: Wide Unicode text in cards and edge labels never overflows or corrupts adjacent cells, touching/overlapping cards route safely without arithmetic overflow, shared edge corridors merge with junction glyphs and preserve highlights/labels, and each rendered frame computes visible indices, child counts, and depths once with O(1) occupancy lookups.
+
+Contract & Behavior:
+  1. `src/tui/canvas.rs`:
+     - **Unicode display width (`BUG-0030`):** Replace `chars().count()` and 1-column cursor increments in `truncate_text`, `compute_label_pos`, `badge_len`, and label cell placement with terminal display width measured via `ratatui::text::Span::raw(...).width()` (or `Line::from(...).width()`). In `truncate_text(s, max_cols)`, ensure the returned string's display width is `<= max_cols` (never splitting a wide character past `max_cols`). When writing label characters into `frame.buffer_mut()`, advance `x` by each character's display width (`w`), skip/stop if `x + w > max_x` or any covered column `(x..x+w)` is blocked, and clear/avoid corrupting trailing cells of wide glyphs.
+     - **Touching/overlapping cards & saturating arithmetic (`BUG-0043`):** In `route_orthogonal_edge`, replace all unchecked `+ 1` (`sy + 1`, `ey + 1`, `mid_x + 1`, `sx + 1`, `ex + 1`, `mid_y + 1`) with `saturating_add(1)`. When `from_rect` and `to_rect` touch or overlap (so the derived `start` or `end` would fall inside either card rect or reverse across a zero-width/zero-height gap), clamp or emit empty segments rather than reversing the route through card interiors.
+     - **Corridor junctions & label occupancy (`BUG-0031`):**
+       - Track drawn corridor cells in a `HashMap<(u16, u16), (char, bool)>` (glyph + `is_highlighted`) alongside `segment_cells: HashSet<(u16, u16)>`. When two edges share a cell, merge box-drawing glyphs (`─` + `│` -> `┼`, T-junctions `┬`/`┴`/`├`/`┤` when combining corners with straight segments, preserving arrowheads `▶`/`◀`/`▼`/`▲`), and preserve the highlighted style if *either* edge on that cell is highlighted.
+       - Track placed label cells in `occupied_label_cells: HashSet<(u16, u16)>`. When placing each edge's label, if the primary `(lx, ly)` is blocked by another edge, card, or already-placed label, probe alternate candidate positions along the edge's segments (above/below horizontal runs, right/left of vertical runs) before dropping the label, and mark all cells covered by a placed label in `occupied_label_cells` so two edge labels never overwrite each other.
+  2. `src/tui/ui.rs`, `src/tui/canvas.rs`, `src/tui/app/state.rs` (**Per-frame TUI render performance `TASK-0075`**):
+     - In `src/tui/app/state.rs`, optimize `visible_component_indices()` to build a `HashMap<&str, Vec<usize>>` children map once per call instead of scanning `self.project.components` linearly for every expanded component.
+     - In `src/tui/ui.rs`, compute `visible = app.visible_component_indices()` **once** per `render()` call, plus precomputed `child_counts: HashMap<&str, usize>` and `depths: HashMap<&str, usize>` maps once per frame. Pass these cached views to `render_component_list`, `render_canvas_with_cache` (add `pub(crate) fn render_canvas_with_cache(...)` in `src/tui/canvas.rs` and have existing `pub fn render_canvas(...)` delegate to it), and `render_detail_panel` so `visible_component_indices()` and `Project::sub_components()` are not recomputed repeatedly per row/card.
+     - Replace the `segment_cells: Vec<(u16, u16)>` linear `.contains()` lookup in `src/tui/canvas.rs` with `HashSet<(u16, u16)>`.
+
+Must still work:
+  - `pub fn render_canvas(frame: &mut Frame, area: Rect, app: &App, viewport: CanvasViewport)` keeps its exact public signature and behavior.
+  - All existing `canvas.rs` and `ui.rs` tests pass at `80x24`, compact/normal/expanded zoom levels, and with long component names.
+
+Drops: none
+
+Tests:
+  - `canvas_unicode_width_truncation_and_label_placement` (in `src/tui/canvas.rs`): truncate wide CJK/emoji strings (`"日本語テスト🚀"`) to `max_cols = 6` -> display width `<= 6`; render a canvas with a wide-character component name and edge label at `80x24` -> card border cells remain intact and no panic occurs.
+  - `route_orthogonal_edge_handles_touching_and_overlapping_cards_without_overflow` (in `src/tui/canvas.rs`): route between touching rects (`x: 0..10` and `x: 10..20`), overlapping rects, and rects near `u16::MAX` -> no panic, and no emitted segment lies inside `from_rect` or `to_rect`.
+  - `render_canvas_merges_corridor_junctions_and_avoids_label_overlap` (in `src/tui/canvas.rs`): render crossing horizontal and vertical edges (one highlighted, one unhighlighted) and two parallel labeled edges -> crossing cell contains `'┼'` with highlighted foreground style, and both labels appear without overwriting each other.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn canvas_unicode_width_truncation_and_label_placement\b' src/tui/canvas.rs && grep -qE 'fn route_orthogonal_edge_handles_touching_and_overlapping_cards_without_overflow\b' src/tui/canvas.rs && grep -qE 'fn render_canvas_merges_corridor_junctions_and_avoids_label_overlap\b' src/tui/canvas.rs && grep -qE 'pub\(crate\) fn render_canvas_with_cache\b' src/tui/canvas.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 18F: Terminal Restore Safety, Async Adapter Sync & Dirty-Flag Event Loop
+
+* **Recommended Command:** `/boost`
+* **Advances:** `BUG-0032`, `TASK-0074`, `TASK-0077`
+
+```text
+[STEP_ID]
+STEP 18F: Harden terminal restore/error propagation and `$EDITOR` suspend rollback, move adapter sync off the UI thread via `mpsc`, and switch the event loop to dirty-flag redraws with event draining.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/terminal.rs
+  - src/tui/app/state.rs
+  - src/tui/app/sync.rs
+  - src/tui/app/mod.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:596-760 (sync_pull_project, sync_push_project, PullSyncReport, PushSyncReport)
+  - src/tui/ui.rs:49-105 (ui::render)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify `src/adapter.rs` or `src/cli.rs`.
+
+[PRE_GATE]
+grep -qE 'fn canvas_unicode_width_truncation_and_label_placement\b' src/tui/canvas.rs
+
+[MUTATION_SPEC]
+Goal: Terminal cleanup always runs all steps and never masks errors, `$EDITOR` failure never leaves raw mode stuck on, adapter sync runs on a background thread without freezing TUI input, and the event loop only redraws when state or terminal size changes while draining queued events.
+
+Contract & Behavior:
+  1. `src/tui/terminal.rs` (**Error propagation & restore safety `BUG-0032`**):
+     - In `restore_terminal`, run all three steps (`disable_raw_mode()`, `execute!(terminal.backend_mut(), LeaveAlternateScreen)`, `terminal.show_cursor()`) unconditionally even if an earlier step returns `Err`, returning the first error encountered (or `Ok(())` if all succeed).
+     - Add helper `fn combine_tui_results(loop_result: RbResult<()>, restore_result: RbResult<()>) -> RbResult<()>` used by `run_tui`: if both fail, return an `RbError::Io` whose message includes both the loop error and the restore error; if only one fails, return that error; if both succeed, return `Ok(())`.
+     - In `suspend_for_editor`, if `EnterAlternateScreen` fails after `enable_raw_mode()`, call `let _ = disable_raw_mode()` before returning; if `terminal.clear()` fails after `EnterAlternateScreen`, call `let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen)` and `let _ = disable_raw_mode()` before returning.
+  2. `src/tui/terminal.rs`, `src/tui/app/state.rs`, `src/tui/app/sync.rs` (**Async adapter sync `TASK-0074`**):
+     - Add `pub sync_in_flight: bool` (initialized to `false`) to `App` in `src/tui/app/state.rs`.
+     - Move `SyncRequest::Pull`, `SyncRequest::PushSelected`, and `poll_interval` auto-sync execution in `run_event_loop` onto a background thread (`std::thread::spawn`) communicating results back to the UI loop via `std::sync::mpsc::channel`.
+     - If a sync request arrives while `app.sync_in_flight` is `true`, do not spawn a second concurrent worker; set `app.status_message = "Adapter sync already in progress".to_string()`.
+     - Extract a testable `pub(crate) fn apply_sync_outcome(app: &mut App, outcome: SyncOutcome)` (updating only the synced `external_tasks`/`features` of matching components in `app.project` rather than clobbering concurrent UI edits to other fields, calling `app.refresh_audit()`, `app.clamp_selection()`, clearing `app.sync_in_flight = false`, and updating `app.status_message`).
+     - Keep `App::sync_pull(&mut self, adapters_path: &Path) -> RbResult<String>` and `App::sync_push_selected(&mut self, adapters_path: &Path) -> RbResult<String>` intact for synchronous callers and tests.
+  3. `src/tui/terminal.rs` (**Dirty-flag event loop & event draining `TASK-0077`**):
+     - In `run_event_loop`, maintain `let mut dirty = true;` and call `terminal.draw(|f| ui::render(f, app))` only when `dirty` is `true`, resetting `dirty = false` after drawing.
+     - Set `dirty = true` on any handled `Event::Key` (with `KeyEventKind::Press`), `Event::Resize(_, _)`, completed `$EDITOR` return, or received async sync completion from the `mpsc` receiver.
+     - When `event::poll(Duration::from_millis(100))` returns `true`, drain all immediately queued events (`while event::poll(Duration::ZERO)?`) before redrawing once, breaking out of the drain loop early if `app.should_quit` becomes `true` or `app.pending_editor_component.is_some()`.
+
+Must still work:
+  - `Ctrl+C` and `q` exit immediately even while a slow adapter sync is running in the background.
+  - Existing `process_pending_editor_with`, `should_startup_pull`, `parse_editor_command`, and synchronous `App::sync_pull` / `App::sync_push_selected` tests continue to pass.
+
+Drops: none
+
+Tests:
+  - `combine_tui_results_preserves_both_loop_and_restore_errors` (in `src/tui/terminal.rs`): pass `Err(loop_err)` and `Err(restore_err)` -> returned error message contains both error texts; single-error and `Ok`/`Ok` cases behave as expected.
+  - `async_sync_channel_applies_pull_outcome_without_blocking` (in `src/tui/terminal.rs`): spawn a background pull worker via the `mpsc` helper on a temp workspace with a mock adapter -> `app.sync_in_flight` becomes `true`, a second sync request is rejected with `"Adapter sync already in progress"`, and once the channel delivers `SyncOutcome`, `apply_sync_outcome` updates component tasks, clears `sync_in_flight`, and preserves an unrelated in-memory edit made while sync was in flight.
+  - `event_loop_dirty_flag_skips_idle_redraws_and_drains_burst_events` (in `src/tui/terminal.rs`): drive the event-loop step helper with an empty poll (idle timeout) -> `dirty` stays `false` (no redraw); drive with a burst of 3 queued key events -> all 3 are processed in one batch with a single `dirty = true` redraw trigger; drive with `Event::Resize` -> `dirty` becomes `true`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub sync_in_flight: bool' src/tui/app/state.rs && grep -qE 'mpsc::channel' src/tui/terminal.rs && grep -qE 'fn combine_tui_results_preserves_both_loop_and_restore_errors\b' src/tui/terminal.rs && grep -qE 'fn async_sync_channel_applies_pull_outcome_without_blocking\b' src/tui/terminal.rs && grep -qE 'fn event_loop_dirty_flag_skips_idle_redraws_and_drains_burst_events\b' src/tui/terminal.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

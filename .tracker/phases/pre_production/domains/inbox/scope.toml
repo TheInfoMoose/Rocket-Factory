@@ -1165,3 +1165,45 @@ title = "Fix STEP 17E POST_GATE grep for TuiTerminal type alias"
 status = "closed"
 severity = "high"
 created_at = "2026-11-24T05:54:56Z"
+
+[[items.tasks]]
+id = "TASK-0113"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0114"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0115"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0116"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0117"
+title = "canvas"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
+
+[[items.tasks]]
+id = "TASK-0118"
+title = "terminal"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T19:11:20Z"
