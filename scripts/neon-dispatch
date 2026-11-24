@@ -4,7 +4,7 @@
 #   neon-dispatch <STEP_ID> [--note "<correction text>"] [--plan <path>]
 #
 # Runs one fresh, non-interactive agy session as Neon from the repo root,
-# logs it to .git/phased/steps/<ID>/neon-<UTC>.log, and prints the log's tail
+# logs it to .git/phased/steps/<ID>/neon-<UTC>-<pid>.log, and prints the log's tail
 # (Neon's report). Exit code = agy's.
 #
 # Env: NEON_MODEL (default gemini-4-neon-medium)
@@ -13,7 +13,12 @@
 # Never commits; the snapshot check (phased-step.sh) is what catches overreach.
 set -euo pipefail
 
-[[ $# -ge 1 ]] || { sed -n '4p' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2; exit 2; }
+usage() {
+    sed -n '4p' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2
+    exit 2
+}
+
+[[ $# -ge 1 ]] || usage
 ID="$1"
 shift
 [[ "$ID" =~ ^[0-9]+[A-Z]*$ ]] || { echo "STEP_ID must look like 13A, 25 or 7AB" >&2; exit 2; }
@@ -21,8 +26,16 @@ NOTE=""
 PLAN="${PHASED_PLAN:-STEPPED_IMPLEMENTATION_PLAN.md}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --note) NOTE="${2:?--note needs text}"; shift ;;
-        --plan) PLAN="${2:?--plan needs a path}"; shift ;;
+        --note)
+            [[ $# -ge 2 ]] || usage
+            NOTE="$2"
+            shift
+            ;;
+        --plan)
+            [[ $# -ge 2 ]] || usage
+            PLAN="$2"
+            shift
+            ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -40,10 +53,23 @@ else
     PROMPT="Execute STEP ${ID} from ${PLAN} using the neon-coder skill. Do not commit."
 fi
 
-LOG="${SNAP}/neon-$(date -u +%Y%m%dT%H%M%SZ).log"
-read -r -a FLAGS <<<"${NEON_FLAGS:---dangerously-skip-permissions}"
+LOG="${SNAP}/neon-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
+RAW_FLAGS="${NEON_FLAGS-"--dangerously-skip-permissions"}"
+FLAGS=()
+if [[ -n "$RAW_FLAGS" ]]; then
+    exec 3< <(python3 -I -c 'import shlex, sys
+for tok in shlex.split(sys.argv[1]):
+    sys.stdout.write(tok + "\0")
+' "$RAW_FLAGS")
+    py_pid=$!
+    while IFS= read -r -d '' flag <&3; do
+        FLAGS+=("$flag")
+    done
+    exec 3<&-
+    wait "$py_pid"
+fi
 set +e
-agy --model "${NEON_MODEL:-gemini-4-neon-medium}" "${FLAGS[@]}" --print-timeout 0 -p "$PROMPT" >"$LOG" 2>&1
+agy --model "${NEON_MODEL:-gemini-4-neon-medium}" ${FLAGS[@]+"${FLAGS[@]}"} --print-timeout 0 -p "$PROMPT" >"$LOG" 2>&1
 rc=$?
 set -e
 echo "Neon log: ${LOG} (agy exit ${rc})"

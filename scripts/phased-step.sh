@@ -130,7 +130,7 @@ if [[ "$MODE" == "new-phase" ]]; then
     fi
     [[ -d .orrery ]] || exit 0
     python3 -I - "$PLAN" <<'PY'
-import pathlib, re, sys, tomllib
+import os, pathlib, re, sys, tempfile, tomllib
 
 plan = pathlib.Path(sys.argv[1]).read_text()
 out = pathlib.Path(".orrery/phase.toml")
@@ -170,8 +170,9 @@ if tracker.is_dir():
     for p in sorted(tracker.rglob("item.toml")):
         try:
             item = tomllib.loads(p.read_text()).get("item", {})
-        except Exception:
-            continue
+        except (tomllib.TOMLDecodeError, OSError) as e:
+            print(f"error reading {p}: {e}", file=sys.stderr)
+            sys.exit(1)
         ref = item.get("source_ref", "")
         if ref.startswith("STEP ") and item.get("status") != "closed":
             tasks.setdefault(ref[5:], item.get("id", ""))
@@ -190,7 +191,20 @@ for kind, ident, title in rows:
         body.append(f"item = {q(tasks[ident])}")
     if kind == "user" and title:
         body.append(f"title = {q(title)}")
-out.write_text("\n".join(body) + "\n")
+content = "\n".join(body) + "\n"
+fd, tmp_name = tempfile.mkstemp(prefix=".phase.toml.", suffix=".tmp", dir=out.parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(content)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_name, out)
+except BaseException:
+    try:
+        os.unlink(tmp_name)
+    except OSError:
+        pass
+    raise
 print(f"Wrote .orrery/phase.toml: {len(rows)} queue entr{'y' if len(rows) == 1 else 'ies'}"
       f" ({', '.join(i for _, i, _ in rows)}). Commit it with the plan.")
 PY
@@ -213,9 +227,8 @@ ALLOWED_SECTION="$(awk '
     f && /^(READ_ONLY_REFS|FORBIDDEN_SCOPE):|^\[/ { exit }
     f { print }
 ' <<<"$BLOCK")"
-mapfile -t ALLOWED < <(sed -nE 's/^[[:space:]]*-[[:space:]]+([^[:space:]]+).*/\1/p' <<<"$ALLOWED_SECTION")
+mapfile -t ALLOWED < <(sed -nE 's/^[[:space:]]*-[[:space:]]+`?([^[:space:]`]+)`?.*/\1/p' <<<"$ALLOWED_SECTION")
 [[ ${#ALLOWED[@]} -gt 0 ]] || { echo "STEP ${STEP_ID} has no ALLOWED_FILES entries" >&2; exit 2; }
-grep -q 'Cargo\.lock' <<<"$ALLOWED_SECTION" && ALLOWED+=("Cargo.lock")
 PRE_GATE="$(awk '/^\[PRE_GATE\]/ { getline; print; exit }' <<<"$BLOCK")"
 POST_GATE="$(awk '/^\[POST_GATE\]/ { getline; print; exit }' <<<"$BLOCK")"
 
@@ -248,6 +261,13 @@ code_stamp() { # tree fingerprint minus .tracker/ (Hydrogen may file findings af
 changed_since_snapshot() {
     comm -3 <(sort -u "${SNAP}/tree") <(fingerprint) | sed -E 's/^\t//; s/^[^ ]+  //' | sort -u
 }
+snap_has_path() { # <path> <tree-file>
+    local target="$1" file="$2" line
+    while IFS= read -r line; do
+        [[ "$line" == *"  "* && "${line#*  }" == "$target" ]] && return 0
+    done <"$file"
+    return 1
+}
 # Prints "<TASK-ID>\t<scope>" for the item whose source_ref is "STEP <ID>".
 find_task() {
     [[ -d .tracker ]] || return 0
@@ -257,8 +277,9 @@ want = f"STEP {sys.argv[1]}"
 for p in sorted(pathlib.Path(".tracker").rglob("item.toml")):
     try:
         item = tomllib.loads(p.read_text()).get("item", {})
-    except Exception:
-        continue
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        print(f"error reading {p}: {e}", file=sys.stderr)
+        sys.exit(1)
     if item.get("source_ref") == want and item.get("status") != "closed":
         print(f'{item.get("id", "")}\t{item.get("scope_ref", "")}')
         break
@@ -266,7 +287,7 @@ PY
 }
 tracker_items() { # item IDs that exist now
     [[ -d .tracker ]] || return 0
-    find .tracker -path '*/items/*/item.toml' -printf '%h\n' | sed 's#.*/##' | sort -u
+    find .tracker -path '*/items/*/item.toml' | sed 's#/item\.toml$##; s#.*/##' | sort -u
 }
 
 # Validates the amendment; prints POST_GATE\t…, EXTRA\t<path>\t<kind>, ERR\t… lines.
@@ -291,14 +312,51 @@ GREP = re.compile(r"""(!\s*)?\bgrep\s+(?:-\S+\s+)*(['"])(.*?)\2""")
 def norm(p): return re.sub(r"\\b|\\<|\\>|^\^|\$$", "", p)
 def greps(line): return {(bool(m.group(1)), norm(m.group(3))) for m in GREP.finditer(line)}
 
+def strip_quoted(s):
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "'":
+            j = s.find("'", i + 1)
+            if j == -1:
+                return None
+            out.append(" ")
+            i = j + 1
+        elif ch == '"':
+            i += 1
+            while i < n and s[i] != '"':
+                if s[i] == "\\" and i + 1 < n:
+                    i += 2
+                else:
+                    i += 1
+            if i >= n:
+                return None
+            out.append(" ")
+            i += 1
+        elif ch == "\\" and i + 1 < n:
+            out.append(s[i : i + 2])
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
 gate = a.get("post_gate")
 if gate is not None:
     gate = str(gate)
-    if "\n" in gate: err("post_gate must be one line")
+    if "\n" in gate or "\r" in gate: err("post_gate must be one line")
     if not base_gate: err("plan header has no **Base gate:** line; post_gate can't be checked")
     elif base_gate not in gate: err("post_gate must contain the plan's Base gate verbatim")
-    for bad in ("|| true", "||true", "|| :", "; true", "set +e", "2>/dev/null ||"):
-        if bad in gate: err(f"post_gate may not contain {bad!r}")
+    unquoted = strip_quoted(gate)
+    if unquoted is None:
+        err("post_gate has an unclosed quote")
+    else:
+        if "||" in unquoted: err("post_gate may not contain '||' outside quoted literals")
+        if ";" in unquoted: err("post_gate may not contain ';' outside quoted literals")
+        if re.search(r"(?<![&<>])&(?![&>])", unquoted): err("post_gate may not contain background '&' outside quoted literals")
+        if re.search(r"\bset\s+(?:-[^\s&|]+\s+)*\+[A-Za-z]*e\b", unquoted) or re.search(r"\bset\s+[^&|]*\+o\s+errexit\b", unquoted):
+            err("post_gate may not contain 'set +e' outside quoted literals")
     missing = greps(orig_gate) - greps(gate)
     for neg, pat in sorted(missing):
         err(f"post_gate drops the spec's {'! ' if neg else ''}grep for {pat!r}")
@@ -415,9 +473,10 @@ if [[ "$MODE" == "defer" ]]; then
     OTHER=()
     OWNED=("${ALLOWED[@]}" "$AMEND")
     if [[ -f "$AMEND" ]]; then
+        AMEND_OUT="$(read_amendment || true)"
         while IFS=$'\t' read -r kind a _; do
             [[ "$kind" == EXTRA ]] && OWNED+=("$a")
-        done < <(read_amendment || true)
+        done <<<"$AMEND_OUT"
     fi
     mapfile -t CHANGED < <(changed_since_snapshot)
     for p in "${CHANGED[@]}"; do
@@ -427,7 +486,7 @@ if [[ "$MODE" == "defer" ]]; then
             OTHER+=("$p")
             continue
         fi
-        if grep -qF "  ${p}" "${SNAP}/tree"; then
+        if snap_has_path "$p" "${SNAP}/tree"; then
             MANUAL+=("$p")
             continue
         fi
@@ -435,7 +494,12 @@ if [[ "$MODE" == "defer" ]]; then
             git diff --binary HEAD -- "$p" >>"$PATCH"
             git restore --source=HEAD --staged --worktree -- "$p"
         else
-            git diff --no-index --binary /dev/null "$p" >>"$PATCH" || true
+            diff_rc=0
+            git diff --no-index --binary /dev/null "$p" >>"$PATCH" || diff_rc=$?
+            if (( diff_rc > 1 )); then
+                echo "defer: git diff --no-index failed on ${p} (exit ${diff_rc})" >&2
+                exit "$diff_rc"
+            fi
             rm -f -- "$p"
         fi
         RESTORED+=("$p")
@@ -470,13 +534,17 @@ if [[ -f "$AMEND" ]]; then
         fail "${AMEND} changed after its first use; one amendment per step"
     fi
     [[ -f "${SNAP}/amend_hash" ]] || echo "$AHASH" >"${SNAP}/amend_hash"
-    while IFS=$'\t' read -r kind a b; do
-        case "$kind" in
-            ERR) fail "amendment: ${a}" ;;
-            POST_GATE) EFFECTIVE_GATE="$a" ;;
-            EXTRA) EXTRA_PATHS+=("$a") ;;
-        esac
-    done < <(read_amendment)
+    if AMEND_OUT="$(read_amendment)"; then
+        while IFS=$'\t' read -r kind a b; do
+            case "$kind" in
+                ERR) fail "amendment: ${a}" ;;
+                POST_GATE) EFFECTIVE_GATE="$a" ;;
+                EXTRA) EXTRA_PATHS+=("$a") ;;
+            esac
+        done <<<"$AMEND_OUT"
+    else
+        fail "amendment: read_amendment failed (exit $?)"
+    fi
 fi
 
 # 1. No commits. 2. Plan untouched.
@@ -553,7 +621,7 @@ if [[ "$MODE" == "commit" ]]; then
     if [[ ${#STEP_PATHS[@]} -eq 0 ]]; then
         # BUG-0021: a rerun after a pass (e.g. orrery reset) has nothing new to commit.
         # Success when the step's commit already exists; a real no-op step still fails.
-        PREV="$(git log -n1 --format=%h -F --grep="STEP ${STEP_ID}: " HEAD)"
+        PREV="$(git log --format='%h%x09%s' HEAD | awk -F'\t' -v pat="STEP ${STEP_ID}: " '!found && index($2, pat) > 0 { print $1; found = 1 }')"
         if [[ -n "$PREV" ]]; then
             echo "STEP ${STEP_ID}: already committed ${PREV}; nothing new to commit."
             log_line "$STEP_ID" committed-earlier "$PREV" "rerun, no new changes"
