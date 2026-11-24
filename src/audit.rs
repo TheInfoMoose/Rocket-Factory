@@ -581,4 +581,68 @@ mod tests {
                 && finding.message.contains("overlaps")
         }));
     }
+
+    #[test]
+    fn audit_flags_unpushed_features_and_dangling_from_connection() {
+        let mut planned_only = make_component("planned_only");
+        planned_only.position = GridPos { col: 0, row: 0 };
+        planned_only.features.push(FeatureItem {
+            id: "feat-1".to_string(),
+            title: "Draft local feature".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+
+        let mut mixed_node = make_component("mixed_node");
+        mixed_node.position = GridPos { col: 1, row: 0 };
+        mixed_node.external_tasks.push(ExternalTaskRef {
+            external_id: "TASK-20".to_string(),
+            title: "Tracked task".to_string(),
+            status: TaskStatus::InProgress,
+        });
+        mixed_node.features.push(FeatureItem {
+            id: "feat-2".to_string(),
+            title: "Pending local feature".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+
+        let project = Project {
+            config: ProjectConfig {
+                name: "Unpushed & Dangling Source".to_string(),
+                description: "Audit branch coverage".to_string(),
+                theme: "crt_amber".to_string(),
+                active_adapters: Vec::new(),
+                grid: GridConfig { cols: 4, rows: 4 },
+                connections: vec![Connection {
+                    from: "ghost_source".to_string(),
+                    to: "planned_only".to_string(),
+                    kind: EdgeKind::DependsOn,
+                    label: None,
+                }],
+            },
+            components: vec![planned_only, mixed_node],
+        };
+
+        let findings = audit_project(&project);
+
+        assert!(findings.iter().any(|finding| {
+            finding.kind == FindingKind::UnpushedFeatures
+                && finding.severity == FindingSeverity::Warning
+                && finding.component_id.as_deref() == Some("planned_only")
+                && finding.message.contains("no linked tasks")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.kind == FindingKind::UnpushedFeatures
+                && finding.severity == FindingSeverity::Warning
+                && finding.component_id.as_deref() == Some("mixed_node")
+                && finding.message.contains("1 unpushed local feature(s)")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.kind == FindingKind::DanglingConnection
+                && finding.severity == FindingSeverity::Error
+                && finding.component_id.is_none()
+                && finding.message.contains("ghost_source")
+        }));
+    }
 }

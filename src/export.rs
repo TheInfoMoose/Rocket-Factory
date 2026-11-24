@@ -317,4 +317,33 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed["config"]["name"], "Demo | `v1`\nPlan");
     }
+
+    #[test]
+    fn export_manifest_not_found_and_clean_roadmap() {
+        let mut core_bus = sample_component("core_bus", "Core Bus", ComponentKind::DataStream);
+        core_bus.features.push(FeatureItem {
+            id: "f1".to_string(),
+            title: "Ship telemetry".to_string(),
+            pushed: true,
+            external_id: Some("EXT-1".to_string()),
+        });
+        let project = sample_project("apollo", vec![core_bus], Vec::new());
+
+        let err = export_component_manifest_toml(&project, "missing_comp")
+            .expect_err("unknown component ID should return NotFound");
+        assert!(
+            matches!(err, RbError::NotFound(ref msg) if msg.contains("missing_comp")),
+            "expected RbError::NotFound, got: {err:?}"
+        );
+
+        let md = export_roadmap_markdown(&project);
+        assert!(md.contains("| 1 | FEAT core_bus:f1 | Core Bus | Ship telemetry | pushed |"));
+
+        let gaps_section = md
+            .split("## Components Without Tasks")
+            .nth(1)
+            .expect("missing Components Without Tasks section");
+        assert!(gaps_section.contains("_None_"));
+        assert!(!gaps_section.contains("- `"));
+    }
 }

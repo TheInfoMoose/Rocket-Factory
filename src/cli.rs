@@ -502,4 +502,150 @@ mod tests {
             "expected RbError::InvalidArgument, got: {err:?}"
         );
     }
+
+    #[test]
+    fn cli_pull_push_adapter_override_and_nonstrict_audit() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let adapters_path = dir.path().join("adapters.toml");
+        let log_a = dir.path().join("tracker_a.log");
+        let log_b = dir.path().join("tracker_b.log");
+
+        execute_command(
+            dir.path(),
+            &adapters_path,
+            Command::Init {
+                name: "apollo".into(),
+                description: "Adapter override and non-strict audit test".into(),
+            },
+        )
+        .expect("init workspace");
+
+        let mut hud = scaffold_component(
+            "hud",
+            "HUD",
+            ComponentKind::UiView,
+            GridPos { col: 0, row: 0 },
+        );
+        hud.features.push(FeatureItem {
+            id: "hud_f1".to_string(),
+            title: "Render status header".to_string(),
+            pushed: false,
+            external_id: None,
+        });
+        storage::save_component(dir.path(), &hud).expect("save hud component");
+
+        let view_box = Component {
+            id: "view_box".to_string(),
+            name: "View Box".to_string(),
+            kind: ComponentKind::UiView,
+            parent_id: None,
+            description: String::new(),
+            relative_path: None,
+            position: GridPos { col: 1, row: 0 },
+            tags: Vec::new(),
+            tech_stack: Vec::new(),
+            files: Vec::new(),
+            flags: Vec::new(),
+            features: Vec::new(),
+            external_tasks: Vec::new(),
+            markdown_body: String::new(),
+        };
+        storage::save_component(dir.path(), &view_box).expect("save view_box");
+
+        let mut project = storage::load_project(dir.path()).expect("load project");
+        project.config.active_adapters = vec!["tracker_a".to_string()];
+        storage::save_project_config(dir.path(), &project.config).expect("save project config");
+
+        let pull_json = r#"{"components":[{"component_id":"hud","tasks":[{"external_id":"B-303","title":"Render status header","status":"in_progress"}]}]}"#;
+        let adapters_file = adapter::AdaptersFile {
+            adapters: vec![
+                adapter::AdapterConfig {
+                    name: "tracker_a".to_string(),
+                    export_format: adapter::ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"A-101\"}}'",
+                                log_a.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!("echo pulled >> '{}' && printf '{{\"components\":[]}}'", log_a.display()),
+                        ],
+                    }),
+                },
+                adapter::AdapterConfig {
+                    name: "tracker_b".to_string(),
+                    export_format: adapter::ExportFormat::Json,
+                    push_component_cmd: None,
+                    push_feature_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec![
+                            "-c".to_string(),
+                            format!(
+                                "cat >> '{}' && printf '{{\"external_id\":\"B-303\",\"message\":\"queued\"}}'",
+                                log_b.display()
+                            ),
+                        ],
+                    }),
+                    pull_status_cmd: Some(adapter::CommandSpec {
+                        program: "sh".to_string(),
+                        args: vec!["-c".to_string(), format!("printf '%s' '{pull_json}'")],
+                    }),
+                },
+            ],
+        };
+        std::fs::write(
+            &adapters_path,
+            toml::to_string_pretty(&adapters_file).expect("serialize adapters.toml"),
+        )
+        .expect("write adapters.toml");
+
+        let push_out = execute_command(
+            dir.path(),
+            &adapters_path,
+            Command::Push {
+                component: Some("hud".to_string()),
+                adapter: Some("tracker_b".to_string()),
+            },
+        )
+        .expect("push with adapter override");
+        assert_eq!(push_out.exit_code, 0);
+        assert!(push_out
+            .stdout
+            .contains("Pushed 0 component(s) and 1 feature(s) across 1 adapter(s)."));
+        assert!(push_out.stdout.contains("Adapter responses: B-303: queued"));
+        assert!(!log_a.exists());
+        assert!(std::fs::read_to_string(&log_b)
+            .expect("read tracker_b log")
+            .contains("hud_f1"));
+
+        let pull_out = execute_command(
+            dir.path(),
+            &adapters_path,
+            Command::Pull {
+                adapter: Some("tracker_b".to_string()),
+            },
+        )
+        .expect("pull with adapter override");
+        assert_eq!(pull_out.exit_code, 0);
+        assert!(pull_out.stdout.contains(
+            "Pulled status from 1 adapter(s): 1 component(s) updated, 1 task(s) synced, 1 feature(s) linked."
+        ));
+        assert!(!log_a.exists());
+
+        let audit_out =
+            execute_command(dir.path(), &adapters_path, Command::Audit { strict: false })
+                .expect("non-strict audit workspace");
+        assert_eq!(audit_out.exit_code, 0);
+        assert!(audit_out.stdout.contains("[ERROR]"));
+        assert!(audit_out.stdout.contains("view_box"));
+    }
 }
