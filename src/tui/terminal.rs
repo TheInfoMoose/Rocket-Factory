@@ -1281,4 +1281,239 @@ args = ["-c", 'printf "%s" "{\"components\":[]}"']
             Err(RbError::NotFound(msg)) if msg == "restore"
         ));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn async_push_error_preserves_partial_push_progress() {
+        use crate::model::FeatureItem;
+        use crate::storage::load_project;
+
+        let mut comp_a = make_component("comp_a", "# Comp A\n");
+        comp_a.features = vec![
+            FeatureItem {
+                id: "f1".to_string(),
+                title: "First feature".to_string(),
+                pushed: false,
+                external_id: None,
+            },
+            FeatureItem {
+                id: "f2".to_string(),
+                title: "Second feature".to_string(),
+                pushed: false,
+                external_id: None,
+            },
+        ];
+
+        let (dir, mut app) = make_workspace_app(vec![comp_a]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+        for comp in &app.project.components {
+            save_component(&app.root, comp).expect("save initial component");
+        }
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.push_feature_cmd]
+program = "sh"
+args = ["-c", 'payload=$(cat); case "$payload" in *"\"id\": \"f1\""*|*"\"id\":\"f1\""*) printf "%s" "{\"external_id\":\"EXT-1\"}" ;; *) echo "simulated push failure on f2" >&2; exit 1 ;; esac']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        app.sync_in_flight = true;
+        let outcome = run_sync_job(
+            app.project.clone(),
+            &app.root,
+            &adapters_path,
+            SyncRequest::PushSelected,
+            Some("comp_a"),
+            false,
+        );
+
+        match &outcome {
+            SyncOutcome::Error {
+                updates,
+                status_message,
+            } => {
+                assert!(
+                    !updates.is_empty(),
+                    "expected partial push updates on error"
+                );
+                assert!(
+                    status_message.contains("Adapter sync failed"),
+                    "unexpected error status: {status_message}"
+                );
+            }
+            SyncOutcome::Success { .. } => panic!("expected SyncOutcome::Error"),
+        }
+
+        apply_sync_outcome(&mut app, outcome);
+
+        assert!(!app.sync_in_flight);
+        assert!(
+            app.status_message.contains("Adapter sync failed"),
+            "expected error status message, got: {}",
+            app.status_message
+        );
+
+        let comp_mem = app.project.component("comp_a").expect("comp_a in memory");
+        let f1_mem = comp_mem
+            .features
+            .iter()
+            .find(|f| f.id == "f1")
+            .expect("f1 in memory");
+        assert!(f1_mem.pushed);
+        assert_eq!(f1_mem.external_id.as_deref(), Some("EXT-1"));
+        let f2_mem = comp_mem
+            .features
+            .iter()
+            .find(|f| f.id == "f2")
+            .expect("f2 in memory");
+        assert!(!f2_mem.pushed);
+        assert_eq!(f2_mem.external_id, None);
+
+        let reloaded = load_project(&app.root).expect("reload project from disk");
+        let comp_disk = reloaded.component("comp_a").expect("comp_a on disk");
+        let f1_disk = comp_disk
+            .features
+            .iter()
+            .find(|f| f.id == "f1")
+            .expect("f1 on disk");
+        assert!(f1_disk.pushed);
+        assert_eq!(f1_disk.external_id.as_deref(), Some("EXT-1"));
+        let f2_disk = comp_disk
+            .features
+            .iter()
+            .find(|f| f.id == "f2")
+            .expect("f2 on disk");
+        assert!(!f2_disk.pushed);
+        assert_eq!(f2_disk.external_id, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn async_sync_preserves_concurrent_foreground_feature_edits() {
+        use crate::model::FeatureItem;
+        use crate::storage::load_project;
+
+        let mut comp_a = make_component("comp_a", "# Comp A\n");
+        comp_a.features = vec![
+            FeatureItem {
+                id: "f1".to_string(),
+                title: "Initial feature title".to_string(),
+                pushed: false,
+                external_id: None,
+            },
+            FeatureItem {
+                id: "f_del".to_string(),
+                title: "Deleted in foreground".to_string(),
+                pushed: false,
+                external_id: None,
+            },
+        ];
+
+        let (dir, mut app) = make_workspace_app(vec![comp_a]);
+        app.project.config.active_adapters = vec!["mock_tracker".to_string()];
+        for comp in &app.project.components {
+            save_component(&app.root, comp).expect("save initial component");
+        }
+
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+
+[adapters.pull_status_cmd]
+program = "sh"
+args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"comp_a\",\"tasks\":[{\"external_id\":\"EXT-9\",\"title\":\"Initial feature title\",\"status\":\"in_progress\"}]}]}"']
+"#;
+        std::fs::write(&adapters_path, adapters_toml).expect("write adapters.toml");
+
+        // Snapshot taken before concurrent foreground feature edits
+        let project_snapshot = app.project.clone();
+
+        // Concurrent foreground edits: rename f1, delete f_del, add f_new
+        {
+            let comp_a_live = app.project.component_mut("comp_a").expect("comp_a exists");
+            let f1 = comp_a_live
+                .features
+                .iter_mut()
+                .find(|f| f.id == "f1")
+                .expect("f1 exists");
+            f1.title = "Foreground edited title".to_string();
+            comp_a_live.features.retain(|f| f.id != "f_del");
+            comp_a_live.features.push(FeatureItem {
+                id: "f_new".to_string(),
+                title: "Foreground new feature".to_string(),
+                pushed: false,
+                external_id: None,
+            });
+            save_component(&app.root, comp_a_live).expect("save edited comp_a");
+        }
+
+        app.sync_in_flight = true;
+        let outcome = run_sync_job(
+            project_snapshot,
+            &app.root,
+            &adapters_path,
+            SyncRequest::Pull,
+            None,
+            false,
+        );
+        assert!(matches!(outcome, SyncOutcome::Success { .. }));
+
+        apply_sync_outcome(&mut app, outcome);
+
+        assert!(!app.sync_in_flight);
+
+        let comp_mem = app.project.component("comp_a").expect("comp_a in memory");
+        assert_eq!(comp_mem.external_tasks.len(), 1);
+        assert_eq!(comp_mem.external_tasks[0].external_id, "EXT-9");
+        assert!(comp_mem.features.iter().all(|f| f.id != "f_del"));
+
+        let f1_mem = comp_mem
+            .features
+            .iter()
+            .find(|f| f.id == "f1")
+            .expect("f1 in memory");
+        assert_eq!(f1_mem.title, "Foreground edited title");
+        assert!(f1_mem.pushed);
+        assert_eq!(f1_mem.external_id.as_deref(), Some("EXT-9"));
+
+        let f_new_mem = comp_mem
+            .features
+            .iter()
+            .find(|f| f.id == "f_new")
+            .expect("f_new in memory");
+        assert_eq!(f_new_mem.title, "Foreground new feature");
+        assert!(!f_new_mem.pushed);
+        assert_eq!(f_new_mem.external_id, None);
+
+        let reloaded = load_project(&app.root).expect("reload project from disk");
+        let comp_disk = reloaded.component("comp_a").expect("comp_a on disk");
+        assert_eq!(comp_disk.external_tasks.len(), 1);
+        assert_eq!(comp_disk.external_tasks[0].external_id, "EXT-9");
+        assert!(comp_disk.features.iter().all(|f| f.id != "f_del"));
+
+        let f1_disk = comp_disk
+            .features
+            .iter()
+            .find(|f| f.id == "f1")
+            .expect("f1 on disk");
+        assert_eq!(f1_disk.title, "Foreground edited title");
+        assert!(f1_disk.pushed);
+        assert_eq!(f1_disk.external_id.as_deref(), Some("EXT-9"));
+
+        let f_new_disk = comp_disk
+            .features
+            .iter()
+            .find(|f| f.id == "f_new")
+            .expect("f_new on disk");
+        assert_eq!(f_new_disk.title, "Foreground new feature");
+        assert!(!f_new_disk.pushed);
+        assert_eq!(f_new_disk.external_id, None);
+    }
 }

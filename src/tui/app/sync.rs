@@ -6,15 +6,22 @@ use crate::adapter::{
     PullSyncReport, PushSyncReport,
 };
 use crate::error::RbResult;
-use crate::model::{ExternalTaskRef, FeatureItem, Project};
+use crate::model::{Component, ExternalTaskRef, FeatureItem, Project};
 
 use super::state::{App, SyncRequest};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FeatureSyncUpdate {
+    pub id: String,
+    pub pushed: bool,
+    pub external_id: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ComponentSyncUpdate {
     pub component_id: String,
-    pub external_tasks: Vec<ExternalTaskRef>,
-    pub features: Vec<FeatureItem>,
+    pub external_tasks: Option<Vec<ExternalTaskRef>>,
+    pub feature_updates: Vec<FeatureSyncUpdate>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +31,7 @@ pub(crate) enum SyncOutcome {
         status_message: String,
     },
     Error {
+        updates: Vec<ComponentSyncUpdate>,
         status_message: String,
     },
 }
@@ -49,6 +57,66 @@ fn format_push_summary(comp_id: &str, report: &PushSyncReport) -> String {
     summary_msg
 }
 
+type ComponentSyncSnapshot = (
+    Vec<ExternalTaskRef>,
+    HashMap<String, (bool, Option<String>)>,
+);
+
+fn diff_component_updates(
+    before: &HashMap<String, ComponentSyncSnapshot>,
+    components: Vec<Component>,
+) -> Vec<ComponentSyncUpdate> {
+    components
+        .into_iter()
+        .filter_map(|comp| {
+            let (external_tasks, feature_updates) = match before.get(&comp.id) {
+                Some((prev_tasks, prev_features)) => {
+                    let external_tasks =
+                        (*prev_tasks != comp.external_tasks).then_some(comp.external_tasks);
+                    let feature_updates: Vec<FeatureSyncUpdate> = comp
+                        .features
+                        .into_iter()
+                        .filter_map(|feat| {
+                            let changed = match prev_features.get(&feat.id) {
+                                Some((prev_pushed, prev_ext_id)) => {
+                                    *prev_pushed != feat.pushed || *prev_ext_id != feat.external_id
+                                }
+                                None => true,
+                            };
+                            changed.then_some(FeatureSyncUpdate {
+                                id: feat.id,
+                                pushed: feat.pushed,
+                                external_id: feat.external_id,
+                            })
+                        })
+                        .collect();
+                    (external_tasks, feature_updates)
+                }
+                None => {
+                    let feature_updates: Vec<FeatureSyncUpdate> = comp
+                        .features
+                        .into_iter()
+                        .map(|feat| FeatureSyncUpdate {
+                            id: feat.id,
+                            pushed: feat.pushed,
+                            external_id: feat.external_id,
+                        })
+                        .collect();
+                    (Some(comp.external_tasks), feature_updates)
+                }
+            };
+
+            (external_tasks.is_some() || !feature_updates.is_empty()).then_some(
+                ComponentSyncUpdate {
+                    component_id: comp.id,
+                    external_tasks,
+                    feature_updates,
+                },
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn run_sync_job(
     mut project: Project,
     root: &Path,
@@ -57,10 +125,17 @@ pub(crate) fn run_sync_job(
     target_comp_id: Option<&str>,
     is_auto: bool,
 ) -> SyncOutcome {
-    let before: HashMap<String, (Vec<ExternalTaskRef>, Vec<FeatureItem>)> = project
+    let before: HashMap<String, ComponentSyncSnapshot> = project
         .components
         .iter()
-        .map(|c| (c.id.clone(), (c.external_tasks.clone(), c.features.clone())))
+        .map(|c| {
+            let feat_map = c
+                .features
+                .iter()
+                .map(|f| (f.id.clone(), (f.pushed, f.external_id.clone())))
+                .collect();
+            (c.id.clone(), (c.external_tasks.clone(), feat_map))
+        })
         .collect();
 
     let result = match request {
@@ -69,6 +144,7 @@ pub(crate) fn run_sync_job(
         SyncRequest::PushSelected => {
             let Some(comp_id) = target_comp_id else {
                 return SyncOutcome::Error {
+                    updates: Vec::new(),
                     status_message: "No component selected to push".to_string(),
                 };
             };
@@ -83,31 +159,13 @@ pub(crate) fn run_sync_job(
         }
     };
 
-    match result {
-        Ok(status_message) => {
-            let updates = project
-                .components
-                .into_iter()
-                .filter_map(|comp| {
-                    let changed = match before.get(&comp.id) {
-                        Some((prev_tasks, prev_features)) => {
-                            *prev_tasks != comp.external_tasks || *prev_features != comp.features
-                        }
-                        None => true,
-                    };
-                    changed.then_some(ComponentSyncUpdate {
-                        component_id: comp.id,
-                        external_tasks: comp.external_tasks,
-                        features: comp.features,
-                    })
-                })
-                .collect();
+    let updates = diff_component_updates(&before, project.components);
 
-            SyncOutcome::Success {
-                updates,
-                status_message,
-            }
-        }
+    match result {
+        Ok(status_message) => SyncOutcome::Success {
+            updates,
+            status_message,
+        },
         Err(err) => {
             let prefix = if is_auto {
                 "Auto-sync failed"
@@ -115,6 +173,7 @@ pub(crate) fn run_sync_job(
                 "Adapter sync failed"
             };
             SyncOutcome::Error {
+                updates,
                 status_message: format!("{prefix}: {err}"),
             }
         }
@@ -122,58 +181,70 @@ pub(crate) fn run_sync_job(
 }
 
 pub(crate) fn apply_sync_outcome(app: &mut App, outcome: SyncOutcome) {
-    match outcome {
+    let (updates, status_message, is_error) = match outcome {
         SyncOutcome::Success {
             updates,
             status_message,
-        } => {
-            let mut updated_indices: Vec<usize> = Vec::new();
-            let mut backups: Vec<(usize, Vec<ExternalTaskRef>, Vec<FeatureItem>)> = Vec::new();
+        } => (updates, status_message, false),
+        SyncOutcome::Error {
+            updates,
+            status_message,
+        } => (updates, status_message, true),
+    };
 
-            for update in updates {
-                if let Some(idx) = app
-                    .project
-                    .components
-                    .iter()
-                    .position(|comp| comp.id == update.component_id)
-                {
-                    let comp = &mut app.project.components[idx];
-                    backups.push((idx, comp.external_tasks.clone(), comp.features.clone()));
-                    comp.external_tasks = update.external_tasks;
-                    comp.features = update.features;
-                    updated_indices.push(idx);
+    let mut updated_indices: Vec<usize> = Vec::new();
+    let mut backups: Vec<(usize, Vec<ExternalTaskRef>, Vec<FeatureItem>)> = Vec::new();
+
+    for update in updates {
+        if let Some(idx) = app
+            .project
+            .components
+            .iter()
+            .position(|comp| comp.id == update.component_id)
+        {
+            let comp = &mut app.project.components[idx];
+            let prev_tasks = comp.external_tasks.clone();
+            let prev_features = comp.features.clone();
+            let mut changed = false;
+
+            if let Some(tasks) = update.external_tasks {
+                comp.external_tasks = tasks;
+                changed = true;
+            }
+            for feat_update in update.feature_updates {
+                if let Some(live_feat) = comp.features.iter_mut().find(|f| f.id == feat_update.id) {
+                    live_feat.pushed = feat_update.pushed;
+                    live_feat.external_id = feat_update.external_id;
+                    changed = true;
                 }
             }
-
-            let mut save_error: Option<String> = None;
-            for (pos, &idx) in updated_indices.iter().enumerate() {
-                if let Err(err) =
-                    crate::storage::save_component(&app.root, &app.project.components[idx])
-                {
-                    for (restore_idx, prev_tasks, prev_features) in
-                        backups.into_iter().skip(pos).rev()
-                    {
-                        app.project.components[restore_idx].external_tasks = prev_tasks;
-                        app.project.components[restore_idx].features = prev_features;
-                    }
-                    save_error = Some(format!("Failed to save synced component: {err}"));
-                    break;
-                }
+            if changed {
+                backups.push((idx, prev_tasks, prev_features));
+                updated_indices.push(idx);
             }
-
-            app.refresh_audit();
-            app.clamp_selection();
-            app.sync_in_flight = false;
-            app.status_message = match save_error {
-                Some(err_msg) => err_msg,
-                None => status_message,
-            };
-        }
-        SyncOutcome::Error { status_message } => {
-            app.sync_in_flight = false;
-            app.status_message = status_message;
         }
     }
+
+    let mut save_error: Option<String> = None;
+    for (pos, &idx) in updated_indices.iter().enumerate() {
+        if let Err(err) = crate::storage::save_component(&app.root, &app.project.components[idx]) {
+            for (restore_idx, prev_tasks, prev_features) in backups.into_iter().skip(pos).rev() {
+                app.project.components[restore_idx].external_tasks = prev_tasks;
+                app.project.components[restore_idx].features = prev_features;
+            }
+            save_error = Some(format!("Failed to save synced component: {err}"));
+            break;
+        }
+    }
+
+    app.refresh_audit();
+    app.clamp_selection();
+    app.sync_in_flight = false;
+    app.status_message = match (is_error, save_error) {
+        (true, Some(err_msg)) => format!("{status_message}; additionally {err_msg}"),
+        (false, Some(err_msg)) => err_msg,
+        (_, None) => status_message,
+    };
 }
 
 impl App {
