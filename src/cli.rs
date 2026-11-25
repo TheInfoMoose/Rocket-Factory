@@ -10,6 +10,7 @@ use crate::storage;
 #[derive(Debug, clap::Parser)]
 #[command(
     name = "rktb",
+    version,
     about = "Rocket Bench — retro-futuristic architecture planning TUI & CLI"
 )]
 pub struct Cli {

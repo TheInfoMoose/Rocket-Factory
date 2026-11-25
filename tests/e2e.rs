@@ -1434,6 +1434,24 @@ fn e2e_binary_cli_subprocess_lifecycle_and_errors() {
         "expected Usage and rktb in --help stdout:\n{help_stdout}"
     );
 
+    // a2) --version exits 0 with binary name and package version on stdout
+    let version_out = std::process::Command::new(bin)
+        .arg("--version")
+        .output()
+        .expect("run rktb --version");
+    assert!(
+        version_out.status.success(),
+        "expected --version exit 0, got {:?}, stderr: {}",
+        version_out.status,
+        String::from_utf8_lossy(&version_out.stderr)
+    );
+    let version_stdout = String::from_utf8_lossy(&version_out.stdout);
+    assert!(
+        version_stdout.contains("rktb") && version_stdout.contains(env!("CARGO_PKG_VERSION")),
+        "expected rktb and version {} in --version stdout:\n{version_stdout}",
+        env!("CARGO_PKG_VERSION")
+    );
+
     // b) init, audit --strict (non-zero on incomplete workspace), and export --format json
     let dir = tempfile::tempdir().expect("create workspace tempdir");
     let init_out = std::process::Command::new(bin)

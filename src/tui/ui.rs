@@ -1051,7 +1051,11 @@ fn render_modal(
             _ => "  [Enter/y] Confirm Delete  [Esc/n] Cancel",
         },
         ModalState::EditConnection(form) if form.candidates.len() > 1 => {
-            "  [[/]] Edge  [Tab] Field  [←/→] Kind  [Enter] Save  [Esc] Cancel"
+            if form.active_field == 1 {
+                "  [PgUp/PgDn] Edge  [Tab] Field  [Enter] Save  [Esc] Cancel"
+            } else {
+                "  [[/]/PgUp/PgDn] Edge  [Tab] Field  [←/→] Kind  [Enter] Save  [Esc] Cancel"
+            }
         }
         ModalState::NewComponent(_)
         | ModalState::EditComponent(_)
@@ -1991,6 +1995,68 @@ mod tests {
         assert!(
             del_text.contains("↑/↓"),
             "expected ↑/↓ cycling hint in ConfirmDelete modal at 80x24:\n{del_text}"
+        );
+    }
+
+    #[test]
+    fn edit_connection_modal_footer_hint_adapts_to_active_field_at_80x24() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        use crate::model::{Connection, EdgeKind};
+
+        let candidates = vec![
+            Connection {
+                from: "view_box".to_string(),
+                to: "core_bus".to_string(),
+                kind: EdgeKind::DependsOn,
+                label: Some("l".repeat(60)),
+            },
+            Connection {
+                from: "core_bus".to_string(),
+                to: "view_box".to_string(),
+                kind: EdgeKind::DataFlow,
+                label: Some("m".repeat(60)),
+            },
+        ];
+
+        let mut app = make_test_app();
+        app.modal = Some(ModalState::edit_connections(candidates));
+
+        let render_to_string = |app: &mut App| -> String {
+            let backend = TestBackend::new(80, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(frame, app)).unwrap();
+            let buf = terminal.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    text.push_str(buf[(x, y)].symbol());
+                }
+                text.push('\n');
+            }
+            text
+        };
+
+        let kind_text = render_to_string(&mut app);
+        assert!(
+            kind_text.contains("[[/]/PgUp/PgDn] Edge"),
+            "expected Kind-field footer hint at 80x24:\n{kind_text}"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        let label_text = render_to_string(&mut app);
+        assert!(
+            label_text.contains("[PgUp/PgDn] Edge"),
+            "expected Label-field footer hint at 80x24:\n{label_text}"
+        );
+        assert!(
+            !label_text.contains("[[/]/PgUp/PgDn] Edge"),
+            "Label-field footer hint must not advertise [[/]/PgUp/PgDn] Edge:\n{label_text}"
+        );
+        assert!(
+            !label_text.contains("[[/]] Edge"),
+            "Label-field footer hint must not advertise [[/]] Edge:\n{label_text}"
         );
     }
 }
