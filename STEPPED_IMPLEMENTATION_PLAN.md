@@ -1,4 +1,4 @@
-# Rocket Factory — Stepped Implementation Plan
+# Rocket Bench — Stepped Implementation Plan
 
 ## Step Execution Roadmap
 
@@ -134,6 +134,7 @@
 - For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
 - **Decisions (2026-11-24):** Combine Phase 19 review follow-ups (`BUG-0060`–`BUG-0063`, `TASK-0127`) with Phase 20 CI/Docs/Release (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`) into Phase 20; enable `#[command(version)]` on `Cli`; keep workflow/harness directories tracked on `master` (already excluded from crates.io packages in `Cargo.toml`) and document them in `README.md`. Note: `TASK-0120` is already satisfied by `delete_component_rolls_back_detached_children_on_failure` in `src/tui/app/mod.rs:2313`.
 - **Decisions (2026-11-24, Phase 21):** Schedule a 2-step Phase 21 polish pass for all three remaining pending bugs (`BUG-0065`, `BUG-0066`, `BUG-0064`). Temporarily remove `scripts/*` from `**Forbidden paths:**` for Phase 21 (`STEP 21B`) and restore `scripts/*` to `**Forbidden paths:**` when planning the next phase (or after Phase 21 review).
+- **Decisions (2026-11-25, Phases 22–23):** Keep Phase 21 active as staged; schedule Phase 22 for remaining rebrand cleanup (`TASK-0136`, `TASK-0138`) + a dedicated regression aversion test suite, and Phase 23 for end-to-end app functional test validation + local and live CI/Release pipeline verification. Applied `TASK-0139` directly to the plan header; `git remote` (`TASK-0136`), `.tracker/` rename (`TASK-0137`), and live GitHub Actions runs are tracked as `[USER]` actions outside Neon's scope lock.
 
 #### Phase 18: TUI, Canvas & Responsiveness Fixes (Done)
 - **Goal:** Fix Phase 17 follow-up bugs (`BUG-0054`–`BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
@@ -154,6 +155,25 @@
 - **Goal:** Resolve the remaining Phase 20 review follow-ups: split `.github/workflows/release.yml` into matrix `build` + single `publish` jobs (`BUG-0065`), sanitize `/` in `GITHUB_REF_NAME` for release archive filenames (`BUG-0066`), and fix `scripts/phased-step.sh` so newly gitignored pre-existing untracked files unchanged on disk are not flagged as out-of-scope (`BUG-0064`).
 - **Done looks like:** Release workflow builds and uploads per-target artifacts in parallel without `contents: write`, then publishes all 6 assets from a single `publish` job on `v*` tags; `workflow_dispatch` on slash-containing branch names packages cleanly; and `scripts/phased-step.sh check` ignores snapshot-only paths that are newly gitignored and unchanged on disk while still catching modifications or deletions.
 - **Steps:** `STEP 21A`–`STEP 21B` (see `### Up Next` and `## Phase 21 Step Blocks`).
+
+#### Phase 22: Rebrand Cleanup & Regression Aversion Suite (Planned)
+- **Goal:** Finish the remaining Rocket-Bench rebrand items (`TASK-0136`, `TASK-0138`; restore `scripts/*` to `**Forbidden paths:**` when staging Phase 22) and add a dedicated regression aversion test suite locking in invariants from prior bug fixes so future changes cannot silently reintroduce them.
+- **Done looks like:** `Cargo.toml` and `README.md` point exclusively to `TheInfoMoose/Rocket-Bench`; cosmetic `rf_demo`/`rf-e2e` test identifiers are renamed to `rktb`; and a dedicated `tests/regression.rs` suite covers high-risk historical bug classes (atomic save/rollback, path traversal & ID validation, `--auto-pull` opt-in guard, async sync conflict/merge safety & stale task pruning, `Contains` edge consistency, Unicode/wide-char canvas & editor layout, and narrow-terminal UI rendering) with `cargo test --workspace` green.
+- **Step titles:**
+  - Update repository URLs in `Cargo.toml` and `README.md` to `Rocket-Bench` (`TASK-0136`; `[USER]` updates local `git remote origin`)
+  - Rename remaining cosmetic `rf` test identifiers (`rf_demo`, `rf-e2e`) to `rktb` (`TASK-0138`)
+  - Add core, storage, security, and sync regression aversion tests (`tests/regression.rs`)
+  - Add TUI, canvas, modal, and editor regression aversion tests (`tests/regression.rs`)
+- **Non-Neon `[USER]` maintenance:** Update local `git remote origin` to `TheInfoMoose/Rocket-Bench.git` (`TASK-0136`), rename `.tracker/` project and `rocket_factory` domain scopes to `Rocket-Bench` (`TASK-0137`), and close `TASK-0139` (plan title already updated).
+
+#### Phase 23: App Functional Validation & CI Pipeline Verification (Planned)
+- **Goal:** Validate end-to-end application functionality across all CLI commands and interactive TUI workflows, and verify that both CI (`.github/workflows/ci.yml`) and Release (`.github/workflows/release.yml`) pipelines pass locally and on GitHub Actions.
+- **Done looks like:** Every `rktb` CLI subcommand and error/exit-code path is validated via `CARGO_BIN_EXE_rktb` functional tests; all core TUI workflows (project load, navigation, zoom/pan, CRUD modals, inline editor, theme switching, help overlay, sync, graceful quit) are verified end-to-end with `TestBackend`; all CI checks (`fmt`, `clippy --locked`, `test --locked`, `doc -D warnings`, `package --locked`, `shellcheck`/`bash -n`, release archive packaging + SHA-256 verification) are validated locally; and live GitHub Actions `CI` (all 3 OS runners + security/scripts + linux-git-build) and `Release` (`workflow_dispatch`) runs pass green on `TheInfoMoose/Rocket-Bench`.
+- **Step titles:**
+  - Audit and expand CLI end-to-end functional validation tests (`tests/e2e.rs`)
+  - Audit and expand interactive TUI workflow functional validation tests (`tests/e2e.rs`)
+  - Validate CI & Release workflow parity locally (workflow YAML/SHA audit, packaging, doc, script, and archive checks)
+  - `[USER]` Push to `Rocket-Bench` and verify live GitHub Actions `CI` and `Release` (`workflow_dispatch`) runs pass green
 
 _Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
