@@ -283,6 +283,7 @@ mod tests {
         assert!(out.stdout.contains("view_box"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn cli_push_sends_unpushed_features_to_all_active_adapters() {
         let dir = tempfile::tempdir().expect("create tempdir");
@@ -504,6 +505,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn cli_pull_push_adapter_override_and_nonstrict_audit() {
         let dir = tempfile::tempdir().expect("create tempdir");

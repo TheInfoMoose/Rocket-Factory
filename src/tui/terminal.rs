@@ -781,6 +781,7 @@ mod tests {
         assert!(app.status_message.contains("simulated editor failure"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn process_pending_sync_executes_pull_and_surfaces_errors() {
         let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
@@ -909,6 +910,7 @@ args = ["-c", "echo simulated adapter failure >&2; exit 1"]
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn async_sync_channel_applies_pull_outcome_without_blocking() {
         let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Body\n")]);
@@ -1021,6 +1023,7 @@ args = ["-c", 'sleep 0.1; printf "%s" "{\"components\":[{\"component_id\":\"auth
         assert!(queue.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn async_sync_does_not_overwrite_concurrent_foreground_disk_edits() {
         use crate::storage::{delete_component, load_project};
@@ -1188,6 +1191,7 @@ args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"comp_a\",\"task
         assert!(!handle_event(&mut app, Event::FocusGained));
     }
 
+    #[cfg(unix)]
     #[test]
     fn step_event_loop_triggers_auto_poll_and_editor_dispatch() {
         let (dir, mut app) = make_workspace_app(vec![make_component("auth_svc", "# Initial\n")]);

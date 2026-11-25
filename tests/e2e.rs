@@ -40,6 +40,35 @@ fn render_app(app: &mut App, width: u16, height: u16) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
+fn encode_powershell_utf16le_base64(script: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut bytes = Vec::with_capacity(script.len() * 2);
+    for unit in script.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+
+        encoded.push(ALPHABET[(b0 >> 2) as usize] as char);
+        encoded.push(ALPHABET[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            encoded.push(ALPHABET[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+        if chunk.len() > 2 {
+            encoded.push(ALPHABET[(b2 & 0x3f) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+    encoded
+}
+
 #[cfg(unix)]
 fn mock_echo_command(response_json: &str) -> CommandSpec {
     CommandSpec {
@@ -55,11 +84,16 @@ fn mock_echo_command(response_json: &str) -> CommandSpec {
 
 #[cfg(windows)]
 fn mock_echo_command(response_json: &str) -> CommandSpec {
+    let escaped_json = response_json.replace('\'', "''");
+    let script =
+        format!("[Console]::In.ReadToEnd() | Out-Null; [Console]::Out.Write('{escaped_json}')");
     CommandSpec {
-        program: "cmd".to_string(),
+        program: "powershell".to_string(),
         args: vec![
-            "/C".to_string(),
-            format!("findstr \"^\" >NUL & echo {response_json}"),
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-EncodedCommand".to_string(),
+            encode_powershell_utf16le_base64(&script),
         ],
     }
 }
@@ -80,11 +114,18 @@ fn mock_log_and_echo_command(log_path: &Path, response_json: &str) -> CommandSpe
 
 #[cfg(windows)]
 fn mock_log_and_echo_command(log_path: &Path, response_json: &str) -> CommandSpec {
+    let escaped_path = log_path.display().to_string().replace('\'', "''");
+    let escaped_json = response_json.replace('\'', "''");
+    let script = format!(
+        "$data = [Console]::In.ReadToEnd(); [System.IO.File]::AppendAllText('{escaped_path}', $data, (New-Object System.Text.UTF8Encoding($false))); [Console]::Out.Write('{escaped_json}')"
+    );
     CommandSpec {
-        program: "cmd".to_string(),
+        program: "powershell".to_string(),
         args: vec![
-            "/C".to_string(),
-            format!("more >> \"{}\" && echo {response_json}", log_path.display()),
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-EncodedCommand".to_string(),
+            encode_powershell_utf16le_base64(&script),
         ],
     }
 }
@@ -1558,5 +1599,19 @@ fn e2e_binary_cli_subprocess_lifecycle_and_errors() {
     assert!(
         poll_stderr.contains("error:"),
         "expected 'error:' on stderr for missing dir:\n{poll_stderr}"
+    );
+}
+
+#[test]
+fn encode_powershell_utf16le_base64_handles_json_quotes() {
+    assert_eq!(encode_powershell_utf16le_base64(""), "");
+    assert_eq!(encode_powershell_utf16le_base64("A"), "QQA=");
+    assert_eq!(encode_powershell_utf16le_base64("AB"), "QQBCAA==");
+    assert_eq!(encode_powershell_utf16le_base64("ABC"), "QQBCAEMA");
+
+    let script = r#"[Console]::Out.Write('{"external_id":"EXT-101"}')"#;
+    assert_eq!(
+        encode_powershell_utf16le_base64(script),
+        "WwBDAG8AbgBzAG8AbABlAF0AOgA6AE8AdQB0AC4AVwByAGkAdABlACgAJwB7ACIAZQB4AHQAZQByAG4AYQBsAF8AaQBkACIAOgAiAEUAWABUAC0AMQAwADEAIgB9ACcAKQA="
     );
 }
