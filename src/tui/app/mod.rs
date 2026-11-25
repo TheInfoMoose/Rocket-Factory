@@ -14,12 +14,18 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::*;
-    use crate::audit::{audit_project, compute_card_status};
+    use crate::audit::audit_project;
+    #[cfg(unix)]
+    use crate::audit::compute_card_status;
+    #[cfg(unix)]
+    use crate::model::CardStatus;
     use crate::model::{
-        CardStatus, Component, ComponentKind, Connection, EdgeKind, ExternalTaskRef, FeatureItem,
-        GridConfig, GridPos, Project, ProjectConfig, TaskStatus,
+        Component, ComponentKind, Connection, EdgeKind, ExternalTaskRef, FeatureItem, GridConfig,
+        GridPos, Project, ProjectConfig, TaskStatus,
     };
-    use crate::storage::{save_component, save_project_config, COMPONENTS_DIR, ROCKET_DIR};
+    #[cfg(unix)]
+    use crate::storage::save_component;
+    use crate::storage::{save_project_config, COMPONENTS_DIR, ROCKET_DIR};
     use crate::theme::default_theme;
     use crate::tui::modal::ModalState;
 
@@ -679,6 +685,7 @@ mod tests {
         assert_eq!(empty_app.status_message, "No component selected to push");
     }
 
+    #[cfg(unix)]
     #[test]
     fn sync_pull_updates_external_tasks_flips_status_and_persists() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -738,6 +745,7 @@ args = ["-c", 'printf "%s" "{\"components\":[{\"component_id\":\"auth_svc\",\"ta
         assert_eq!(compute_card_status(disk_comp), CardStatus::Complete);
     }
 
+    #[cfg(unix)]
     #[test]
     fn sync_push_selected_marks_features_pushed_and_persists() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -796,6 +804,7 @@ args = ["-c", 'printf "%s" "{\"external_id\":\"FEAT-42\"}"']
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn sync_push_selected_pushes_unpushed_features_to_all_active_adapters() {
         use crate::adapter::{AdapterConfig, AdaptersFile, CommandSpec, ExportFormat};

@@ -991,6 +991,7 @@ export_format = "json"
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_push_component_pipes_toml_manifest_and_parses_response() {
         let dir = tempdir().unwrap();
@@ -1015,6 +1016,7 @@ export_format = "json"
         assert_eq!(resp.message.as_deref(), Some("ok"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_pull_status_parses_json_tasks() {
         let dir = tempdir().unwrap();
@@ -1038,6 +1040,7 @@ export_format = "json"
         assert_eq!(resp.components[0].tasks[0].status, TaskStatus::Complete);
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_command_nonzero_exit_returns_adapter_error() {
         let dir = tempdir().unwrap();
@@ -1059,6 +1062,7 @@ export_format = "json"
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn push_unpushed_features_sends_to_all_adapters_and_records_first_id() {
         let dir = tempdir().unwrap();
@@ -1117,6 +1121,7 @@ export_format = "json"
         assert!(payload_b.contains("Draw box"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn push_unpushed_features_leaves_unpushed_on_second_adapter_error() {
         let dir = tempdir().unwrap();
@@ -1156,6 +1161,7 @@ export_format = "json"
         assert!(comp.features[0].external_id.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn command_large_stdin_and_stdout_does_not_deadlock() {
         let dir = tempdir().unwrap();
@@ -1177,6 +1183,7 @@ export_format = "json"
         assert_eq!(output, payload);
     }
 
+    #[cfg(unix)]
     #[test]
     fn command_timeout_kills_stalled_process() {
         let dir = tempdir().unwrap();
@@ -1198,6 +1205,7 @@ export_format = "json"
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn command_output_limit_rejects_oversized_stdout() {
         let dir = tempdir().unwrap();
@@ -1384,6 +1392,7 @@ export_format = "json"
         assert!(comp.features[1].external_id.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn push_unpushed_features_records_partial_progress_on_failure() {
         let dir = tempdir().unwrap();
@@ -1467,6 +1476,7 @@ export_format = "json"
         assert!(retry_payload.contains("\"f2\""));
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_command_rejects_invalid_utf8_stdout() {
         let dir = tempdir().unwrap();
@@ -1504,6 +1514,30 @@ export_format = "json"
         };
 
         let err = run_push_component(&adapter, dir.path(), &project, "missing_comp");
+        assert!(matches!(err, Err(RbError::NotFound(_))));
+    }
+
+    #[test]
+    fn sync_push_project_rejects_missing_component_cross_platform() {
+        let dir = tempdir().unwrap();
+        let adapters_path = dir.path().join("adapters.toml");
+        let adapters_toml = r#"
+[[adapters]]
+name = "mock_tracker"
+export_format = "json"
+"#;
+        std::fs::write(&adapters_path, adapters_toml).unwrap();
+
+        let mut project = sample_project();
+        project.config.active_adapters = vec!["mock_tracker".to_string()];
+
+        let err = sync_push_project(
+            &mut project,
+            dir.path(),
+            &adapters_path,
+            &["nonexistent_comp".to_string()],
+            None,
+        );
         assert!(matches!(err, Err(RbError::NotFound(_))));
     }
 }
