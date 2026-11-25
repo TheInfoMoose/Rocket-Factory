@@ -5438,6 +5438,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 ### STEP 20F: Complete `.gitignore` Patterns & `README.md` Documentation (`TASK-0087`, `TASK-0091`, `TASK-0094`)
 
 * **Recommended Command:** `/goal`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
