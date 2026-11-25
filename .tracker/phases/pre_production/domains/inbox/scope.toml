@@ -371,28 +371,28 @@ created_at = "2026-11-24T21:22:28Z"
 [[items.bugs]]
 id = "BUG-0060"
 title = "TUI async push drops partial push progress on error, causing duplicate pushes on retry"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-25T01:54:35Z"
 
 [[items.bugs]]
 id = "BUG-0061"
 title = "EditConnection modal footer hint contradicts [/] behavior on Label field"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-25T01:54:38Z"
 
 [[items.bugs]]
 id = "BUG-0062"
 title = "Windows mock adapter helpers break JSON under cmd /C; new unit tests hardcode sh"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-25T01:54:42Z"
 
 [[items.bugs]]
 id = "BUG-0063"
 title = "Async sync apply_sync_outcome clobbers concurrent foreground feature edits"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-25T01:54:46Z"
 
@@ -402,6 +402,20 @@ title = "phased-step.sh flags newly gitignored pre-existing untracked files as o
 status = "pending"
 severity = "medium"
 created_at = "2026-11-25T03:30:02Z"
+
+[[items.bugs]]
+id = "BUG-0065"
+title = "Release workflow matrix jobs race on softprops/action-gh-release tag creation"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T04:19:23Z"
+
+[[items.bugs]]
+id = "BUG-0066"
+title = "Release workflow fails on workflow_dispatch from branch names containing '/'"
+status = "pending"
+severity = "low"
+created_at = "2026-11-25T04:19:31Z"
 
 [[items.features]]
 id = "FEAT-0001"
@@ -1022,35 +1036,35 @@ created_at = "2026-11-23T15:53:09Z"
 [[items.tasks]]
 id = "TASK-0083"
 title = "[CI-01] Pin GitHub Actions in ci.yml to immutable 40-char commit SHAs"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:53:11Z"
 
 [[items.tasks]]
 id = "TASK-0084"
 title = "[CI-02] Add security audit, cargo doc, and script lint checks to ci.yml"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:53:13Z"
 
 [[items.tasks]]
 id = "TASK-0085"
 title = "[CI-03] Add cross-platform CI matrix and tag-triggered release workflow"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:53:14Z"
 
 [[items.tasks]]
 id = "TASK-0086"
 title = "[CI-04] Add --locked flag to cargo clippy and cargo test in ci.yml"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:15Z"
 
 [[items.tasks]]
 id = "TASK-0087"
 title = "[CI-05] Add .agents/ and editor/OS temp patterns to .gitignore"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:16Z"
 
@@ -1078,7 +1092,7 @@ created_at = "2026-11-23T15:53:20Z"
 [[items.tasks]]
 id = "TASK-0091"
 title = "[DOC-01] Fix README.md omissions and add License/Testing/release docs"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:21Z"
 
@@ -1099,7 +1113,7 @@ created_at = "2026-11-23T15:53:23Z"
 [[items.tasks]]
 id = "TASK-0094"
 title = "[META-02] Review tracked internal harness metadata (.tracker/, .orrery/, .phased/) on master"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:25Z"
 
@@ -1274,7 +1288,7 @@ created_at = "2026-11-24T19:38:40Z"
 [[items.tasks]]
 id = "TASK-0120"
 title = "Add missing delete_component_rolls_back_detached_children_on_failure test from STEP 18C"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T21:22:28Z"
 
@@ -1323,7 +1337,7 @@ created_at = "2026-11-24T21:47:45Z"
 [[items.tasks]]
 id = "TASK-0127"
 title = "Enable --version in Cli or omit --version check from STEP 19C"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-24T21:55:56Z"
 

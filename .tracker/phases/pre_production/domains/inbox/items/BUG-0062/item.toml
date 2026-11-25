@@ -2,11 +2,11 @@
 id = "BUG-0062"
 type = "bug"
 title = "Windows mock adapter helpers break JSON under cmd /C; new unit tests hardcode sh"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-25T01:54:42Z"
-updated_at = "2026-11-25T01:54:58Z"
+updated_at = "2026-11-25T04:40:38Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "6d96987"
+summary = "Resolved in STEP 20C-20D: PowerShell EncodedCommand mocks and cfg(unix) test gating"

@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0085"
 type = "task"
 title = "[CI-03] Add cross-platform CI matrix and tag-triggered release workflow"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:53:14Z"
-updated_at = "2026-11-23T15:53:14Z"
+updated_at = "2026-11-25T04:40:38Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "52b02db"
+summary = "Resolved in STEP 20E: add cross-platform CI matrix and release workflow"

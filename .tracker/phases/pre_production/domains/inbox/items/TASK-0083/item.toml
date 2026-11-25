@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0083"
 type = "task"
 title = "[CI-01] Pin GitHub Actions in ci.yml to immutable 40-char commit SHAs"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T15:53:11Z"
-updated_at = "2026-11-23T15:53:11Z"
+updated_at = "2026-11-25T04:40:38Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "52b02db"
+summary = "Resolved in STEP 20E: pin GitHub Actions to 40-char commit SHAs"

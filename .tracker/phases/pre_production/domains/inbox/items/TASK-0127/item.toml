@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0127"
 type = "task"
 title = "Enable --version in Cli or omit --version check from STEP 19C"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-24T21:55:56Z"
-updated_at = "2026-11-24T21:56:04Z"
+updated_at = "2026-11-25T04:40:38Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "7722a23"
+summary = "Resolved in STEP 20B: enable version on Cli and test rktb --version"
