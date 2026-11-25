@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0128"
 type = "task"
 title = "sync"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-25T03:09:27Z"
-updated_at = "2026-11-25T03:09:27Z"
+updated_at = "2026-11-25T03:15:04Z"
 source_ref = "STEP 20A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0128@2026-11-25T03:11:28Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "e2f0135"
+summary = "STEP 20A: Preserve Partial Push Progress on Error & Merge Async Feature Updates (`BUG-0060`, `BUG-0063`) (phased check PASS)"
