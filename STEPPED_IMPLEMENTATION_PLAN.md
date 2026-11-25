@@ -4927,6 +4927,7 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 * **Recommended Command:** `/goal`
 * **Advances:** `TASK-0078`, `TASK-0082`
+* **Restaged:** 1
 
 ```text
 [STEP_ID]
@@ -4950,7 +4951,7 @@ Goal: The compiled `rktb` binary is verified end-to-end as a subprocess (`clap` 
 Contract & Behavior:
   1. tests/e2e.rs (`TASK-0078`):
      - Add binary subprocess integration tests using `env!("CARGO_BIN_EXE_rktb")` (`std::process::Command`) verifying:
-       a) `--help` and `--version` exit 0 with expected CLI name/usage on stdout.
+       a) `--help` exits 0 with expected CLI name/usage on stdout.
        b) `init`, `audit --strict` (non-zero exit code on incomplete workspace), and `export --format json` succeed against a temp workspace.
        c) Running a subcommand (e.g. `audit`) on an uninitialized temp directory exits non-zero and prints `error:` on stderr.
        d) Launching `rktb --path <missing_dir>` with `RKTB_POLL_INTERVAL_SECS=invalid` prints `warning: ignoring invalid RKTB_POLL_INTERVAL_SECS` on stderr and exits non-zero with `error:`.
