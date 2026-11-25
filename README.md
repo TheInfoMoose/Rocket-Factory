@@ -81,7 +81,9 @@ Running `rktb` without a subcommand opens the interactive TUI.
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `--path <DIR>` | `.` | Workspace root directory containing `.rocket/`. |
-| `--adapters-file <PATH>` | `~/.config/rocket-bench/adapters.toml` | Path to the external adapters configuration file. Falls back to `.rocket/adapters.toml` if `$HOME` is unset or empty. |
+| `--adapters-file <PATH>` | `~/.config/rocket-bench/adapters.toml` | Path to the external adapters configuration file. Defaults to `~/.config/rocket-bench/adapters.toml` when `$HOME` is set and non-empty; when `$HOME` is unset or empty, no implicit workspace `.rocket/adapters.toml` fallback is used (pass `--adapters-file` explicitly). |
+| `--auto-pull` | `false` | Boolean flag that enables a one-shot pull on TUI startup when `active_adapters` are configured. |
+| `--version` / `-V` | — | Prints `rktb <version>` and exits. |
 
 ### Subcommands
 
@@ -118,11 +120,11 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 | Key | Action |
 | :--- | :--- |
 | `n` | New top-level component (defaults to top-center placement on the canvas) |
-| `a` | Add a sub-component under the selected component |
+| `a` | Add a sub-component under the selected component (Navigate mode) |
 | `e` | Edit selected component |
-| `E` | Edit outgoing edge from selected component |
+| `E` | Edit outgoing edge from selected component (opens with the first matching connection selected when multiple exist) |
 | `d` | Delete selected component |
-| `D` | Delete connection on selected component |
+| `D` | Delete connection on selected component (opens with the first matching connection selected when multiple exist) |
 | `m` | Toggle Move Card mode |
 | `c` | Connect components (`<A> depends on <target>`, i.e. `from = <A>`, `to = <target>`); confirming on an already-connected target toggles and removes the existing edge |
 | `Enter` (Connect mode) | Confirm connect target |
@@ -149,12 +151,12 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 
 ### Modal Controls
 
-- **Component / Sub-Component / Connection forms (`n`, `a`, `e`, `E`)**: `Tab` switches fields, `←`/`→` cycles enum options, `Enter` saves, `Esc` cancels.
-  - `a` opens the New Sub-Component modal scoped under the selected parent component.
+- **Component / Sub-Component / Connection forms (`n`, `a`, `e`, `E`)**: `Tab`, `Shift+Tab`, `↑`, and `↓` navigate between fields, `←`/`→` cycles enum options, `Enter` saves, `Esc` cancels.
+  - `a` (in Navigate mode) opens the New Sub-Component modal scoped under the selected parent component.
   - `e` (Edit Component) supports changing component archetypes (`kind`) and includes an `Add Sub-component` action.
-  - `E` (Edit Edge) supports `EdgeKind::Contains` (`contains`) to ingest existing cards as sub-components or detach them when changed away.
-- **Delete confirmation (`d`, `D`)**: `Enter` or `y` confirms deletion, `Esc` or `n` cancels.
-- **Theme switcher (`t`)**: `↑`/`↓` selects a theme, `Enter` applies and saves to `.rocket/project.toml`, `Esc` cancels.
+  - `E` (Edit Edge) supports `EdgeKind::Contains` (`contains`) to ingest existing cards as sub-components or detach them when changed away. When multiple matching connections exist, the modal opens with the first matching connection selected: cycle candidates with `[` / `]` or `PgUp` / `PgDn` on the Kind field, and with `PgUp` / `PgDn` on the Label field (where `[` / `]` type literal characters).
+- **Delete confirmation (`d`, `D`)**: `Enter` or `y` confirms deletion, `Esc` or `n` cancels. When `D` matches multiple connections, it opens with the first matching connection selected and `↑` / `↓` selects among candidates.
+- **Theme switcher (`t`)**: `↑`/`↓` or `j`/`k` selects a theme, `Enter` applies and saves to `.rocket/project.toml`, `Esc` cancels.
 - **Keyboard help (`?`)**: `Esc`, `?`, `Enter`, or `q` closes the modal.
 
 ## Workspace Layout
@@ -175,6 +177,8 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 - **`.rocket/components/<id>.md`**: Markdown specification body for component `<id>`, rendered in the Component Details panel and edited with `v`.
 - **`.rocket/themes/*.ron`**: Optional workspace-local RON theme files.
 
+> **Note:** Hand-edited `.rocket/components/<id>.toml` files must include all required non-defaulted fields: `id`, `name`, `description`, `position`, `tags`, `tech_stack`, `files`, `flags`, `features`, and `external_tasks`.
+
 ## RON Themes
 
 ### Theme Search Order
@@ -182,7 +186,7 @@ The TUI layout consists of a header bar, three columns (Component List, Snap Gri
 When loading a theme named `<name>`, Rocket Bench searches in the following order:
 
 1. `<workspace>/.rocket/themes/<name>.ron`
-2. `~/.config/rocket-bench/themes/<name>.ron`
+2. `~/.config/rocket-bench/themes/<name>.ron` (skipped when `$HOME` is unset or empty)
 3. Built-in `crt_amber` (fallback when `<name>` is `"crt_amber"` and no override file exists)
 
 Theme names may only contain ASCII alphanumerics, `_`, and `-`. Symlinks resolving outside the theme directory are rejected.
@@ -221,7 +225,7 @@ Rocket Bench integrates with external tools by spawning configured commands and 
 
 ### Configuration Path and Schema
 
-By default, adapters are loaded from `~/.config/rocket-bench/adapters.toml` (overridable via `--adapters-file <PATH>`). Enable adapters for a workspace by listing their `name` values under `active_adapters` in `.rocket/project.toml`.
+By default, adapters are loaded from `~/.config/rocket-bench/adapters.toml` when `$HOME` is set and non-empty (overridable via `--adapters-file <PATH>`; when `$HOME` is unset or empty, pass `--adapters-file` explicitly). Enable adapters for a workspace by listing their `name` values under `active_adapters` in `.rocket/project.toml`.
 
 ```toml
 [[adapters]]
@@ -259,6 +263,8 @@ Each command is executed with the workspace root as its working directory. Non-z
   "message": "synced"
 }
 ```
+
+Any returned `external_id` and `message` values from `push_component_cmd` are surfaced in the push status summary and are not persisted onto the component.
 
 #### `push_feature_cmd`
 
@@ -310,3 +316,30 @@ When multiple active adapters define `push_feature_cmd`, each unpushed feature i
 ```
 
 Valid task `status` values are `"pending"`, `"in_progress"`, `"blocked"`, and `"complete"`. During reconciliation, each matched component's `external_tasks` are replaced with the returned `tasks`, and features are linked (`pushed = true`, `external_id` populated) by matching `external_id` or exact `title`.
+
+## Testing
+
+Run the workspace formatting, lint, test, and documentation checks with:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked
+```
+
+## Releases
+
+Pushing a `v*` Git tag (or dispatching the Release workflow manually) triggers `.github/workflows/release.yml`, which builds release binaries and packages platform archives alongside `.sha256` checksum files for:
+
+- **Linux** (`x86_64-unknown-linux-gnu`, `.tar.gz` + `.sha256`)
+- **macOS** (`aarch64-apple-darwin`, `.tar.gz` + `.sha256`)
+- **Windows** (`x86_64-pc-windows-msvc`, `.zip` + `.sha256`)
+
+## Repository Layout
+
+In addition to the Rust crate (`src/`, `tests/`, `Cargo.toml`), `.tracker/`, `.orrery/`, `.phased/`, `scripts/`, and `STEPPED_IMPLEMENTATION_PLAN.md` are tracked on `master` for project planning and workflow automation. These planning and workflow directories/files are excluded from published crate packages via the `exclude` list in `Cargo.toml`.
+
+## License
+
+Rocket Bench is licensed under the MIT License. See [LICENSE](LICENSE) for details.

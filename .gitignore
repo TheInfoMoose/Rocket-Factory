@@ -2,3 +2,7 @@
 .orrery/logs/
 .orrery/agent_io/
 .orrery/checkpoints/
+.agents/
+.DS_Store
+*.swp
+*~
