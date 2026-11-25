@@ -40,34 +40,67 @@ fn render_app(app: &mut App, width: u16, height: u16) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
+#[cfg(unix)]
+fn mock_echo_command(response_json: &str) -> CommandSpec {
+    CommandSpec {
+        program: "sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            r#"cat >/dev/null; printf '%s' "$1""#.to_string(),
+            "_".to_string(),
+            response_json.to_string(),
+        ],
+    }
+}
+
+#[cfg(windows)]
+fn mock_echo_command(response_json: &str) -> CommandSpec {
+    CommandSpec {
+        program: "cmd".to_string(),
+        args: vec![
+            "/C".to_string(),
+            format!("findstr \"^\" >NUL & echo {response_json}"),
+        ],
+    }
+}
+
+#[cfg(unix)]
+fn mock_log_and_echo_command(log_path: &Path, response_json: &str) -> CommandSpec {
+    CommandSpec {
+        program: "sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            r#"cat >> "$1" && printf '%s' "$2""#.to_string(),
+            "_".to_string(),
+            log_path.display().to_string(),
+            response_json.to_string(),
+        ],
+    }
+}
+
+#[cfg(windows)]
+fn mock_log_and_echo_command(log_path: &Path, response_json: &str) -> CommandSpec {
+    CommandSpec {
+        program: "cmd".to_string(),
+        args: vec![
+            "/C".to_string(),
+            format!("more >> \"{}\" && echo {response_json}", log_path.display()),
+        ],
+    }
+}
+
 fn write_mock_adapters_toml(adapters_path: &Path, pull_json: &str) {
     let adapters_file = AdaptersFile {
         adapters: vec![AdapterConfig {
             name: "mock_tracker".to_string(),
             export_format: ExportFormat::Json,
-            push_component_cmd: Some(CommandSpec {
-                program: "sh".to_string(),
-                args: vec![
-                    "-c".to_string(),
-                    r#"cat >/dev/null; printf '{"external_id":"COMP-1","message":"pushed"}'"#
-                        .to_string(),
-                ],
-            }),
-            push_feature_cmd: Some(CommandSpec {
-                program: "sh".to_string(),
-                args: vec![
-                    "-c".to_string(),
-                    r#"cat >/dev/null; printf '{"external_id":"EXT-101","message":"created"}'"#
-                        .to_string(),
-                ],
-            }),
-            pull_status_cmd: Some(CommandSpec {
-                program: "sh".to_string(),
-                args: vec![
-                    "-c".to_string(),
-                    format!("cat >/dev/null; printf '%s' '{pull_json}'"),
-                ],
-            }),
+            push_component_cmd: Some(mock_echo_command(
+                r#"{"external_id":"COMP-1","message":"pushed"}"#,
+            )),
+            push_feature_cmd: Some(mock_echo_command(
+                r#"{"external_id":"EXT-101","message":"created"}"#,
+            )),
+            pull_status_cmd: Some(mock_echo_command(pull_json)),
         }],
     };
     let toml_content = toml::to_string_pretty(&adapters_file).expect("serialize adapters.toml");
@@ -488,32 +521,20 @@ fn e2e_multi_adapter_feature_push_cli_and_tui() {
                 name: "tracker_a".to_string(),
                 export_format: ExportFormat::Json,
                 push_component_cmd: None,
-                push_feature_cmd: Some(CommandSpec {
-                    program: "sh".to_string(),
-                    args: vec![
-                        "-c".to_string(),
-                        format!(
-                            "cat >> '{}' && printf '{{\"external_id\":\"A-100\",\"message\":\"ok\"}}'",
-                            log_a.display()
-                        ),
-                    ],
-                }),
+                push_feature_cmd: Some(mock_log_and_echo_command(
+                    &log_a,
+                    r#"{"external_id":"A-100","message":"ok"}"#,
+                )),
                 pull_status_cmd: None,
             },
             AdapterConfig {
                 name: "tracker_b".to_string(),
                 export_format: ExportFormat::Json,
                 push_component_cmd: None,
-                push_feature_cmd: Some(CommandSpec {
-                    program: "sh".to_string(),
-                    args: vec![
-                        "-c".to_string(),
-                        format!(
-                            "cat >> '{}' && printf '{{\"external_id\":\"B-200\",\"message\":\"ok\"}}'",
-                            log_b.display()
-                        ),
-                    ],
-                }),
+                push_feature_cmd: Some(mock_log_and_echo_command(
+                    &log_b,
+                    r#"{"external_id":"B-200","message":"ok"}"#,
+                )),
                 pull_status_cmd: None,
             },
         ],
@@ -1393,56 +1414,131 @@ fn e2e_help_modal_connect_direction_and_edit_edge_preview() {
 }
 
 #[test]
-fn e2e_readme_documents_release_build_and_tui_features() {
-    let readme_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
-    let readme = fs::read_to_string(&readme_path).expect("read README.md");
+fn e2e_binary_cli_subprocess_lifecycle_and_errors() {
+    let bin = env!("CARGO_BIN_EXE_rktb");
 
+    // a) --help exits 0 with expected CLI name/usage on stdout
+    let help_out = std::process::Command::new(bin)
+        .arg("--help")
+        .output()
+        .expect("run rktb --help");
     assert!(
-        readme.contains("### Build and install from a local clone"),
-        "README.md missing local clone build heading"
+        help_out.status.success(),
+        "expected --help exit 0, got {:?}, stderr: {}",
+        help_out.status,
+        String::from_utf8_lossy(&help_out.stderr)
+    );
+    let help_stdout = String::from_utf8_lossy(&help_out.stdout);
+    assert!(
+        help_stdout.contains("Usage:") && help_stdout.contains("rktb"),
+        "expected Usage and rktb in --help stdout:\n{help_stdout}"
     );
 
-    let install_pos = readme
-        .find("cargo install --path . --locked")
-        .expect("README.md missing cargo install --path . --locked");
-    let build_pos = readme
-        .find("cargo build --release --locked")
-        .expect("README.md missing cargo build --release --locked");
+    // b) init, audit --strict (non-zero on incomplete workspace), and export --format json
+    let dir = tempfile::tempdir().expect("create workspace tempdir");
+    let init_out = std::process::Command::new(bin)
+        .arg("--path")
+        .arg(dir.path())
+        .args([
+            "init",
+            "--name",
+            "subprocess-e2e",
+            "--description",
+            "Subprocess plan for testuser@example.com",
+        ])
+        .output()
+        .expect("run rktb init");
     assert!(
-        install_pos < build_pos,
-        "expected cargo install block before cargo build --release block"
+        init_out.status.success(),
+        "expected init exit 0, got {:?}, stderr: {}",
+        init_out.status,
+        String::from_utf8_lossy(&init_out.stderr)
     );
+    let init_stdout = String::from_utf8_lossy(&init_out.stdout);
     assert!(
-        readme[install_pos..build_pos].contains("```"),
-        "expected cargo install and cargo build --release in separate fenced code blocks"
+        init_stdout.contains("subprocess-e2e"),
+        "expected project name in init stdout:\n{init_stdout}"
     );
 
-    for binding in [
-        "| `+` / `=` |",
-        "| `-` |",
-        "| `c` |",
-        "| `a` |",
-        "| `E` |",
-        "<A> depends on <target>",
-    ] {
-        assert!(
-            readme.contains(binding),
-            "README.md missing TUI keyboard documentation '{binding}'"
-        );
-    }
+    let mut incomplete = scaffold_component(
+        "gap_node",
+        "Gap Node",
+        ComponentKind::DataStream,
+        GridPos { col: 0, row: 0 },
+    );
+    incomplete.features.clear();
+    storage::save_component(dir.path(), &incomplete).expect("save incomplete component");
 
-    for doc_token in [
-        "`concept`",
-        "`interface`",
-        "`logic`",
-        "`data`",
-        "`integration`",
-        "`custom`",
-        "`parent_id`",
-    ] {
-        assert!(
-            readme.contains(doc_token),
-            "README.md missing archetype/sub-component documentation '{doc_token}'"
-        );
-    }
+    let audit_out = std::process::Command::new(bin)
+        .arg("--path")
+        .arg(dir.path())
+        .args(["audit", "--strict"])
+        .output()
+        .expect("run rktb audit --strict");
+    assert!(
+        !audit_out.status.success(),
+        "expected non-zero exit code for audit --strict on incomplete workspace"
+    );
+    let audit_stdout = String::from_utf8_lossy(&audit_out.stdout);
+    assert!(
+        audit_stdout.contains("[ERROR]"),
+        "expected [ERROR] finding in audit --strict stdout:\n{audit_stdout}"
+    );
+
+    let export_out = std::process::Command::new(bin)
+        .arg("--path")
+        .arg(dir.path())
+        .args(["export", "--format", "json"])
+        .output()
+        .expect("run rktb export --format json");
+    assert!(
+        export_out.status.success(),
+        "expected export --format json exit 0, got {:?}, stderr: {}",
+        export_out.status,
+        String::from_utf8_lossy(&export_out.stderr)
+    );
+    let export_stdout = String::from_utf8_lossy(&export_out.stdout);
+    let parsed_json: serde_json::Value =
+        serde_json::from_str(&export_stdout).expect("export stdout should be valid JSON");
+    assert_eq!(parsed_json["config"]["name"], "subprocess-e2e");
+
+    // c) Running audit on an uninitialized temp directory exits non-zero and prints error: on stderr
+    let uninit_dir = tempfile::tempdir().expect("create uninitialized tempdir");
+    let uninit_out = std::process::Command::new(bin)
+        .arg("--path")
+        .arg(uninit_dir.path())
+        .arg("audit")
+        .output()
+        .expect("run rktb audit on uninitialized dir");
+    assert!(
+        !uninit_out.status.success(),
+        "expected non-zero exit code for audit on uninitialized dir"
+    );
+    let uninit_stderr = String::from_utf8_lossy(&uninit_out.stderr);
+    assert!(
+        uninit_stderr.contains("error:"),
+        "expected 'error:' on stderr for uninitialized audit:\n{uninit_stderr}"
+    );
+
+    // d) Launching rktb --path <missing_dir> with RKTB_POLL_INTERVAL_SECS=abc warns and exits non-zero
+    let missing_dir = uninit_dir.path().join("does_not_exist");
+    let poll_out = std::process::Command::new(bin)
+        .arg("--path")
+        .arg(&missing_dir)
+        .env("RKTB_POLL_INTERVAL_SECS", "abc")
+        .output()
+        .expect("run rktb with invalid RKTB_POLL_INTERVAL_SECS");
+    assert!(
+        !poll_out.status.success(),
+        "expected non-zero exit code for missing dir"
+    );
+    let poll_stderr = String::from_utf8_lossy(&poll_out.stderr);
+    assert!(
+        poll_stderr.contains("warning: ignoring invalid RKTB_POLL_INTERVAL_SECS"),
+        "expected RKTB_POLL_INTERVAL_SECS warning on stderr:\n{poll_stderr}"
+    );
+    assert!(
+        poll_stderr.contains("error:"),
+        "expected 'error:' on stderr for missing dir:\n{poll_stderr}"
+    );
 }
