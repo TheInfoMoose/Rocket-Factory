@@ -350,23 +350,51 @@ created_at = "2026-11-24T18:57:22Z"
 [[items.bugs]]
 id = "BUG-0057"
 title = "Background async sync overwrites concurrent foreground disk edits with stale snapshot"
-status = "pending"
+status = "closed"
 severity = "high"
 created_at = "2026-11-24T21:22:28Z"
 
 [[items.bugs]]
 id = "BUG-0058"
 title = "EditConnectionForm '[' / ']' candidate cycling intercepts Label text input"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T21:22:28Z"
 
 [[items.bugs]]
 id = "BUG-0059"
 title = "step_event_loop blocks up to 100ms after draining SyncOutcome before redrawing"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T21:22:28Z"
+
+[[items.bugs]]
+id = "BUG-0060"
+title = "TUI async push drops partial push progress on error, causing duplicate pushes on retry"
+status = "pending"
+severity = "high"
+created_at = "2026-11-25T01:54:35Z"
+
+[[items.bugs]]
+id = "BUG-0061"
+title = "EditConnection modal footer hint contradicts [/] behavior on Label field"
+status = "pending"
+severity = "low"
+created_at = "2026-11-25T01:54:38Z"
+
+[[items.bugs]]
+id = "BUG-0062"
+title = "Windows mock adapter helpers break JSON under cmd /C; new unit tests hardcode sh"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T01:54:42Z"
+
+[[items.bugs]]
+id = "BUG-0063"
+title = "Async sync apply_sync_outcome clobbers concurrent foreground feature edits"
+status = "pending"
+severity = "low"
+created_at = "2026-11-25T01:54:46Z"
 
 [[items.features]]
 id = "FEAT-0001"
@@ -952,35 +980,35 @@ created_at = "2026-11-23T15:52:47Z"
 [[items.tasks]]
 id = "TASK-0078"
 title = "[TEST-01] Add CARGO_BIN_EXE binary subprocess integration tests in tests/e2e.rs"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-23T15:53:04Z"
 
 [[items.tasks]]
 id = "TASK-0079"
 title = "[TEST-02] Add tests for terminal.rs runtime, event loop, and suspend/restore"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:53:05Z"
 
 [[items.tasks]]
 id = "TASK-0080"
 title = "[TEST-03] Add unit tests for storage.rs error paths and symlink containment"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T15:53:06Z"
 
 [[items.tasks]]
 id = "TASK-0081"
 title = "[TEST-04] Close core module unit test branch gaps (cli, adapter, audit, export, model, theme, error, style)"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:08Z"
 
 [[items.tasks]]
 id = "TASK-0082"
 title = "[TEST-05] Decouple brittle tests/e2e.rs assertions and replace Unix-only sh -c mocks"
-status = "open"
+status = "closed"
 severity = "low"
 created_at = "2026-11-23T15:53:09Z"
 
