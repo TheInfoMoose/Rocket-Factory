@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 19):** Fix Phase 18 review follow-up bugs (`BUG-0057`, `BUG-0058`, `BUG-0059`) and close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
+**Phase goal (Phase 20):** Fix Phase 19 review follow-up bugs (`BUG-0060`, `BUG-0061`, `BUG-0062`, `BUG-0063`, `TASK-0127`), make the test suite Windows-safe, harden CI with pinned SHAs/cross-platform matrix/release workflow (`TASK-0083`–`TASK-0086`), and complete `.gitignore` and `README.md` (`TASK-0087`, `TASK-0091`, `TASK-0094`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,12 +26,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 19A** | `/goal` | sync | `src/adapter.rs`, `src/tui/app/sync.rs`, `src/tui/terminal.rs` | — |
-| 2 | **STEP 19B** | `/goal` | modal | `src/tui/modal.rs` | — |
-| 3 | **STEP 19C** | `/goal` | tests | `tests/e2e.rs` | — |
-| 4 | **STEP 19D** | `/goal` | tests | `src/tui/terminal.rs`, `src/storage.rs` | **STEP 19A** |
-| 5 | **STEP 19E** | `/goal` | tests | `src/cli.rs`, `src/audit.rs`, `src/export.rs` | — |
-| 6 | **STEP 19F** | `/goal` | tests | `src/model.rs`, `src/theme.rs`, `src/tui/style.rs` | — |
+| 1 | **STEP 20A** | `/goal` | sync | `src/tui/app/sync.rs`, `src/tui/terminal.rs` | — |
+| 2 | **STEP 20B** | `/goal` | ui | `src/tui/ui.rs`, `src/cli.rs`, `tests/e2e.rs` | — |
+| 3 | **STEP 20C** | `/goal` | tests | `tests/e2e.rs`, `src/cli.rs`, `src/tui/terminal.rs` | **STEP 20A**, **STEP 20B** |
+| 4 | **STEP 20D** | `/goal` | tests | `src/adapter.rs`, `src/tui/app/mod.rs` | — |
+| 5 | **STEP 20E** | `/goal` | ci | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | **STEP 20C**, **STEP 20D** |
+| 6 | **STEP 20F** | `/goal` | docs | `.gitignore`, `README.md` | **STEP 20B**, **STEP 20E** |
 
 ### Completed
 
@@ -115,6 +115,12 @@
 | **STEP 18D** | Done (`b0237dc`) | `/goal` | tui | `src/tui/modal.rs`, `src/tui/app/actions.rs`, `src/tui/ui.rs`, `src/tui/app/mod.rs`, `tests/e2e.rs` |
 | **STEP 18E** | Done (`32d285a`) | `/goal` | canvas | `src/tui/canvas.rs`, `src/tui/ui.rs`, `src/tui/app/state.rs` |
 | **STEP 18F** | Done (`7d6bb49`) | `/boost` | terminal | `src/tui/terminal.rs`, `src/tui/app/state.rs`, `src/tui/app/sync.rs`, `src/tui/app/mod.rs` |
+| **STEP 19A** | Done (`4f3fc34`) | `/goal` | sync | `src/adapter.rs`, `src/tui/app/sync.rs`, `src/tui/terminal.rs` |
+| **STEP 19B** | Done (`79221e3`) | `/goal` | modal | `src/tui/modal.rs` |
+| **STEP 19C** | Done (`1318d4f`) | `/goal` | tests | `tests/e2e.rs` |
+| **STEP 19D** | Done (`5ef6c41`) | `/goal` | tests | `src/tui/terminal.rs`, `src/storage.rs` |
+| **STEP 19E** | Done (`c4c94ac`) | `/goal` | tests | `src/cli.rs`, `src/audit.rs`, `src/export.rs` |
+| **STEP 19F** | Done (`c04c1a7`) | `/goal` | tests | `src/model.rs`, `src/theme.rs`, `src/tui/style.rs` |
 
 ### Future phases
 
@@ -124,23 +130,22 @@
 - Organize all 63 open items (Rebrand + 62 audit findings) into Phases 15–20.
 - `scripts/*` is temporarily removed from `**Forbidden paths:**` for Phase 16 (`STEP 16A`) and must be restored to `**Forbidden paths:**` when planning Phase 17.
 - For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
+- **Decisions (2026-11-24):** Combine Phase 19 review follow-ups (`BUG-0060`–`BUG-0063`, `TASK-0127`) with Phase 20 CI/Docs/Release (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`) into Phase 20; enable `#[command(version)]` on `Cli`; keep workflow/harness directories tracked on `master` (already excluded from crates.io packages in `Cargo.toml`) and document them in `README.md`. Note: `TASK-0120` is already satisfied by `delete_component_rolls_back_detached_children_on_failure` in `src/tui/app/mod.rs:2313`.
 
 #### Phase 18: TUI, Canvas & Responsiveness Fixes (Done)
 - **Goal:** Fix Phase 17 follow-up bugs (`BUG-0054`–`BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
 - **Done looks like:** Stale pulled tasks are pruned, audit checks global grid bounds/overlaps, component list and detail panel scroll properly, canvas handles Unicode and overlapping edges cleanly, TUI mutations and `Contains` edges stay atomic and in sync, and adapter sync runs off the UI thread with dirty-flag redraws.
 - **Steps:** `STEP 18A`–`STEP 18F` (completed).
 
-#### Phase 19: Follow-Up Fixes & Comprehensive Test Coverage (Active)
+#### Phase 19: Follow-Up Fixes & Comprehensive Test Coverage (Done)
 - **Goal:** Fix Phase 18 review follow-up bugs (`BUG-0057`, `BUG-0058`, `BUG-0059`) and close all integration, binary, terminal, storage, and core module test gaps (`TASK-0078`–`TASK-0082`).
 - **Done looks like:** Background sync never overwrites concurrent foreground disk edits, `SyncOutcome` triggers immediate redraw, `EditConnectionForm` allows `[`/`]` in `Label`, `rktb` binary CLI is tested end-to-end via `CARGO_BIN_EXE_rktb`, `terminal.rs` and `storage.rs` edge/error paths are covered, core module branch gaps are closed, and E2E tests are cross-platform.
-- **Steps:** `STEP 19A`–`STEP 19F` (see `### Up Next` and `## Phase 19 Step Blocks`).
+- **Steps:** `STEP 19A`–`STEP 19F` (completed).
 
-#### Phase 20: CI, Documentation & Release Readiness
-- **Goal:** Harden GitHub Actions CI, add cross-platform matrix and tag-triggered release workflow, complete `README.md` documentation, and audit `.gitignore` / tracked harness metadata (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`).
-- **Done looks like:** CI pins immutable SHAs, runs `--locked` + `cargo doc` + cross-platform checks + release workflow, `README.md` is complete for `rktb`, and `.gitignore`/harness metadata is clean.
-- **Steps:**
-  - **STEP 20A:** Harden `.github/workflows/ci.yml` (pin SHAs, `--locked`, `cargo doc`, `shellcheck`/script checks, cross-platform matrix, tag release workflow) (`TASK-0083`, `TASK-0084`, `TASK-0085`, `TASK-0086`)
-  - **STEP 20B:** Update `.gitignore`, complete `README.md` (license, testing, release, `rktb` docs), and review tracked harness metadata (`TASK-0087`, `TASK-0091`, `TASK-0094`)
+#### Phase 20: Follow-Up Fixes, Cross-Platform Tests, CI Hardening & Release Readiness (Active)
+- **Goal:** Fix Phase 19 review follow-up bugs (`BUG-0060`, `BUG-0061`, `BUG-0062`, `BUG-0063`, `TASK-0127`), make the test suite Windows-safe, harden GitHub Actions CI with pinned SHAs/cross-platform matrix/release workflow (`TASK-0083`–`TASK-0086`), and complete `.gitignore` and `README.md` (`TASK-0087`, `TASK-0091`, `TASK-0094`).
+- **Done looks like:** Async push errors preserve partial push progress, async sync merges feature link updates without clobbering concurrent foreground feature edits, `EditConnection` footer hint matches Label-field behavior, `rktb --version` works and is tested, Windows CI tests pass cleanly, CI pins immutable 40-char SHAs with `--locked` + `cargo doc` + `rustsec/audit-check` + script checks + cross-platform matrix + `v*` release workflow, and `.gitignore`/`README.md` are complete.
+- **Steps:** `STEP 20A`–`STEP 20F` (see `### Up Next` and `## Phase 20 Step Blocks`).
 
 _Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
@@ -5133,6 +5138,365 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn model_component_mut_and_all_component_kinds\b' src/model.rs && grep -qE 'fn theme_resolve_errors_on_malformed_ron_and_missing_name\b' src/theme.rs && grep -qE 'fn style_covers_all_card_status_glyphs_and_border_colors\b' src/tui/style.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 20 Step Blocks
+
+### STEP 20A: Preserve Partial Push Progress on Error & Merge Async Feature Updates (`BUG-0060`, `BUG-0063`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20A: Preserve partial push progress on async sync error and merge feature link updates without clobbering concurrent foreground feature edits.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/app/sync.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:760-860 (sync_push_project_in_memory, sync_push_project)
+  - src/tui/app/sync.rs:1-180 (ComponentSyncUpdate, SyncOutcome, run_sync_job, apply_sync_outcome)
+  - src/tui/terminal.rs:1024-1155 (async_sync_does_not_overwrite_concurrent_foreground_disk_edits, step_event_loop_returns_immediately_when_sync_outcome_ready)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No `.unwrap()` or `.expect()` in non-test code.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Ensure TUI async push never loses partial push progress when a later feature fails (`BUG-0060`) and async sync never overwrites concurrent foreground feature additions, deletions, or title edits (`BUG-0063`).
+
+Contract & Behavior:
+  1. `src/tui/app/sync.rs` (`BUG-0060`, `BUG-0063`):
+     - Update `ComponentSyncUpdate` so feature sync deltas are applied per feature ID (e.g., `external_tasks: Option<Vec<ExternalTaskRef>>` when `external_tasks` changed, plus `feature_updates` carrying `(id, pushed, external_id)` for features whose `pushed` or `external_id` changed during sync).
+     - Update `SyncOutcome::Error` to carry `updates: Vec<ComponentSyncUpdate>` alongside `status_message: String`.
+     - In `run_sync_job`, compute `updates` by diffing `before` against `project.components` for BOTH `Ok` and `Err` results so any features marked `pushed = true` / `external_id = Some(...)` by `sync_push_project_in_memory` prior to an adapter error are returned in `SyncOutcome::Error { updates, status_message }`. (When `SyncRequest::PushSelected` has `target_comp_id == None`, return `SyncOutcome::Error { updates: Vec::new(), status_message: ... }`.)
+     - In `apply_sync_outcome`, apply and persist `updates` for BOTH `SyncOutcome::Success` and `SyncOutcome::Error`:
+       - For each `update`, locate the live component by `update.component_id` (skipping components deleted in the foreground).
+       - If `update.external_tasks` is `Some(tasks)`, replace `comp.external_tasks`.
+       - For each feature delta in `update.feature_updates`, find the matching live feature by `id` in `comp.features` and update ONLY its `pushed` and `external_id` fields — preserving foreground edits to `title`, newly added foreground features, and foreground feature deletions.
+       - Persist every modified live component via `crate::storage::save_component` with rollback of remaining unsaved in-memory component backups if a disk save fails.
+       - On `SyncOutcome::Error`, if saving partial updates also fails, surface both the original `status_message` and the save error in `app.status_message`; otherwise keep `app.status_message = status_message`. Always call `app.refresh_audit()`, `app.clamp_selection()`, and set `app.sync_in_flight = false`.
+  2. `src/tui/terminal.rs`:
+     - Update any existing `SyncOutcome` construction in tests if needed, and add unit tests proving both partial-push preservation on error and concurrent foreground feature preservation.
+
+Must still work:
+  - `async_sync_does_not_overwrite_concurrent_foreground_disk_edits` and `step_event_loop_returns_immediately_when_sync_outcome_ready` continue to pass.
+  - Synchronous `App::sync_pull` and `App::sync_push_selected` behavior is unchanged.
+
+Drops: none
+
+Tests:
+  - `async_push_error_preserves_partial_push_progress` (in `src/tui/terminal.rs`, `#[cfg(unix)]` if invoking `sh`): component has 2 unpushed features; mock `push_feature_cmd` succeeds on feature 1 (returning `{"external_id":"EXT-1"}`) and exits non-zero on feature 2 -> `run_sync_job` returns `SyncOutcome::Error` with non-empty `updates`, and `apply_sync_outcome` persists feature 1 (`pushed == true`, `external_id == Some("EXT-1")`) in memory and on disk while leaving feature 2 unpushed and setting an error `app.status_message`.
+  - `async_sync_preserves_concurrent_foreground_feature_edits` (in `src/tui/terminal.rs`): take a `project` snapshot, then edit feature `f1`'s title and add a new foreground feature `f_new` in `app.project` and on disk; apply a `SyncOutcome::Success` updating `external_tasks` and linking `f1` (`pushed = true`, `external_id = Some("EXT-9")`) -> live `f1` retains the edited foreground title with `pushed == true` and `external_id == Some("EXT-9")`, `f_new` remains present in memory and on disk, and `external_tasks` is updated.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn async_push_error_preserves_partial_push_progress\b' src/tui/terminal.rs && grep -qE 'fn async_sync_preserves_concurrent_foreground_feature_edits\b' src/tui/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 20B: Adapt `EditConnection` Footer Hint for Label Field & Enable `rktb --version` (`BUG-0061`, `TASK-0127`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20B: Update EditConnection modal footer hint by active field and enable `--version` on the `rktb` CLI with subprocess test coverage.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/tui/ui.rs
+  - src/cli.rs
+  - tests/e2e.rs
+READ_ONLY_REFS:
+  - src/tui/modal.rs:585-625 (EditConnectionForm active_field, [/] and PageUp/PageDown handling)
+  - src/tui/ui.rs:1040-1080 (render_modal footer_hint and popup sizing)
+  - src/cli.rs:10-25 (Cli derive attributes)
+  - tests/e2e.rs:1416-1445 (e2e_binary_cli_subprocess_lifecycle_and_errors)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter `EditConnectionForm` key handling in `src/tui/modal.rs`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Make the `EditConnection` modal footer hint match actual Label-field key behavior (`BUG-0061`) and enable `rktb --version` (`TASK-0127`).
+
+Contract & Behavior:
+  1. `src/tui/ui.rs` (`BUG-0061`):
+     - In `render_modal`, when `ModalState::EditConnection(form)` has `form.candidates.len() > 1`:
+       - When `form.active_field == 1` (Label field), display footer hint `"  [PgUp/PgDn] Edge  [Tab] Field  [Enter] Save  [Esc] Cancel"` (must NOT advertise `[/]` for edge cycling).
+       - When `form.active_field == 0` (Kind field), display footer hint `"  [[/]/PgUp/PgDn] Edge  [Tab] Field  [←/→] Kind  [Enter] Save  [Esc] Cancel"`.
+     - Single-candidate `EditConnection` keeps `"  [Tab] Field  [←/→] Cycle  [Enter] Save  [Esc] Cancel"`.
+  2. `src/cli.rs` (`TASK-0127`):
+     - Add `version` to `#[command(name = "rktb", version, about = ...)]` on `Cli` so `rktb --version` and `rktb -V` exit 0 and print `rktb <CARGO_PKG_VERSION>`.
+  3. `tests/e2e.rs` (`TASK-0127`):
+     - In `e2e_binary_cli_subprocess_lifecycle_and_errors`, spawn `rktb --version` via `env!("CARGO_BIN_EXE_rktb")` and assert exit status 0 and stdout containing `"rktb"` and `env!("CARGO_PKG_VERSION")`.
+
+Must still work:
+  - All existing `render_modal` layout tests and `e2e_binary_cli_subprocess_lifecycle_and_errors` assertions continue to pass.
+  - Narrowest supported terminal (`80x24`) renders the `EditConnection` modal without clipping or panic even with a long label.
+
+Drops: none
+
+Tests:
+  - `edit_connection_modal_footer_hint_adapts_to_active_field_at_80x24` (in `src/tui/ui.rs`): construct `App` with an `EditConnection` modal having 2 candidate edges and a 60-character label; render at `80x24` with `active_field == 0` -> rendered buffer contains `[[/]/PgUp/PgDn] Edge`; switch to `active_field == 1` via real key (`Tab`) and render at `80x24` -> rendered buffer contains `[PgUp/PgDn] Edge` and does not contain `[[/]/PgUp/PgDn] Edge` or `[[/]] Edge`.
+  - `e2e_binary_cli_subprocess_lifecycle_and_errors` (in `tests/e2e.rs`): `rktb --version` exits 0 and stdout includes `"rktb"` and `env!("CARGO_PKG_VERSION")`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'version,' src/cli.rs && grep -qE 'fn edit_connection_modal_footer_hint_adapts_to_active_field_at_80x24\b' src/tui/ui.rs && grep -qE 'CARGO_PKG_VERSION' tests/e2e.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 20C: Fix Windows Mock Adapter Helpers in `tests/e2e.rs` & Gate `sh` Unit Tests in `cli.rs`/`terminal.rs` (`BUG-0062` Part 1)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20C: Replace broken Windows `cmd /C` mock adapter helpers in `tests/e2e.rs` with PowerShell `-EncodedCommand` and gate `sh` unit tests in `src/cli.rs` and `src/tui/terminal.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - tests/e2e.rs
+  - src/cli.rs
+  - src/tui/terminal.rs
+READ_ONLY_REFS:
+  - tests/e2e.rs:43-95 (mock_echo_command, mock_log_and_echo_command)
+  - src/cli.rs:285-380,505-610 (sh-based adapter unit tests)
+  - src/tui/terminal.rs:785-1235 (sh-based adapter unit tests)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not add external crates to `Cargo.toml` (implement UTF-16LE base64 encoding directly in `tests/e2e.rs`).
+
+[PRE_GATE]
+grep -qE 'fn async_push_error_preserves_partial_push_progress\b' src/tui/terminal.rs && grep -qE 'CARGO_PKG_VERSION' tests/e2e.rs
+
+[MUTATION_SPEC]
+Goal: Eliminate Windows `cmd /C` JSON-escaping and interactive `more` defects in `tests/e2e.rs` and prevent Unix-only `sh` unit tests in `src/cli.rs` and `src/tui/terminal.rs` from failing on Windows CI (`BUG-0062`).
+
+Contract & Behavior:
+  1. `tests/e2e.rs` (`BUG-0062`):
+     - Add a pure-Rust helper `encode_powershell_utf16le_base64(script: &str) -> String` (compiled on all targets so it is unit-tested on Linux/macOS as well as used on Windows) that encodes `script` as UTF-16LE bytes and RFC 4648 standard base64 (`A-Z`, `a-z`, `0-9`, `+`, `/`, `=` padding).
+     - Replace the `#[cfg(windows)]` `mock_echo_command(response_json: &str) -> CommandSpec` with `powershell` `-NoProfile` `-NonInteractive` `-EncodedCommand` `<encoded>` where the script drains stdin (`[Console]::In.ReadToEnd() | Out-Null`) and writes exact `response_json` via `[Console]::Out.Write(...)` (using PowerShell single-quoted literal escaping `''` for any `'`), avoiding `cmd /C` quote escaping completely.
+     - Replace the `#[cfg(windows)]` `mock_log_and_echo_command(log_path: &Path, response_json: &str) -> CommandSpec` with `powershell` `-NoProfile` `-NonInteractive` `-EncodedCommand` `<encoded>` where the script reads stdin (`$data = [Console]::In.ReadToEnd()`), appends `$data` as UTF-8 to `log_path` via `[System.IO.File]::AppendAllText(...)` (never invoking interactive `more`), and writes exact `response_json` via `[Console]::Out.Write(...)`.
+  2. `src/cli.rs` (`BUG-0062`):
+     - Gate all `sh`-invoking unit tests (`cli_push_sends_unpushed_features_to_all_active_adapters`, `cli_pull_push_adapter_override_and_nonstrict_audit`) with `#[cfg(unix)]`, ensuring no unused imports or dead-code warnings when compiled under `#[cfg(not(unix))]`.
+  3. `src/tui/terminal.rs` (`BUG-0062`):
+     - Gate all `sh`-invoking unit tests (`process_pending_sync_executes_pull_and_surfaces_errors`, `async_sync_channel_applies_pull_outcome_without_blocking`, `async_sync_does_not_overwrite_concurrent_foreground_disk_edits`, `step_event_loop_triggers_auto_poll_and_editor_dispatch`, `async_push_error_preserves_partial_push_progress`) with `#[cfg(unix)]`, ensuring no unused imports or dead-code warnings under `#[cfg(not(unix))]`.
+
+Must still work:
+  - All Unix E2E tests and unit tests continue to run and pass unchanged on Linux/macOS.
+  - Non-`sh` unit tests in `src/cli.rs` and `src/tui/terminal.rs` remain active on all platforms.
+
+Drops: none
+
+Tests:
+  - `encode_powershell_utf16le_base64_handles_json_quotes` (in `tests/e2e.rs`): encode a PowerShell snippet containing JSON double quotes (`{"external_id":"EXT-101"}`) and verify exact expected UTF-16LE base64 output (and empty string -> empty string, plus padding cases).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn encode_powershell_utf16le_base64_handles_json_quotes\b' tests/e2e.rs && grep -qE 'EncodedCommand' tests/e2e.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 20D: Gate `sh` Unit Tests in `adapter.rs` & `tui/app/mod.rs` for Windows CI (`BUG-0062` Part 2)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20D: Gate Unix-shell (`sh`) unit tests in `src/adapter.rs` and `src/tui/app/mod.rs` with `#[cfg(unix)]` and add cross-platform adapter coverage.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - src/adapter.rs
+  - src/tui/app/mod.rs
+READ_ONLY_REFS:
+  - src/adapter.rs:990-1509 (sh-based adapter unit tests)
+  - src/tui/app/mod.rs:680-875 (sh-based app sync unit tests)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass cleanly on Windows CI by gating `sh`-invoking unit tests in `src/adapter.rs` and `src/tui/app/mod.rs` (`BUG-0062`).
+
+Contract & Behavior:
+  1. `src/adapter.rs` (`BUG-0062`):
+     - Gate every unit test that spawns `"sh"` with `#[cfg(unix)]` (and any test-only helpers/imports used exclusively by those tests) so Windows builds have zero `sh` failures and zero dead-code/unused-import clippy warnings.
+     - Add a cross-platform (non-`cfg(unix)`) unit test `sync_push_project_rejects_missing_component_cross_platform` verifying `sync_push_project` returns `RbError::NotFound` for an unknown component ID when an active adapter is configured (validating pre-spawn checks on all OSes).
+  2. `src/tui/app/mod.rs` (`BUG-0062`):
+     - Gate every unit test that spawns `"sh"` (`sync_pull_updates_external_tasks_flips_status_and_persists`, `sync_push_selected_marks_features_pushed_and_persists`, `sync_push_selected_pushes_unpushed_features_to_all_active_adapters`) with `#[cfg(unix)]`, ensuring no unused imports or dead-code warnings under `#[cfg(not(unix))]`.
+
+Must still work:
+  - All existing unit tests in `src/adapter.rs` and `src/tui/app/mod.rs` still run and pass on Unix.
+  - Pure reconciliation, config loading, and non-shell unit tests remain active on all platforms.
+
+Drops: none
+
+Tests:
+  - `sync_push_project_rejects_missing_component_cross_platform` (in `src/adapter.rs`): write a valid `adapters.toml` with an active adapter name matching `project.config.active_adapters`, call `sync_push_project` with `&["nonexistent_comp".to_string()]` -> returns `Err(RbError::NotFound(_))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn sync_push_project_rejects_missing_component_cross_platform\b' src/adapter.rs && grep -qE '#\[cfg\(unix\)\]' src/tui/app/mod.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 20E: Harden CI Workflow (Pinned SHAs, `--locked`, Docs/Audit/Scripts, Cross-Platform Matrix) & Add Release Workflow (`TASK-0083`–`TASK-0086`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20E: Harden `.github/workflows/ci.yml` with pinned 40-char action SHAs, `--locked`, `cargo doc`, `rustsec/audit-check`, script checks, and cross-platform matrix, and add `.github/workflows/release.yml`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/ci.yml
+  - .github/workflows/release.yml (NEW)
+READ_ONLY_REFS:
+  - .github/workflows/ci.yml:1-77 (existing CI jobs)
+  - Cargo.toml:1-36 (package metadata, binary name rktb, exclude list)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify `scripts/*` or `Cargo.toml`.
+
+[PRE_GATE]
+grep -qE 'EncodedCommand' tests/e2e.rs && grep -qE '#\[cfg\(unix\)\]' src/tui/app/mod.rs
+
+[MUTATION_SPEC]
+Goal: Eliminate supply-chain mutable action tags, enforce `--locked`, `cargo doc`, dependency audit, and script syntax checks, verify Linux/macOS/Windows in CI, and automate `v*` tag release builds with SHA-256 checksums (`TASK-0083`, `TASK-0084`, `TASK-0085`, `TASK-0086`).
+
+Contract & Behavior:
+  1. `.github/workflows/ci.yml` (`TASK-0083`, `TASK-0084`, `TASK-0085`, `TASK-0086`):
+     - Triggers: keep `push` (`master`, `main`), `pull_request`, `workflow_dispatch`, and add `schedule:` with weekly cron `"0 6 * * 1"`.
+     - Pin EVERY `uses:` step across all jobs to its exact 40-char commit SHA with a trailing version comment (no mutable `@v4`/`@v2`/`@stable` refs):
+       - `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2`
+       - `dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable` (always with `with: toolchain: stable`)
+       - `Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0`
+       - `rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0`
+     - `check` job:
+       - Cross-platform `strategy.matrix.os: [ubuntu-latest, macos-latest, windows-latest]` (`fail-fast: false`).
+       - Run `cargo fmt --all -- --check` (on `ubuntu-latest`), `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked` (on `ubuntu-latest`), and `cargo package --locked` (on `ubuntu-latest`).
+     - `security-and-scripts` job (on `ubuntu-latest`):
+       - Checkout, run `rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0` with `token: ${{ secrets.GITHUB_TOKEN }}`.
+       - Run `bash -n scripts/phased-step.sh scripts/neon-dispatch && shellcheck -S error scripts/phased-step.sh scripts/neon-dispatch`.
+     - `linux-git-build` job (on `ubuntu-latest`):
+       - Use the pinned SHAs above, keep `cargo build --release --locked`, `cargo install --git ... --locked`, and add `"$RKTB_BIN" --version` to the smoke test.
+  2. `.github/workflows/release.yml` (NEW) (`TASK-0083`, `TASK-0085`):
+     - Triggers: `push: tags: ["v*"]` and `workflow_dispatch:`.
+     - Top-level `permissions: contents: read`; release build job `permissions: contents: write`.
+     - Matrix across `ubuntu-latest` (`x86_64-unknown-linux-gnu`, `tar.gz`), `macos-latest` (`aarch64-apple-darwin`, `tar.gz`), and `windows-latest` (`x86_64-pc-windows-msvc`, `zip`).
+     - Use the exact pinned 40-char SHAs above (`actions/checkout`, `dtolnay/rust-toolchain` with `toolchain: stable`, `Swatinem/rust-cache`, and `softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2`).
+     - Build with `cargo build --release --locked`, package `rktb` (or `rktb.exe`) + `README.md` + `LICENSE` into `rktb-${{ github.ref_name }}-<target>.(tar.gz|zip)`, generate `<archive>.sha256`, and upload archive + `.sha256` to the GitHub Release when `startsWith(github.ref, 'refs/tags/v')`.
+
+Must still work:
+  - Both workflow files parse as valid YAML with zero mutable `uses:` refs.
+  - `cargo doc --no-deps --workspace` (with `RUSTDOCFLAGS="-D warnings"`) and `bash -n scripts/phased-step.sh scripts/neon-dispatch` pass locally.
+
+Drops: none
+
+Tests:
+  - YAML validation via `python3 -c "import yaml; ..."` and local `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` + `bash -n scripts/phased-step.sh scripts/neon-dispatch` in `[POST_GATE]`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace && bash -n scripts/phased-step.sh scripts/neon-dispatch && python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); yaml.safe_load(open('.github/workflows/release.yml'))" && grep -qE '11bd71901bbe5b1630ceea73d27597364c9af683' .github/workflows/ci.yml && grep -qE 'windows-latest' .github/workflows/ci.yml && grep -qE 'da05d552573ad5aba039eaac05058a918a7bf631' .github/workflows/release.yml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 20F: Complete `.gitignore` Patterns & `README.md` Documentation (`TASK-0087`, `TASK-0091`, `TASK-0094`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 20F: Add missing ignore patterns to `.gitignore` and complete `README.md` CLI, TUI, schema, testing, release, repository-layout, and license documentation.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .gitignore
+  - README.md
+READ_ONLY_REFS:
+  - .gitignore:1-10 (existing ignore rules)
+  - README.md:75-312 (CLI, TUI, workspace layout, themes, adapters)
+  - Cargo.toml:1-25 (package exclude list and MIT license)
+  - src/cli.rs:10-25 (global flags including --auto-pull and --version)
+  - src/tui/ui.rs:1044-1060 (modal footer hints)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not modify `Cargo.toml`, `src/`, `tests/`, or harness directories.
+
+[PRE_GATE]
+test -f .github/workflows/release.yml && grep -qE 'version,' src/cli.rs
+
+[MUTATION_SPEC]
+Goal: Ignore local agent/editor/OS artifacts in `.gitignore` (`TASK-0087`), fix `README.md` omissions and add Testing/Releases/License sections (`TASK-0091`), and document the tracked workflow metadata directories excluded from published crates (`TASK-0094`).
+
+Contract & Behavior:
+  1. `.gitignore` (`TASK-0087`):
+     - Preserve existing lines (`/target/`, `.orrery/logs/`, `.orrery/agent_io/`, `.orrery/checkpoints/`).
+     - Add `.agents/`, `.DS_Store`, `*.swp`, and `*~`.
+  2. `README.md` (`TASK-0091`, `TASK-0094`):
+     - **CLI Reference / Global Flags:**
+       - Add `--auto-pull` (boolean flag, default `false`; enables one-shot pull on TUI startup when active adapters are configured).
+       - Add `--version` / `-V` (prints `rktb <version>`).
+       - Correct `--adapters-file` description: defaults to `~/.config/rocket-bench/adapters.toml` when `$HOME` is set and non-empty; when `$HOME` is unset or empty, no implicit workspace `.rocket/adapters.toml` fallback is used (pass `--adapters-file` explicitly).
+     - **TUI Keyboard Reference & Modal Controls:**
+       - Note that `a` (Add sub-component) works in Navigate mode.
+       - Clarify `E` / `D` behavior when multiple connections exist: opens with the first matching connection selected; `E` cycles candidates with `[` / `]` or `PgUp` / `PgDn` on the Kind field and `PgUp` / `PgDn` on the Label field (where `[` / `]` type literal characters); `D` selects with `↑` / `↓`.
+       - Note that form modals support `Tab`, `Shift+Tab`, `↑`, and `↓` for field navigation, and `ThemeSwitcher` supports both `↑`/`↓` and `j`/`k`.
+     - **Workspace Layout & RON Themes:**
+       - Add a clear note under `## Workspace Layout` warning that hand-edited `.rocket/components/<id>.toml` files must include all required non-defaulted fields (`id`, `name`, `description`, `position`, `tags`, `tech_stack`, `files`, `flags`, `features`, `external_tasks`).
+       - Note under `## RON Themes` that when `$HOME` is unset or empty, the `~/.config/rocket-bench/themes/` search path is skipped.
+     - **External Adapters:**
+       - Clarify `PushResponse` handling: `push_component_cmd` response `external_id` / `message` values are surfaced in the push status summary (not persisted onto the component), while `push_feature_cmd` records the first non-null `external_id` on the feature.
+     - **New Sections:**
+       - `## Testing`: document running `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked`.
+       - `## Releases`: document `v*` tag-triggered release builds (Linux, macOS, Windows archives + `.sha256` checksums).
+       - `## Repository Layout` (resolving `TASK-0094`): note that `.tracker/`, `.orrery/`, `.phased/`, `scripts/`, and `STEPPED_IMPLEMENTATION_PLAN.md` are tracked on `master` for project planning/workflow automation and are excluded from published crate packages via `Cargo.toml`'s `exclude` list.
+       - `## License`: state MIT license and link to `LICENSE`.
+
+Must still work:
+  - Existing installation commands, Quick Start, and adapter JSON examples remain accurate for `rktb`.
+
+Drops: none
+
+Tests:
+  - Verified by `[POST_GATE]` grep checks on `.gitignore` and `README.md` alongside the workspace base gate.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE '^\.agents/$' .gitignore && grep -qE '^\.DS_Store$' .gitignore && grep -qE '^## Testing$' README.md && grep -qE '^## License$' README.md && grep -qE -- '--auto-pull' README.md && grep -qE -- '--version' README.md
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

@@ -1319,3 +1319,45 @@ title = "Enable --version in Cli or omit --version check from STEP 19C"
 status = "pending"
 severity = "high"
 created_at = "2026-11-24T21:55:56Z"
+
+[[items.tasks]]
+id = "TASK-0128"
+title = "sync"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
+
+[[items.tasks]]
+id = "TASK-0129"
+title = "ui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
+
+[[items.tasks]]
+id = "TASK-0130"
+title = "tests"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
+
+[[items.tasks]]
+id = "TASK-0131"
+title = "tests"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
+
+[[items.tasks]]
+id = "TASK-0132"
+title = "ci"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
+
+[[items.tasks]]
+id = "TASK-0133"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T03:09:27Z"
