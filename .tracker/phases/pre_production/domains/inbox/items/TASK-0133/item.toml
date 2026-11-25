@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0133"
 type = "task"
 title = "docs"
-status = "open"
+status = "pending"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-25T03:09:27Z"
-updated_at = "2026-11-25T03:09:27Z"
+updated_at = "2026-11-25T03:31:44Z"
 source_ref = "STEP 20F"
 
 [effort]
