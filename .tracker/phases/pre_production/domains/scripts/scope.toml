@@ -67,3 +67,10 @@ title = "scripts"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-24T04:44:18Z"
+
+[[items.tasks]]
+id = "TASK-0135"
+title = "scripts"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T05:27:13Z"

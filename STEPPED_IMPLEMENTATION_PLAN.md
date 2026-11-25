@@ -6,7 +6,7 @@
 
 **Base gate:** `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
 
-**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*:scripts/*`
+**Forbidden paths:** `Rocket Factory.md:STEPPED_IMPLEMENTATION_PLAN.md:docs/*:.phased/*:.orrery/*`
 
 **Planning files:** `Rocket Factory.md:docs/*`
 
@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 20):** Fix Phase 19 review follow-up bugs (`BUG-0060`, `BUG-0061`, `BUG-0062`, `BUG-0063`, `TASK-0127`), make the test suite Windows-safe, harden CI with pinned SHAs/cross-platform matrix/release workflow (`TASK-0083`–`TASK-0086`), and complete `.gitignore` and `README.md` (`TASK-0087`, `TASK-0091`, `TASK-0094`).
+**Phase goal (Phase 21):** Fix the remaining Phase 20 review follow-up bugs: split `.github/workflows/release.yml` into a race-free `build` → `publish` pipeline and sanitize `/` in `GITHUB_REF_NAME` (`BUG-0065`, `BUG-0066`), and fix `scripts/phased-step.sh` so newly gitignored pre-existing untracked files that remain unchanged on disk are not flagged as out-of-scope (`BUG-0064`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,12 +26,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 20A** | `/goal` | sync | `src/tui/app/sync.rs`, `src/tui/terminal.rs` | — |
-| 2 | **STEP 20B** | `/goal` | ui | `src/tui/ui.rs`, `src/cli.rs`, `tests/e2e.rs` | — |
-| 3 | **STEP 20C** | `/goal` | tests | `tests/e2e.rs`, `src/cli.rs`, `src/tui/terminal.rs` | **STEP 20A**, **STEP 20B** |
-| 4 | **STEP 20D** | `/goal` | tests | `src/adapter.rs`, `src/tui/app/mod.rs` | — |
-| 5 | **STEP 20E** | `/goal` | ci | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | **STEP 20C**, **STEP 20D** |
-| 6 | **STEP 20F** | `/goal` | docs | `.gitignore`, `README.md` | **STEP 20B**, **STEP 20E** |
+| 1 | **STEP 21A** | `/goal` | ci | `.github/workflows/release.yml` | — |
+| 2 | **STEP 21B** | `/goal` | scripts | `scripts/phased-step.sh` | — |
 
 ### Completed
 
@@ -121,6 +117,12 @@
 | **STEP 19D** | Done (`5ef6c41`) | `/goal` | tests | `src/tui/terminal.rs`, `src/storage.rs` |
 | **STEP 19E** | Done (`c4c94ac`) | `/goal` | tests | `src/cli.rs`, `src/audit.rs`, `src/export.rs` |
 | **STEP 19F** | Done (`c04c1a7`) | `/goal` | tests | `src/model.rs`, `src/theme.rs`, `src/tui/style.rs` |
+| **STEP 20A** | Done (`e2f0135`) | `/goal` | sync | `src/tui/app/sync.rs`, `src/tui/terminal.rs` |
+| **STEP 20B** | Done (`7722a23`) | `/goal` | ui | `src/tui/ui.rs`, `src/cli.rs`, `tests/e2e.rs` |
+| **STEP 20C** | Done (`afced5f`) | `/goal` | tests | `tests/e2e.rs`, `src/cli.rs`, `src/tui/terminal.rs` |
+| **STEP 20D** | Done (`6d96987`) | `/goal` | tests | `src/adapter.rs`, `src/tui/app/mod.rs` |
+| **STEP 20E** | Done (`52b02db`) | `/goal` | ci | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
+| **STEP 20F** | Done (`beb9a90`) | `/goal` | docs | `.gitignore`, `README.md` |
 
 ### Future phases
 
@@ -131,6 +133,7 @@
 - `scripts/*` is temporarily removed from `**Forbidden paths:**` for Phase 16 (`STEP 16A`) and must be restored to `**Forbidden paths:**` when planning Phase 17.
 - For `SEC-01` (`BUG-0018`), unconditional TUI startup auto-pull is disabled by default and gated behind `--auto-pull` (manual `r`/`S` sync and explicit `RKTB_POLL_INTERVAL_SECS` still work).
 - **Decisions (2026-11-24):** Combine Phase 19 review follow-ups (`BUG-0060`–`BUG-0063`, `TASK-0127`) with Phase 20 CI/Docs/Release (`TASK-0083`–`TASK-0087`, `TASK-0091`, `TASK-0094`) into Phase 20; enable `#[command(version)]` on `Cli`; keep workflow/harness directories tracked on `master` (already excluded from crates.io packages in `Cargo.toml`) and document them in `README.md`. Note: `TASK-0120` is already satisfied by `delete_component_rolls_back_detached_children_on_failure` in `src/tui/app/mod.rs:2313`.
+- **Decisions (2026-11-24, Phase 21):** Schedule a 2-step Phase 21 polish pass for all three remaining pending bugs (`BUG-0065`, `BUG-0066`, `BUG-0064`). Temporarily remove `scripts/*` from `**Forbidden paths:**` for Phase 21 (`STEP 21B`) and restore `scripts/*` to `**Forbidden paths:**` when planning the next phase (or after Phase 21 review).
 
 #### Phase 18: TUI, Canvas & Responsiveness Fixes (Done)
 - **Goal:** Fix Phase 17 follow-up bugs (`BUG-0054`–`BUG-0056`), fix all TUI, canvas, and terminal bugs (`BUG-0024`–`BUG-0032`, `BUG-0040`–`BUG-0043`), and eliminate UI-thread blocking and idle redraw/allocation overhead (`TASK-0074`, `TASK-0075`, `TASK-0077`).
@@ -142,10 +145,15 @@
 - **Done looks like:** Background sync never overwrites concurrent foreground disk edits, `SyncOutcome` triggers immediate redraw, `EditConnectionForm` allows `[`/`]` in `Label`, `rktb` binary CLI is tested end-to-end via `CARGO_BIN_EXE_rktb`, `terminal.rs` and `storage.rs` edge/error paths are covered, core module branch gaps are closed, and E2E tests are cross-platform.
 - **Steps:** `STEP 19A`–`STEP 19F` (completed).
 
-#### Phase 20: Follow-Up Fixes, Cross-Platform Tests, CI Hardening & Release Readiness (Active)
+#### Phase 20: Follow-Up Fixes, Cross-Platform Tests, CI Hardening & Release Readiness (Done)
 - **Goal:** Fix Phase 19 review follow-up bugs (`BUG-0060`, `BUG-0061`, `BUG-0062`, `BUG-0063`, `TASK-0127`), make the test suite Windows-safe, harden GitHub Actions CI with pinned SHAs/cross-platform matrix/release workflow (`TASK-0083`–`TASK-0086`), and complete `.gitignore` and `README.md` (`TASK-0087`, `TASK-0091`, `TASK-0094`).
 - **Done looks like:** Async push errors preserve partial push progress, async sync merges feature link updates without clobbering concurrent foreground feature edits, `EditConnection` footer hint matches Label-field behavior, `rktb --version` works and is tested, Windows CI tests pass cleanly, CI pins immutable 40-char SHAs with `--locked` + `cargo doc` + `rustsec/audit-check` + script checks + cross-platform matrix + `v*` release workflow, and `.gitignore`/`README.md` are complete.
-- **Steps:** `STEP 20A`–`STEP 20F` (see `### Up Next` and `## Phase 20 Step Blocks`).
+- **Steps:** `STEP 20A`–`STEP 20F` (completed).
+
+#### Phase 21: Release Workflow & Harness Polish (Active)
+- **Goal:** Resolve the remaining Phase 20 review follow-ups: split `.github/workflows/release.yml` into matrix `build` + single `publish` jobs (`BUG-0065`), sanitize `/` in `GITHUB_REF_NAME` for release archive filenames (`BUG-0066`), and fix `scripts/phased-step.sh` so newly gitignored pre-existing untracked files unchanged on disk are not flagged as out-of-scope (`BUG-0064`).
+- **Done looks like:** Release workflow builds and uploads per-target artifacts in parallel without `contents: write`, then publishes all 6 assets from a single `publish` job on `v*` tags; `workflow_dispatch` on slash-containing branch names packages cleanly; and `scripts/phased-step.sh check` ignores snapshot-only paths that are newly gitignored and unchanged on disk while still catching modifications or deletions.
+- **Steps:** `STEP 21A`–`STEP 21B` (see `### Up Next` and `## Phase 21 Step Blocks`).
 
 _Note (`TASK-0060`): the 117-column footer layout is accepted as-is because it keeps `? help` and `q quit` visible at 80 columns._
 
@@ -5498,6 +5506,121 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE '^\.agents/$' .gitignore && grep -qE '^\.DS_Store$' .gitignore && grep -qE '^## Testing$' README.md && grep -qE '^## License$' README.md && grep -qE -- '--auto-pull' README.md && grep -qE -- '--version' README.md
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 21 Step Blocks
+
+### STEP 21A: Split Release Workflow into `build` → `publish` and Sanitize Archive Filenames (`BUG-0065`, `BUG-0066`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 21A: Split `.github/workflows/release.yml` into a matrix `build` job and a single `publish` job (`BUG-0065`) and sanitize `/` in `GITHUB_REF_NAME` for archive filenames (`BUG-0066`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/release.yml
+READ_ONLY_REFS:
+  - .github/workflows/ci.yml:1-110 (pinned action SHA conventions)
+  - .phased/reviews/phase-20.md:9-16 (BUG-0065 and BUG-0066 findings)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not use unpinned action tags (every `uses:` must pin a 40-char commit SHA).
+  - Do not grant `contents: write` to the matrix `build` job.
+
+[PRE_GATE]
+test -f .github/workflows/release.yml
+
+[MUTATION_SPEC]
+Goal: Eliminate the parallel GitHub Release creation race on `v*` tag pushes (`BUG-0065`) and prevent archive packaging failures on `workflow_dispatch` from branch names containing `/` (`BUG-0066`).
+
+Contract & Behavior:
+  1. Two-stage `build` → `publish` workflow (`.github/workflows/release.yml`, `BUG-0065`):
+     - Keep top-level triggers (`push.tags: ["v*"]`, `workflow_dispatch:`) and top-level `permissions: contents: read`.
+     - Replace the single `release` job with:
+       - `build`: matrix job over the existing 3 targets (`ubuntu-latest` / `x86_64-unknown-linux-gnu` / `tar.gz` / `rktb`, `macos-latest` / `aarch64-apple-darwin` / `tar.gz` / `rktb`, `windows-latest` / `x86_64-pc-windows-msvc` / `zip` / `rktb.exe`), `fail-fast: false`, inheriting read-only `contents: read` (no `contents: write` permission). Builds with `cargo build --release --locked`, packages the archive + `.sha256` into a clean directory (e.g. `dist/`), and uploads them via `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2` with a unique per-target artifact `name` (e.g. `release-${{ matrix.target }}`), `path` containing the archive and `.sha256`, and `if-no-files-found: error`.
+       - `publish`: single job with `needs: build`, `if: startsWith(github.ref, 'refs/tags/v')`, `runs-on: ubuntu-latest`, `permissions: contents: write`. Downloads all build artifacts via `actions/download-artifact@fa0a91b85d4f404e4b4e05b3ab75d946bc9376a8 # v4.1.8` (`pattern: release-*`, `merge-multiple: true`, `path: dist`) and attaches all downloaded archives and `.sha256` files in one `softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2` step (`files: dist/*`).
+     - All `uses:` references in `.github/workflows/release.yml` remain pinned to immutable 40-char commit SHAs with trailing version comments.
+  2. Archive filename sanitization (`.github/workflows/release.yml`, `BUG-0066`):
+     - In both the Unix `bash` packaging step (`matrix.archive == 'tar.gz'`) and the Windows `pwsh` packaging step (`matrix.archive == 'zip'`), sanitize `GITHUB_REF_NAME` by replacing every `/` with `-` before constructing the archive filename (`rktb-<safe_ref>-<target>.tar.gz` / `rktb-<safe_ref>-<target>.zip`) and its `.sha256` checksum filename and inner filename entry.
+     - Ensure the `.sha256` file records the basename of the archive (not a `dist/` path prefix) so `sha256sum -c` works directly on downloaded release assets.
+
+Must still work:
+  - `v*` tag pushes still build all 3 targets with `--locked`, bundle `rktb`/`rktb.exe`, `README.md`, and `LICENSE`, generate `.sha256` checksums, and publish all 6 assets to the GitHub Release.
+  - `workflow_dispatch` still runs the full `build` matrix (including packaging and artifact upload) without triggering `publish` / `softprops/action-gh-release`.
+
+Drops: none
+
+Tests:
+  - Static YAML & structural assertions in `[POST_GATE]` verify valid YAML, `build` + `publish` jobs, `publish.needs == build`, `publish.if` checks `refs/tags/v`, least-privilege `permissions`, 40-char SHA pinning on all `uses:`, `upload-artifact` in `build` (no `action-gh-release`), `download-artifact` + `action-gh-release` in `publish`, and no unsanitized `GITHUB_REF_NAME` in `rktb-...` archive names.
+  - During execution, verify the bash sanitization logic locally with `GITHUB_REF_NAME="release/v0.1"` -> `release-v0.1` and `GITHUB_REF_NAME="v0.1.0"` -> `v0.1.0`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && python3 -c "import re, yaml; d = yaml.safe_load(open('.github/workflows/release.yml')); b, p = d['jobs']['build'], d['jobs']['publish']; assert p.get('needs') in ('build', ['build']); assert 'refs/tags/v' in str(p.get('if', '')); assert 'write' not in str(b.get('permissions', '')); assert p.get('permissions', {}).get('contents') == 'write'; b_uses = [s['uses'] for s in b['steps'] if 'uses' in s]; p_uses = [s['uses'] for s in p['steps'] if 'uses' in s]; assert b_uses and p_uses and all(re.search(r'@[0-9a-f]{40}$', u) for u in b_uses + p_uses); assert any('actions/upload-artifact@' in u for u in b_uses); assert not any('action-gh-release' in u for u in b_uses); assert any('actions/download-artifact@' in u for u in p_uses); assert any('softprops/action-gh-release@' in u for u in p_uses); runs = '\n'.join(s.get('run', '') for s in b['steps']); assert 'rktb-' + chr(36) + '{GITHUB_REF_NAME}-' not in runs and 'rktb-' + chr(36) + 'env:GITHUB_REF_NAME-' not in runs" && grep -qE 'actions/upload-artifact@[0-9a-f]{40}' .github/workflows/release.yml && grep -qE 'actions/download-artifact@[0-9a-f]{40}' .github/workflows/release.yml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 21B: Ignore Newly Gitignored Unchanged Snapshot Paths in `scripts/phased-step.sh` (`BUG-0064`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 21B: Update `changed_since_snapshot()` in `scripts/phased-step.sh` so pre-existing untracked files newly matched by `.gitignore` that remain unchanged on disk are not reported as out-of-scope (`BUG-0064`).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - scripts/phased-step.sh
+READ_ONLY_REFS:
+  - scripts/phased-step.sh:235-275 (fingerprint, code_stamp, changed_since_snapshot, snap_has_path)
+  - scripts/phased-step.sh:555-615 (scope check consuming changed_since_snapshot)
+  - .github/workflows/ci.yml:71-73 (CI bash -n and shellcheck -S error gate)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not pass `--ignored` to `git status` inside `fingerprint()` (must not walk/hash `target/` or existing ignored directories).
+  - Do not weaken scope checking for modified, deleted, or newly created non-ignored files.
+
+[PRE_GATE]
+bash -n scripts/phased-step.sh
+
+[MUTATION_SPEC]
+Goal: Prevent `scripts/phased-step.sh check` (and `defer`) from flagging pre-existing untracked files as out-of-scope changes when a step adds a `.gitignore` rule matching those files without modifying or deleting them on disk (`BUG-0064`).
+
+Contract & Behavior:
+  1. `changed_since_snapshot()` (`scripts/phased-step.sh`):
+     - Compare `${SNAP}/tree` against current `fingerprint()` as before.
+     - For any entry that appears **only** in `${SNAP}/tree` (absent from current `fingerprint()`), extract its snapshot hash (`<snap_hash>`) and path (`<p>`):
+       - If `<snap_hash>` is not `DELETED`, `<p>` still exists as a regular file on disk (`[[ -f "$p" ]]`), `git check-ignore -q -- "$p"` succeeds, AND `sha256sum -- "$p"` still matches `<snap_hash>`, treat `<p>` as unchanged and omit it from `changed_since_snapshot()` output.
+       - Otherwise (the file was modified on disk, deleted, reverted to match `HEAD` without being ignored, or was `DELETED` in the snapshot), emit `<p>` as changed.
+     - Entries present only in current `fingerprint()` (or whose hash changed between `${SNAP}/tree` and current `fingerprint()`) continue to be emitted as changed.
+     - Preserve path handling for filenames containing spaces and keep output uniquely sorted (`sort -u`).
+     - Keep `scripts/phased-step.sh` clean under `bash -n` and `shellcheck -S error` (quote variables properly, avoid bashisms/errors flagged by shellcheck).
+
+Must still work:
+  - Modifying a pre-existing untracked file that becomes newly gitignored is still detected and reported as out-of-scope.
+  - Deleting a pre-existing untracked file (whether newly gitignored or not) is still detected and reported as out-of-scope.
+  - Normal `start`, `check`, `commit`, `defer`, `status`, and `new-phase` flows remain unchanged and fast (no walking of `target/`).
+
+Drops: none
+
+Tests:
+  - During execution, verify in a temporary git repository under `/tmp` (cleaned up afterward, never touching the workspace) running `scripts/phased-step.sh`:
+    1. `newly_ignored_unchanged_untracked_file_passes_check`: create a pre-existing untracked file `.agents/note.txt`, run `phased-step.sh start`, add `.agents/` to `.gitignore` without touching `.agents/note.txt` -> `phased-step.sh check --no-gate` exits 0 and does not list `.agents/note.txt`.
+    2. `newly_ignored_modified_untracked_file_fails_check`: same setup, also append a byte to `.agents/note.txt` -> `phased-step.sh check --no-gate` exits 1 and flags `.agents/note.txt` as out-of-scope.
+    3. `deleted_untracked_file_fails_check`: same setup, delete `.agents/note.txt` -> `phased-step.sh check --no-gate` exits 1 and flags `.agents/note.txt` as out-of-scope.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && bash -n scripts/phased-step.sh && grep -qE 'check-ignore' scripts/phased-step.sh
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
